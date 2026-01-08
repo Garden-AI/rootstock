@@ -21,7 +21,7 @@ def run_all_benchmarks(
     sizes: list[str] = None,
     n_calls: int = 50,
     n_warmup: int = 5,
-    model: str = "mace-mp-0",
+    model: str = "medium",
     device: str = "cuda",
     output_file: str = None,
     ipc_overhead_only: bool = False,
@@ -188,7 +188,7 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="mace-mp-0",
+        default="medium",
         help="MACE model name",
     )
     parser.add_argument(

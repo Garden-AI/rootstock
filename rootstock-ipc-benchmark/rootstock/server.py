@@ -33,7 +33,7 @@ class RootstockServer:
     4. Sends positions, receives forces
     
     Example:
-        with RootstockServer(mlip="mace-mp-0") as server:
+        with RootstockServer() as server:
             energy, forces, virial = server.calculate(positions, cell, numbers)
     """
     

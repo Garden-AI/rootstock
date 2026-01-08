@@ -9,7 +9,7 @@ This runs in an isolated subprocess and:
 4. Persists across multiple calculations (no startup overhead per calculation)
 
 Usage:
-    python worker.py --socket rootstock --model mace-mp-0
+    python worker.py --socket rootstock --model medium
 """
 
 import argparse
@@ -41,7 +41,7 @@ class MLIPWorker:
     def __init__(
         self,
         socket_name: str,
-        model: str = "mace-mp-0",
+        model: str = "medium",
         device: str = "cuda",
         log=None,
     ):
@@ -227,7 +227,7 @@ class MLIPWorker:
 def main():
     parser = argparse.ArgumentParser(description="Rootstock MLIP worker")
     parser.add_argument("--socket", required=True, help="Unix socket name")
-    parser.add_argument("--model", default="mace-mp-0", help="MACE model name")
+    parser.add_argument("--model", default="medium", help="MACE model name")
     parser.add_argument("--device", default="cuda", help="Device (cuda or cpu)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     args = parser.parse_args()

@@ -24,10 +24,10 @@ mace_image = (
         "ase>=3.22",
         "mace-torch>=0.3",
     )
-    # Copy our package into the image
-    .copy_local_dir("rootstock", "/root/rootstock")
-    .copy_local_dir("benchmarks", "/root/benchmarks")
     .env({"PYTHONPATH": "/root"})
+    # Copy our package into the image (must be last)
+    .add_local_dir("rootstock", "/root/rootstock")
+    .add_local_dir("benchmarks", "/root/benchmarks")
 )
 
 
@@ -44,7 +44,7 @@ def benchmark_size(
     size: str = "medium",
     n_calls: int = 50,
     n_warmup: int = 5,
-    model: str = "mace-mp-0",
+    model: str = "medium",
 ) -> dict:
     """
     Run benchmark for a single system size.
@@ -125,7 +125,7 @@ def benchmark_size(
 def benchmark_all(
     n_calls: int = 50,
     n_warmup: int = 5,
-    model: str = "mace-mp-0",
+    model: str = "medium",
 ) -> list[dict]:
     """
     Run benchmarks for all system sizes.

@@ -29,7 +29,7 @@ class RootstockCalculator(Calculator):
         
         atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
         
-        with RootstockCalculator(model="mace-mp-0") as calc:
+        with RootstockCalculator(model="medium") as calc:
             atoms.calc = calc
             print(atoms.get_potential_energy())
             print(atoms.get_forces())
@@ -39,7 +39,7 @@ class RootstockCalculator(Calculator):
     
     def __init__(
         self,
-        model: str = "mace-mp-0",
+        model: str = "medium",
         device: str = "cuda",
         worker_python: Optional[str] = None,
         log=None,
@@ -49,7 +49,7 @@ class RootstockCalculator(Calculator):
         Initialize the Rootstock calculator.
         
         Args:
-            model: MACE model name (e.g., "mace-mp-0", "mace-mp-0-small")
+            model: MACE model name (e.g., "small", "medium", "large")
             device: Device for MLIP ("cuda" or "cpu")
             worker_python: Python executable for worker process. If None, uses
                           the same Python as the current process.

@@ -18,7 +18,7 @@ def benchmark_ipc(
     atoms: Atoms,
     n_calls: int = 100,
     n_warmup: int = 5,
-    model: str = "mace-mp-0",
+    model: str = "medium",
     device: str = "cuda",
     worker_python: str = None,
     log=None,
