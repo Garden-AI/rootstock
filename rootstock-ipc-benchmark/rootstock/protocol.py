@@ -14,6 +14,7 @@ Reference: https://docs.ipi-code.org/
 """
 
 import socket
+
 import numpy as np
 
 # ASE units conversion

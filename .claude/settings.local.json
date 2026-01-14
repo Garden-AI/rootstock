@@ -4,7 +4,10 @@
       "WebSearch",
       "Bash(python -m py_compile:*)",
       "Bash(modal run:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(tree:*)",
+      "Bash(ruff check:*)",
+      "Bash(uv run:*)"
     ]
   }
 }
