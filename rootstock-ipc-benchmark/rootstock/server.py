@@ -240,7 +240,7 @@ class RootstockServer:
             # Send INIT with atomic species info (v0.2)
             init_data = {
                 "numbers": atomic_numbers.tolist() if atomic_numbers is not None else None,
-                "pbc": pbc if pbc is not None else [True, True, True],
+                "pbc": [bool(p) for p in pbc] if pbc is not None else [True, True, True],
             }
             init_bytes = json.dumps(init_data).encode("utf-8")
             self._protocol.send_init(bead_index=0, init_string=init_bytes)

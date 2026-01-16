@@ -7,7 +7,9 @@
       "Bash(python3:*)",
       "Bash(tree:*)",
       "Bash(ruff check:*)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(uv pip install:*)",
+      "Bash(.venv/bin/rootstock:*)"
     ]
   }
 }
