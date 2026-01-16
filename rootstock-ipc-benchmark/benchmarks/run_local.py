@@ -10,11 +10,7 @@ Usage:
 
 import argparse
 import json
-import sys
 from datetime import datetime
-from pathlib import Path
-
-import numpy as np
 
 
 def run_all_benchmarks(
@@ -38,9 +34,9 @@ def run_all_benchmarks(
         output_file: Optional JSON file to save results
         ipc_overhead_only: If True, only measure IPC overhead (no MLIP)
     """
-    from .systems import get_benchmark_system, list_benchmark_systems
-    from .direct import benchmark_direct, BenchmarkResult
+    from .direct import benchmark_direct
     from .ipc import benchmark_ipc, benchmark_ipc_overhead_only
+    from .systems import get_benchmark_system, list_benchmark_systems
     
     if sizes is None:
         sizes = list(list_benchmark_systems().keys())
@@ -112,7 +108,7 @@ def run_all_benchmarks(
             overhead_ms = ipc_result.mean_ms - direct_result.mean_ms
             overhead_pct = (overhead_ms / direct_result.mean_ms) * 100
             
-            print(f"\n[Overhead Analysis]")
+            print("\n[Overhead Analysis]")
             print(f"  IPC overhead: {overhead_ms:.2f} ms ({overhead_pct:.1f}%)")
             
             if overhead_pct < 5:

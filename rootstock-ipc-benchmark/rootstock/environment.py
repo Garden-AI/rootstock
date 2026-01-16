@@ -13,7 +13,6 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 from .pep723 import parse_pep723_metadata
 
@@ -59,7 +58,7 @@ class EnvironmentManager:
     and a `setup(model, device)` function that returns an ASE calculator.
     """
 
-    def __init__(self, root: Optional[Path | str] = None):
+    def __init__(self, root: Path | str | None = None):
         """
         Initialize the environment manager.
 

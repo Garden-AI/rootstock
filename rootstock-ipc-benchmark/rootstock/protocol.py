@@ -157,7 +157,7 @@ class IPIProtocol:
             positions: Nx3 positions in Angstrom
         """
         cell_bohr = self.recv_array((3, 3), np.float64).T.copy()
-        icell_bohr = self.recv_array((3, 3), np.float64).T.copy()  # Not used
+        _icell_bohr = self.recv_array((3, 3), np.float64).T.copy()  # noqa: F841
         natoms = self.recv_array(1, np.int32)[0]
         positions_bohr = self.recv_array((natoms, 3), np.float64)
         

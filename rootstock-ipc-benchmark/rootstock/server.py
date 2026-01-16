@@ -9,9 +9,7 @@ import json
 import os
 import socket
 import subprocess
-import sys
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -29,51 +27,38 @@ class RootstockServer:
 
     The server:
     1. Creates a Unix domain socket
-    2. Launches a worker subprocess
+    2. Launches a worker subprocess via uv run
     3. Accepts the worker's connection
     4. Sends positions, receives forces
 
-    Example (v0.2 with environment):
+    Example:
         with RootstockServer(
-            environment_path=Path("mace.py"),
+            environment_path=Path("mace_env.py"),
             model="mace-mp-0",
             device="cuda",
         ) as server:
-            energy, forces, virial = server.calculate(positions, cell, numbers)
-
-    Example (legacy):
-        with RootstockServer() as server:
             energy, forces, virial = server.calculate(positions, cell, numbers)
     """
 
     def __init__(
         self,
-        socket_name: str = "rootstock",
-        # v0.2 parameters
-        environment_path: Optional[Path] = None,
-        model: str = "medium",
+        environment_path: Path,
+        model: str,
         device: str = "cuda",
-        root: Optional[Path] = None,
-        # Legacy parameters (deprecated)
-        worker_script: Optional[str] = None,
-        worker_python: Optional[str] = None,
+        socket_name: str = "rootstock",
+        root: Path | None = None,
         log=None,
         timeout: float = 60.0,
     ):
         """
         Initialize the server.
 
-        v0.2 mode (recommended): Provide environment_path, model, device, root.
-        Legacy mode: Provide worker_script and/or worker_python.
-
         Args:
+            environment_path: Path to environment file
+            model: Model identifier to pass to setup()
+            device: Device string to pass to setup()
             socket_name: Name for the Unix socket (will be /tmp/ipi_<name>)
-            environment_path: Path to environment file (v0.2)
-            model: Model identifier to pass to setup() (v0.2)
-            device: Device string to pass to setup() (v0.2)
-            root: Root directory for cache (v0.2)
-            worker_script: Path to worker script (legacy, deprecated)
-            worker_python: Python executable for worker (legacy, deprecated)
+            root: Root directory for cache
             log: Optional file object for protocol logging
             timeout: Socket timeout in seconds
         """
@@ -82,38 +67,26 @@ class RootstockServer:
         self.log = log
         self.timeout = timeout
 
-        # v0.2 mode vs legacy mode
         self.environment_path = environment_path
         self.model = model
         self.device = device
         self.root = root
 
-        # Legacy parameters
-        self.worker_script = worker_script or self._default_worker_script()
-        self.worker_python = worker_python or sys.executable
-
-        # Determine mode
-        self._use_uv = environment_path is not None
-
-        self._server_socket: Optional[socket.socket] = None
-        self._client_socket: Optional[socket.socket] = None
-        self._protocol: Optional[IPIProtocol] = None
-        self._process: Optional[subprocess.Popen] = None
+        self._server_socket: socket.socket | None = None
+        self._client_socket: socket.socket | None = None
+        self._protocol: IPIProtocol | None = None
+        self._process: subprocess.Popen | None = None
         self._connected = False
 
-        # Track INIT state (v0.2)
+        # Track INIT state
         self._init_sent = False
-        self._init_numbers: Optional[list[int]] = None
-        self._init_pbc: Optional[list[bool]] = None
+        self._init_numbers: list[int] | None = None
+        self._init_pbc: list[bool] | None = None
 
-        # Environment manager (v0.2)
+        # Environment manager
         self._env_manager = None
-        self._wrapper_path: Optional[Path] = None
-    
-    def _default_worker_script(self) -> str:
-        """Get path to the default worker script."""
-        return str(Path(__file__).parent / "worker.py")
-    
+        self._wrapper_path: Path | None = None
+
     def start(self):
         """Start the server and launch the worker process."""
         # Create server socket
@@ -123,11 +96,8 @@ class RootstockServer:
         if self.log:
             print(f"Server listening on {self.socket_path}", file=self.log, flush=True)
 
-        # Launch worker process - v0.2 mode or legacy mode
-        if self._use_uv:
-            self._start_uv_worker()
-        else:
-            self._start_legacy_worker()
+        # Launch worker process via uv
+        self._start_worker()
 
         if self.log:
             print(f"Launched worker process (PID {self._process.pid})", file=self.log, flush=True)
@@ -135,16 +105,7 @@ class RootstockServer:
         # Wait for worker to connect
         self._accept_connection()
 
-    def _start_legacy_worker(self):
-        """Start worker using legacy direct subprocess call."""
-        cmd = [self.worker_python, self.worker_script, "--socket", self.socket_name]
-        self._process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE if not self.log else None,
-            stderr=subprocess.PIPE if not self.log else None,
-        )
-
-    def _start_uv_worker(self):
+    def _start_worker(self):
         """Start worker using uv run with generated wrapper script."""
         from .environment import EnvironmentManager, check_uv_available
 
@@ -179,17 +140,17 @@ class RootstockServer:
             stdout=subprocess.PIPE if not self.log else None,
             stderr=subprocess.PIPE if not self.log else None,
         )
-    
+
     def _accept_connection(self):
         """Accept connection from worker process."""
         # Use short timeout for accept so we can check if process died
         self._server_socket.settimeout(1.0)
-        
+
         while True:
             try:
                 self._client_socket, addr = self._server_socket.accept()
                 break
-            except socket.timeout:
+            except TimeoutError:
                 # Check if process died
                 if self._process.poll() is not None:
                     stdout, stderr = self._process.communicate()
@@ -197,23 +158,23 @@ class RootstockServer:
                         f"Worker process died with code {self._process.returncode}.\n"
                         f"stdout: {stdout}\nstderr: {stderr}"
                     )
-        
+
         # Restore original timeout
         self._server_socket.settimeout(self.timeout)
         self._client_socket.settimeout(self.timeout)
-        
+
         self._protocol = IPIProtocol(self._client_socket, log=self.log)
         self._connected = True
-        
+
         if self.log:
             print("Worker connected", file=self.log, flush=True)
-    
+
     def calculate(
         self,
         positions: np.ndarray,
         cell: np.ndarray,
-        atomic_numbers: Optional[np.ndarray] = None,
-        pbc: Optional[list[bool]] = None,
+        atomic_numbers: np.ndarray | None = None,
+        pbc: list[bool] | None = None,
     ) -> tuple[float, np.ndarray, np.ndarray]:
         """
         Calculate energy and forces for given atomic configuration.
@@ -237,7 +198,7 @@ class RootstockServer:
         status = self._protocol.recv_status()
 
         if status == "NEEDINIT":
-            # Send INIT with atomic species info (v0.2)
+            # Send INIT with atomic species info
             init_data = {
                 "numbers": atomic_numbers.tolist() if atomic_numbers is not None else None,
                 "pbc": [bool(p) for p in pbc] if pbc is not None else [True, True, True],
@@ -255,23 +216,23 @@ class RootstockServer:
 
         if status != "READY":
             raise RuntimeError(f"Worker not ready, status: {status}")
-        
+
         # Send positions
         self._protocol.send_posdata(cell, positions)
-        
+
         # Check status - worker should now be calculating
         self._protocol.send_status()
         status = self._protocol.recv_status()
-        
+
         if status != "HAVEDATA":
             raise RuntimeError(f"Worker failed to calculate, status: {status}")
-        
+
         # Get results
         self._protocol.send_getforce()
         energy, forces, virial, extra = self._protocol.recv_forceready()
-        
+
         return energy, forces, virial
-    
+
     def stop(self):
         """Stop the server and terminate the worker process."""
         if self._protocol is not None:
@@ -301,7 +262,7 @@ class RootstockServer:
         if os.path.exists(self.socket_path):
             os.unlink(self.socket_path)
 
-        # Clean up wrapper script (v0.2)
+        # Clean up wrapper script
         if self._wrapper_path is not None:
             try:
                 self._wrapper_path.unlink(missing_ok=True)
@@ -309,7 +270,7 @@ class RootstockServer:
                 pass
             self._wrapper_path = None
 
-        # Clean up environment manager (v0.2)
+        # Clean up environment manager
         if self._env_manager is not None:
             self._env_manager.cleanup()
             self._env_manager = None
@@ -319,11 +280,11 @@ class RootstockServer:
 
         if self.log:
             print("Server stopped", file=self.log, flush=True)
-    
+
     def __enter__(self):
         self.start()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
         return False

@@ -74,8 +74,8 @@ def run_nvt_md(atoms, calc, n_steps: int, timestep_fs: float = 1.0,
         Dict with trajectory data and timing info
     """
     import numpy as np
-    from ase.md.langevin import Langevin
     from ase import units
+    from ase.md.langevin import Langevin
     
     atoms = atoms.copy()
     atoms.calc = calc
@@ -233,12 +233,12 @@ def run_comparison(
     rootstock_mean_ms = np.mean(rootstock_results["times_per_step_ms"])
     overhead_per_step_ms = rootstock_mean_ms - direct_mean_ms
     
-    print(f"\nWall Clock Time:")
+    print("\nWall Clock Time:")
     print(f"  Direct:    {time_direct:7.1f} s  ({time_direct/60:.2f} min)")
     print(f"  Rootstock: {time_rootstock:7.1f} s  ({time_rootstock/60:.2f} min)")
     print(f"  Overhead:  {overhead_seconds:+7.1f} s  ({overhead_pct:+.1f}%)")
     
-    print(f"\nPer-Step Timing:")
+    print("\nPer-Step Timing:")
     print(f"  Direct:    {direct_mean_ms:.2f} ms/step")
     print(f"  Rootstock: {rootstock_mean_ms:.2f} ms/step")
     print(f"  Overhead:  {overhead_per_step_ms:+.2f} ms/step")
@@ -249,7 +249,7 @@ def run_comparison(
     direct_mean_T = np.mean(direct_results["temperatures"])
     rootstock_mean_T = np.mean(rootstock_results["temperatures"])
     
-    print(f"\nPhysical Validation:")
+    print("\nPhysical Validation:")
     print(f"  Final energy - Direct:    {direct_final_E:.3f} eV")
     print(f"  Final energy - Rootstock: {rootstock_final_E:.3f} eV")
     print(f"  Mean temp - Direct:       {direct_mean_T:.1f} K")
