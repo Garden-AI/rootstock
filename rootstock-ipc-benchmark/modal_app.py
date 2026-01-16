@@ -5,7 +5,6 @@ Usage:
     modal run modal_app.py::test_mace_environment
     modal run modal_app.py::test_chgnet_environment
     modal run modal_app.py::benchmark_v2
-    modal run modal_app.py::benchmark_ipc_overhead
 """
 
 import modal
@@ -397,60 +396,6 @@ def benchmark_v2(
         else:
             print("CONCERN: IPC overhead exceeds 5% target for 1000+ atoms")
     print("=" * 60)
-
-    return results
-
-
-@app.function(
-    image=rootstock_image,
-    gpu="A10G",
-    timeout=600,
-)
-def benchmark_ipc_overhead(
-    n_calls: int = 1000,
-    n_warmup: int = 10,
-) -> dict:
-    """
-    Measure pure IPC overhead without MLIP calculation.
-
-    Uses a mock worker that returns zeros instantly.
-    This isolates the socket communication overhead.
-    """
-    import sys
-    sys.path.insert(0, "/root")
-
-    from benchmarks.ipc import benchmark_ipc_overhead_only
-    from benchmarks.systems import get_benchmark_system
-
-    results = {}
-
-    print("Measuring pure IPC overhead (no MLIP calculation)...")
-    print(f"Calls: {n_calls}, Warmup: {n_warmup}")
-    print()
-
-    for size in ["small", "medium", "large", "xlarge"]:
-        atoms = get_benchmark_system(size)
-
-        print(f"{size} ({len(atoms)} atoms)...")
-        result = benchmark_ipc_overhead_only(
-            atoms,
-            n_calls=n_calls,
-            n_warmup=n_warmup,
-        )
-
-        print(f"  Mean: {result.mean_ms:.3f} ms")
-        print(f"  Std:  {result.std_ms:.3f} ms")
-        print(f"  P95:  {result.p95_ms:.3f} ms")
-
-        results[size] = {
-            "n_atoms": len(atoms),
-            "mean_ms": result.mean_ms,
-            "std_ms": result.std_ms,
-            "p95_ms": result.p95_ms,
-        }
-
-    print("\nPure IPC overhead summary:")
-    print("This is the theoretical minimum overhead from socket communication.")
 
     return results
 
