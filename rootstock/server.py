@@ -27,22 +27,23 @@ class RootstockServer:
 
     The server:
     1. Creates a Unix domain socket
-    2. Launches a worker subprocess via uv run
+    2. Launches a worker subprocess using pre-built environment
     3. Accepts the worker's connection
     4. Sends positions, receives forces
 
     Example:
         with RootstockServer(
-            environment_path=Path("mace_env.py"),
-            model="mace-mp-0",
+            env_name="mace_env",
+            model="medium",
             device="cuda",
+            root=Path("/vol/rootstock"),
         ) as server:
             energy, forces, virial = server.calculate(positions, cell, numbers)
     """
 
     def __init__(
         self,
-        environment_path: Path,
+        env_name: str,
         model: str,
         device: str = "cuda",
         socket_name: str = "rootstock",
@@ -54,23 +55,26 @@ class RootstockServer:
         Initialize the server.
 
         Args:
-            environment_path: Path to environment file
+            env_name: Name of pre-built environment (e.g., "mace_env")
             model: Model identifier to pass to setup()
             device: Device string to pass to setup()
             socket_name: Name for the Unix socket (will be /tmp/ipi_<name>)
-            root: Root directory for cache
+            root: Root directory for environments and cache (required)
             log: Optional file object for protocol logging
             timeout: Socket timeout in seconds
         """
+        if root is None:
+            raise ValueError("root is required for pre-built environments")
+
         self.socket_name = socket_name
         self.socket_path = create_unix_socket_path(socket_name)
         self.log = log
         self.timeout = timeout
 
-        self.environment_path = environment_path
+        self.env_name = env_name
         self.model = model
         self.device = device
-        self.root = root
+        self.root = Path(root)
 
         self._server_socket: socket.socket | None = None
         self._client_socket: socket.socket | None = None
@@ -96,7 +100,7 @@ class RootstockServer:
         if self.log:
             print(f"Server listening on {self.socket_path}", file=self.log, flush=True)
 
-        # Launch worker process via uv
+        # Launch worker process
         self._start_worker()
 
         if self.log:
@@ -106,29 +110,22 @@ class RootstockServer:
         self._accept_connection()
 
     def _start_worker(self):
-        """Start worker using uv run with generated wrapper script."""
-        from .environment import EnvironmentManager, check_uv_available
-
-        # Check uv is available
-        if not check_uv_available():
-            raise RuntimeError(
-                "uv not found in PATH. Install uv to use environment-based workers: "
-                "https://docs.astral.sh/uv/getting-started/installation/"
-            )
+        """Start worker using pre-built environment."""
+        from .environment import EnvironmentManager
 
         # Create environment manager
         self._env_manager = EnvironmentManager(root=self.root)
 
         # Generate wrapper script
         self._wrapper_path = self._env_manager.generate_wrapper(
-            env_path=self.environment_path,
+            env_name=self.env_name,
             model=self.model,
             device=self.device,
             socket_path=self.socket_path,
         )
 
         # Get spawn command and environment
-        cmd = self._env_manager.get_spawn_command(self._wrapper_path)
+        cmd = self._env_manager.get_spawn_command(self.env_name, self._wrapper_path)
         env = self._env_manager.get_environment_variables()
 
         if self.log:

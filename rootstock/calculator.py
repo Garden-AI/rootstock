@@ -19,14 +19,14 @@ from .server import RootstockServer
 
 class RootstockCalculator(Calculator):
     """
-    ASE calculator that runs MLIPs in an isolated subprocess.
+    ASE calculator that runs MLIPs in a pre-built isolated environment.
 
     This calculator:
-    1. Spawns a worker process that loads the MLIP
+    1. Spawns a worker process using a pre-built virtual environment
     2. Communicates via i-PI protocol over Unix sockets
     3. Keeps the worker alive across calculations (no startup overhead)
 
-    Example (v0.3 API - recommended):
+    Example:
         from ase.build import bulk
         from rootstock import RootstockCalculator
 
@@ -50,13 +50,9 @@ class RootstockCalculator(Calculator):
             atoms.calc = calc
             print(atoms.get_potential_energy())
 
-    Example (power user - direct environment path):
-        with RootstockCalculator(
-            environment="/custom/path/mace.py",
-            model="medium",
-            device="cuda",
-        ) as calc:
-            ...
+    Note:
+        Environments must be pre-built using `rootstock build` before use.
+        Run: rootstock build mace_env --root /path/to/rootstock
     """
 
     implemented_properties = ["energy", "free_energy", "forces", "stress"]
@@ -67,7 +63,6 @@ class RootstockCalculator(Calculator):
         cluster: str | None = None,
         root: str | Path | None = None,
         device: str = "cuda",
-        environment: str | None = None,
         log=None,
         **kwargs,
     ):
@@ -80,8 +75,6 @@ class RootstockCalculator(Calculator):
             cluster: Known cluster name ("modal", "della"). Mutually exclusive with root.
             root: Path to rootstock directory. Mutually exclusive with cluster.
             device: PyTorch device ("cuda", "cuda:0", "cpu")
-            environment: Direct path to environment file (power user, overrides model parsing).
-                        When specified, the model parameter is passed directly to setup().
             log: Optional file object for logging
             **kwargs: Additional arguments passed to ASE Calculator
         """
@@ -90,44 +83,35 @@ class RootstockCalculator(Calculator):
         self.device = device
         self.log = log
 
-        # Resolve root directory and environment path
-        if environment is not None:
-            # Power user mode: direct environment path
-            # Root is optional in this mode
-            self.root = Path(root) if root else None
-            self.environment_path = Path(environment)
-            self.model_arg = model  # Pass model string directly to setup()
+        # Resolve root directory
+        if cluster is not None and root is not None:
+            raise ValueError("Cannot specify both 'cluster' and 'root'")
 
-            if not self.environment_path.exists():
-                raise FileNotFoundError(f"Environment file not found: {self.environment_path}")
+        if cluster is not None:
+            self.root = get_root_for_cluster(cluster)
+        elif root is not None:
+            self.root = Path(root)
         else:
-            # Standard mode: resolve cluster/root and parse model string
-            if cluster is not None and root is not None:
-                raise ValueError("Cannot specify both 'cluster' and 'root'")
+            raise ValueError("Must specify either 'cluster' or 'root'")
 
-            if cluster is not None:
-                self.root = get_root_for_cluster(cluster)
-            elif root is not None:
-                self.root = Path(root)
+        # Parse model string to get environment name and model arg
+        env_name, model_arg = parse_model_string(model)
+        self.env_name = f"{env_name}_env"  # e.g., "mace" -> "mace_env"
+        self.model_arg = model_arg
+
+        # Verify environment is built
+        env_python = self.root / "envs" / self.env_name / "bin" / "python"
+        if not env_python.exists():
+            envs_dir = self.root / "envs"
+            if envs_dir.exists():
+                available = [p.name for p in envs_dir.iterdir() if p.is_dir()]
             else:
-                raise ValueError("Must specify either 'cluster' or 'root'")
-
-            # Parse model string to get environment name and model arg
-            env_name, model_arg = parse_model_string(model)
-            # Use {env_name}_env.py to avoid shadowing package names (e.g., mace_env.py)
-            self.environment_path = self.root / "environments" / f"{env_name}_env.py"
-            self.model_arg = model_arg
-
-            if not self.environment_path.exists():
-                env_dir = self.root / "environments"
-                if env_dir.exists():
-                    available = [p.stem for p in env_dir.glob("*.py")]
-                else:
-                    available = []
-                raise FileNotFoundError(
-                    f"Environment '{env_name}' not found at {self.environment_path}. "
-                    f"Available: {available}"
-                )
+                available = []
+            raise RuntimeError(
+                f"Environment '{self.env_name}' not built at {self.root}/envs/{self.env_name}/\n"
+                f"Run: rootstock build {self.env_name} --root {self.root}\n"
+                f"Available environments: {available}"
+            )
 
         # Generate unique socket name to avoid conflicts
         self._socket_name = f"rootstock_{uuid.uuid4().hex[:8]}"
@@ -137,7 +121,7 @@ class RootstockCalculator(Calculator):
         """Start server if not already running."""
         if self._server is None:
             self._server = RootstockServer(
-                environment_path=self.environment_path,
+                env_name=self.env_name,
                 model=self.model_arg,
                 device=self.device,
                 socket_name=self._socket_name,

@@ -1,6 +1,6 @@
 # Rootstock
 
-Run MLIP (Machine Learning Interatomic Potential) calculators in isolated Python environments, communicating via the i-PI protocol over Unix sockets.
+Run MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments, communicating via the i-PI protocol over Unix sockets.
 
 ## Quick Start
 
@@ -30,6 +30,8 @@ with RootstockCalculator(
     print(atoms.get_potential_energy())
 ```
 
+**Note:** Environments must be pre-built before use. See [Administrator Setup](#administrator-setup).
+
 ## Installation
 
 ```bash
@@ -44,11 +46,11 @@ The `model` parameter encodes both the environment and model-specific argument:
 
 | `model=`            | Environment    | Model Arg           |
 |---------------------|----------------|---------------------|
-| `"mace-medium"`     | mace_env.py    | `"medium"`          |
-| `"mace-small"`      | mace_env.py    | `"small"`           |
-| `"mace-large"`      | mace_env.py    | `"large"`           |
-| `"chgnet"`          | chgnet_env.py  | `""` (default)      |
-| `"mace-/path/to/weights.pt"` | mace_env.py | `"/path/to/weights.pt"` |
+| `"mace-medium"`     | mace_env       | `"medium"`          |
+| `"mace-small"`      | mace_env       | `"small"`           |
+| `"mace-large"`      | mace_env       | `"large"`           |
+| `"chgnet"`          | chgnet_env     | `""` (default)      |
+| `"mace-/path/to/weights.pt"` | mace_env | `"/path/to/weights.pt"` |
 
 ## Known Clusters
 
@@ -59,70 +61,21 @@ The `model` parameter encodes both the environment and model-specific argument:
 
 For other clusters, use `root="/path/to/rootstock"` directly.
 
-## Architecture
+## Administrator Setup
 
-```
-Main Process                          Worker Process (subprocess)
-+-------------------------+          +-----------------------------+
-| RootstockCalculator     |          | MLIPWorker                  |
-| (ASE-compatible)        |          | (loads MACE/CHGNet once)    |
-|                         |          |                             |
-| server.py (i-PI server) |<-------->| worker.py (i-PI client)     |
-| - sends positions       |   Unix   | - receives positions        |
-| - receives forces       |  socket  | - calculates forces         |
-+-------------------------+          +-----------------------------+
-```
+Environments must be pre-built before users can run calculations.
 
-The worker process is spawned via `uv run` with the appropriate environment file, which specifies dependencies via PEP 723 metadata. This enables true Python environment isolation while maintaining a persistent worker across calculations.
-
-## Directory Structure
-
-All Rootstock state lives under a single root directory:
-
-```
-{root}/
-├── environments/           # Environment files (*.py with PEP 723 metadata)
-│   ├── mace_env.py        # Use _env suffix to avoid shadowing packages
-│   └── chgnet_env.py
-└── cache/
-    └── huggingface/       # HuggingFace model weights (persisted)
-```
-
-## Running on Modal
+### 1. Create Directory Structure
 
 ```bash
-# Initialize the volume (first time only)
-modal run modal_app.py::init_rootstock_volume
-
-# Test the v0.3 API with caching
-modal run modal_app.py::test_new_api
-
-# Run benchmarks
-modal run modal_app.py::benchmark_v3
-
-# Inspect cache contents
-modal run modal_app.py::inspect_cache
+mkdir -p /scratch/gpfs/SHARED/rootstock/{environments,envs,cache}
 ```
 
-## Local Development
+### 2. Create Environment Source Files
 
 ```bash
-# Create virtual environment
-uv venv && source .venv/bin/activate
-
-# Install dependencies
-uv pip install -e ".[dev]"
-
-# Run linting
-ruff check rootstock/
-ruff format rootstock/
-```
-
-## Environment Files
-
-Environment files are Python scripts with PEP 723 metadata and a `setup()` function:
-
-```python
+# mace_env.py
+cat > /scratch/gpfs/SHARED/rootstock/environments/mace_env.py << 'EOF'
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.0"]
@@ -132,6 +85,89 @@ Environment files are Python scripts with PEP 723 metadata and a `setup()` funct
 def setup(model: str, device: str = "cuda"):
     from mace.calculators import mace_mp
     return mace_mp(model=model, device=device, default_dtype="float32")
+EOF
+```
+
+### 3. Build Environments
+
+```bash
+# Build MACE environment with model pre-download
+rootstock build mace_env --root /scratch/gpfs/SHARED/rootstock --models small,medium,large
+
+# Build CHGNet environment
+rootstock build chgnet_env --root /scratch/gpfs/SHARED/rootstock
+
+# Verify
+rootstock status --root /scratch/gpfs/SHARED/rootstock
+```
+
+## Architecture
+
+```
+Main Process                          Worker Process (subprocess)
++-------------------------+          +-----------------------------+
+| RootstockCalculator     |          | Pre-built venv Python       |
+| (ASE-compatible)        |          | (mace_env/bin/python)       |
+|                         |          |                             |
+| server.py (i-PI server) |<-------->| worker.py (i-PI client)     |
+| - sends positions       |   Unix   | - receives positions        |
+| - receives forces       |  socket  | - calculates forces         |
++-------------------------+          +-----------------------------+
+```
+
+The worker process uses a pre-built virtual environment, providing:
+- **Fast startup**: No dependency installation at runtime
+- **Filesystem compatibility**: Works on NFS, Lustre, GPFS, Modal volumes
+- **Reproducibility**: Same environment every time
+
+## Directory Structure
+
+```
+{root}/
+├── environments/           # Environment SOURCE files (*.py with PEP 723)
+│   ├── mace_env.py
+│   └── chgnet_env.py
+├── envs/                   # Pre-built virtual environments
+│   ├── mace_env/
+│   │   ├── bin/python
+│   │   ├── lib/python3.11/site-packages/
+│   │   └── env_source.py   # Copy of environment source
+│   └── chgnet_env/
+└── cache/                  # XDG_CACHE_HOME for model weights
+    ├── mace/               # MACE models
+    └── huggingface/        # HuggingFace models
+```
+
+## CLI Commands
+
+```bash
+# Build a pre-built environment
+rootstock build <env_name> --root <path> [--models m1,m2] [--force]
+
+# Show status
+rootstock status --root <path>
+
+# Register an environment source file
+rootstock register <env_file> --root <path>
+
+# List environments
+rootstock list --root <path>
+```
+
+## Running on Modal
+
+```bash
+# Initialize volume and build environments (takes ~10-15 min)
+modal run modal_app.py::init_rootstock_volume
+
+# Test pre-built environments
+modal run modal_app.py::test_prebuilt
+
+# Show status
+modal run modal_app.py::inspect_status
+
+# Run benchmarks
+modal run modal_app.py::benchmark_v4
 ```
 
 ## Performance
@@ -144,15 +180,11 @@ IPC overhead is <5% for systems with 1000+ atoms compared to direct in-process e
 | Medium      | 256   | ~5-8%            |
 | Large       | 1000  | <5%              |
 
-## Legacy API (v0.2)
+## Local Development
 
-The v0.2 API with explicit `environment=` parameter still works:
-
-```python
-with RootstockCalculator(
-    environment="/path/to/mace.py",
-    model="medium",
-    device="cuda",
-) as calc:
-    ...
+```bash
+uv venv && source .venv/bin/activate
+uv pip install -e ".[dev]"
+ruff check rootstock/
+ruff format rootstock/
 ```

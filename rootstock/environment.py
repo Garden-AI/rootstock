@@ -2,31 +2,48 @@
 Environment management for Rootstock.
 
 This module handles:
-- Resolving environment names to file paths
-- Generating wrapper scripts for `uv run`
+- Managing pre-built virtual environments
+- Generating wrapper scripts for worker processes
 - Providing spawn commands for worker processes
 """
 
 from __future__ import annotations
 
-import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
 
-from .pep723 import parse_pep723_metadata
 
-# Template for generated wrapper scripts
-# This script is run via `uv run --with rootstock wrapper.py`
-WRAPPER_TEMPLATE = """# /// script
-# requires-python = "{requires_python}"
-# dependencies = {dependencies_json}
-# ///
+def get_model_cache_env(root: Path) -> dict[str, str]:
+    """
+    Get environment variables to redirect model downloads to shared cache.
 
+    We set XDG_CACHE_HOME as a catch-all for libraries following the XDG spec
+    (MACE uses ~/.cache/mace/), plus explicit HF vars for HuggingFace.
+
+    Args:
+        root: Rootstock root directory.
+
+    Returns:
+        Dict of environment variables for model caching.
+    """
+    cache_dir = root / "cache"
+    return {
+        # XDG base directory - catches MACE and other well-behaved libraries
+        "XDG_CACHE_HOME": str(cache_dir),
+        # HuggingFace explicit (some tools check these before XDG)
+        "HF_HOME": str(cache_dir / "huggingface"),
+        "HF_HUB_CACHE": str(cache_dir / "huggingface" / "hub"),
+    }
+
+
+# Simplified wrapper template for pre-built environments
+# No PEP 723 metadata needed since dependencies are already installed
+WRAPPER_TEMPLATE = """
 import sys
 sys.path.insert(0, "{env_dir}")
-
-from {env_module} import setup
+from env_source import setup
 from rootstock.worker import run_worker
 
 run_worker(
@@ -38,80 +55,58 @@ run_worker(
 """
 
 
-def get_rootstock_path() -> Path:
-    """
-    Get the path to the rootstock package.
-
-    This is used for `uv run --with /path/to/rootstock` to inject
-    rootstock into the worker's environment.
-    """
-    import rootstock
-
-    return Path(rootstock.__file__).parent.parent
-
-
 class EnvironmentManager:
     """
-    Manages rootstock environment files and worker spawning.
+    Manages pre-built rootstock environments and worker spawning.
 
-    An environment file is a Python script with PEP 723 metadata
-    and a `setup(model, device)` function that returns an ASE calculator.
+    In v0.4+, environments are pre-built virtual environments located in
+    {root}/envs/{env_name}/. The environment source file is copied into
+    the venv as env_source.py during build.
     """
 
-    def __init__(self, root: Path | str | None = None):
+    def __init__(self, root: Path | str):
         """
         Initialize the environment manager.
 
         Args:
             root: Root directory for environments and cache.
-                  If None, environments can only be loaded by direct path.
         """
-        self.root = Path(root) if root else None
+        self.root = Path(root)
         self._temp_files: list[Path] = []
 
-    def resolve_environment(self, environment: str) -> Path:
+    def get_env_python(self, env_name: str) -> Path:
         """
-        Resolve an environment name or path to an actual file path.
+        Get path to Python executable for a pre-built environment.
 
         Args:
-            environment: Either an absolute path to an environment file,
-                        or the name of a registered environment.
+            env_name: Name of the environment (e.g., "mace_env").
 
         Returns:
-            Path to the environment file.
+            Path to the environment's Python executable.
 
         Raises:
-            FileNotFoundError: If the environment cannot be found.
+            RuntimeError: If the environment is not built.
         """
-        # If it's an absolute path, use it directly
-        if environment.startswith("/"):
-            path = Path(environment)
-            if not path.exists():
-                raise FileNotFoundError(f"Environment file not found: {path}")
-            return path
+        env_python = self.root / "envs" / env_name / "bin" / "python"
 
-        # Otherwise, look in {root}/environments/
-        if self.root is None:
-            raise ValueError(
-                f"Cannot resolve environment '{environment}' without a root directory. "
-                "Either provide root= or use an absolute path."
+        if not env_python.exists():
+            envs_dir = self.root / "envs"
+            if envs_dir.exists():
+                available = [p.name for p in envs_dir.iterdir() if p.is_dir()]
+            else:
+                available = []
+
+            raise RuntimeError(
+                f"Environment '{env_name}' not built. "
+                f"Run: rootstock build {env_name} --root {self.root}\n"
+                f"Available environments: {available}"
             )
 
-        # Try with and without .py extension
-        env_dir = self.root / "environments"
-        for name in [environment, f"{environment}.py"]:
-            path = env_dir / name
-            if path.exists():
-                return path
-
-        raise FileNotFoundError(
-            f"Environment '{environment}' not found in {env_dir}. "
-            f"Available environments: {list(env_dir.glob('*.py')) if env_dir.exists() else []}"
-        )
+        return env_python
 
     def generate_wrapper(
         self,
-        env_path: Path,
+        env_name: str,
         model: str,
         device: str,
         socket_path: str,
@@ -119,11 +114,8 @@ class EnvironmentManager:
         """
         Generate a wrapper script for the given environment.
 
-        The wrapper script includes the PEP 723 metadata from the environment
-        file, imports the setup function, and calls run_worker().
-
         Args:
-            env_path: Path to the environment file
+            env_name: Name of the pre-built environment
             model: Model identifier to pass to setup()
             device: Device string to pass to setup()
             socket_path: Unix socket path for IPC
@@ -131,28 +123,11 @@ class EnvironmentManager:
         Returns:
             Path to the generated wrapper script (temp file).
         """
-        content = env_path.read_text()
-        metadata = parse_pep723_metadata(content)
-
-        if metadata is None:
-            raise ValueError(f"No PEP 723 metadata in {env_path}")
-
-        # Extract metadata
-        requires_python = metadata.get("requires-python", ">=3.10")
-        dependencies = metadata.get("dependencies", [])
-
-        # Module name is the filename without extension
-        env_module = env_path.stem
-
-        # Format dependencies as JSON array for TOML
-        dependencies_json = json.dumps(dependencies)
+        env_dir = self.root / "envs" / env_name
 
         # Generate wrapper content
         wrapper_content = WRAPPER_TEMPLATE.format(
-            requires_python=requires_python,
-            dependencies_json=dependencies_json,
-            env_dir=str(env_path.parent),
-            env_module=env_module,
+            env_dir=str(env_dir),
             model=model,
             device=device,
             socket_path=socket_path,
@@ -168,48 +143,30 @@ class EnvironmentManager:
 
         return tmp_path
 
-    def get_spawn_command(self, wrapper_path: Path) -> list[str]:
+    def get_spawn_command(self, env_name: str, wrapper_path: Path) -> list[str]:
         """
-        Get the command to spawn a worker via uv run.
+        Get the command to spawn a worker using pre-built environment.
 
         Args:
+            env_name: Name of the pre-built environment.
             wrapper_path: Path to the generated wrapper script.
 
         Returns:
             Command list for subprocess.Popen, e.g.:
-            ["uv", "run", "--with", "/path/to/rootstock", "/tmp/wrapper.py"]
-
-        Note:
-            We don't set --cache-dir here because some filesystems (like Modal volumes)
-            don't support uv's lock files. The uv cache uses its default location,
-            while HuggingFace cache is set via HF_HOME in get_environment_variables().
+            ["/vol/rootstock/envs/mace_env/bin/python", "/tmp/wrapper.py"]
         """
-        rootstock_path = get_rootstock_path()
-        return ["uv", "run", "--with", str(rootstock_path), str(wrapper_path)]
+        env_python = self.get_env_python(env_name)
+        return [str(env_python), str(wrapper_path)]
 
     def get_environment_variables(self) -> dict[str, str]:
         """
         Get environment variables to set for the worker process.
 
         Returns:
-            Dict of environment variables, including HF_HOME if root is set.
-
-        Note:
-            We only set HF_HOME (HuggingFace cache) on the root volume, not UV_CACHE_DIR.
-            This is because some filesystems (like Modal volumes) don't support uv's
-            lock files. The HuggingFace cache stores large model weights that benefit
-            from persistence, while uv's pip cache can be rebuilt quickly.
+            Dict of environment variables for model caching.
         """
-        import os
-
         env = os.environ.copy()
-
-        if self.root is not None:
-            # Set HuggingFace cache directory (for model weights)
-            hf_home = self.root / "cache" / "huggingface"
-            hf_home.mkdir(parents=True, exist_ok=True)
-            env["HF_HOME"] = str(hf_home)
-
+        env.update(get_model_cache_env(self.root))
         return env
 
     def cleanup(self):
@@ -232,13 +189,13 @@ def check_uv_available() -> bool:
 
 def list_environments(root: Path | str) -> list[tuple[str, Path]]:
     """
-    List registered environments.
+    List registered environment source files.
 
     Args:
         root: Root directory containing environments/
 
     Returns:
-        List of (name, path) tuples for each environment.
+        List of (name, path) tuples for each environment source file.
     """
     root = Path(root)
     env_dir = root / "environments"
@@ -250,5 +207,29 @@ def list_environments(root: Path | str) -> list[tuple[str, Path]]:
     for path in sorted(env_dir.glob("*.py")):
         name = path.stem
         result.append((name, path))
+
+    return result
+
+
+def list_built_environments(root: Path | str) -> list[tuple[str, Path]]:
+    """
+    List pre-built environments.
+
+    Args:
+        root: Root directory containing envs/
+
+    Returns:
+        List of (name, path) tuples for each built environment.
+    """
+    root = Path(root)
+    envs_dir = root / "envs"
+
+    if not envs_dir.exists():
+        return []
+
+    result = []
+    for path in sorted(envs_dir.iterdir()):
+        if path.is_dir() and (path / "bin" / "python").exists():
+            result.append((path.name, path))
 
     return result
