@@ -14,7 +14,57 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+
+def extract_minimum_python_version(requires_python: str) -> str:
+    """
+    Extract minimum Python version from a requires-python specifier.
+
+    Handles PEP 440 version specifiers like:
+        ">=3.10"        -> "3.10"
+        ">=3.10,<3.13"  -> "3.10"
+        "~=3.10"        -> "3.10"
+        ">=3.10.0"      -> "3.10"  (normalized for uv)
+
+    Args:
+        requires_python: PEP 440 version specifier string
+
+    Returns:
+        Minimum version string suitable for `uv venv --python X.Y`
+
+    Raises:
+        ValueError: If no minimum version can be determined
+    """
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+
+    spec_set = SpecifierSet(requires_python)
+
+    min_version = None
+
+    for spec in spec_set:
+        # Operators that establish a lower bound
+        if spec.operator in (">=", "~=", "=="):
+            version = Version(spec.version)
+            if min_version is None or version < min_version:
+                min_version = version
+        elif spec.operator == ">":
+            # Strict greater-than: we can't determine exact minimum
+            # but the version given is a reasonable approximation for uv
+            version = Version(spec.version)
+            if min_version is None or version < min_version:
+                min_version = version
+
+    if min_version is None:
+        raise ValueError(
+            f"Cannot determine minimum Python version from '{requires_python}'. "
+            "Specifier must include >=, ~=, ==, or > constraint."
+        )
+
+    # Return major.minor only (uv expects "3.10" not "3.10.0")
+    return f"{min_version.major}.{min_version.minor}"
 
 
 def cmd_build(args) -> int:
@@ -77,7 +127,14 @@ def cmd_build(args) -> int:
     dependencies = metadata.get("dependencies", [])
     requires_python = metadata.get("requires-python", ">=3.10")
 
-    print(f"  Python: {requires_python}")
+    # Extract minimum version properly
+    try:
+        python_version = extract_minimum_python_version(requires_python)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    print(f"  Python: {requires_python} -> {python_version}")
     print(f"  Dependencies: {dependencies}")
 
     # Set up environment for uv commands.
@@ -88,12 +145,6 @@ def cmd_build(args) -> int:
 
     # Create virtual environment
     print("\n1. Creating virtual environment...")
-
-    # Phase 1: Download Python to local temp directory (avoids network filesystem
-    # issues with atomic file operations on Modal Volumes, HPC shared filesystems, etc.)
-    import tempfile
-
-    python_version = requires_python.replace(">=", "")
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_python_dir = Path(tmp_dir) / ".python"
 

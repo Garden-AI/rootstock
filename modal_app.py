@@ -26,7 +26,7 @@ app = modal.App("rootstock-v04")
 # Persistent volume for rootstock root directory
 rootstock_volume = modal.Volume.from_name("rootstock-v04-data", create_if_missing=True)
 
-# Base image with uv and Python
+# Base image with uv, Python, and MACE (for benchmarking)
 base_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("curl")
@@ -35,6 +35,8 @@ base_image = (
         "numpy>=1.24",
         "ase>=3.22",
         "tomli>=2.0",
+        "packaging>=21.0",
+        "mace-torch>=0.3.0",  # For direct benchmarking baseline
     )
     .run_commands("curl -LsSf https://astral.sh/uv/install.sh | sh")
     .env({
@@ -309,6 +311,56 @@ def inspect_status():
                 print(f"  {env_name}: not a symlink")
         else:
             print(f"  {env_name}: python not found")
+
+
+# -----------------------------------------------------------------------------
+# Sanity Check
+# -----------------------------------------------------------------------------
+
+
+@app.function(
+    image=base_image,
+    volumes={"/vol/rootstock": rootstock_volume},
+    gpu="A10G",
+    timeout=1800,  # 30 min max
+)
+def sanity_check(
+    n_atoms: int = 1000,
+    n_steps: int = 5000,
+) -> dict:
+    """
+    Run sanity check benchmark on Modal.
+
+    This is the gate check before HPC deployment. Measures IPC overhead
+    after calculator initialization (excludes slow volume loading).
+
+    Pass criteria:
+        <5%  overhead = PASS
+        5-10% overhead = MARGINAL
+        >10% overhead = FAIL
+    """
+    import sys
+
+    sys.path.insert(0, "/root")
+
+    from benchmarks.sanity_check import sanity_check as run_sanity_check
+
+    result = run_sanity_check(
+        n_atoms=n_atoms,
+        n_steps=n_steps,
+        model="medium",
+        device="cuda",
+        cluster="modal",
+    )
+
+    return {
+        "system_size": result.system_size,
+        "n_steps": result.n_steps,
+        "direct_time_s": result.direct_time_s,
+        "rootstock_time_s": result.rootstock_time_s,
+        "overhead_pct": result.overhead_pct,
+        "status": result.status,
+    }
 
 
 # -----------------------------------------------------------------------------

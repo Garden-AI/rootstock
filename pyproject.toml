@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "ase>=3.22",
     "numpy>=1.24",
+    "packaging>=21.0",
     "tomli>=2.0; python_version < '3.11'",
 ]
 
