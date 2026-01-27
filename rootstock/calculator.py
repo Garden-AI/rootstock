@@ -13,6 +13,7 @@ import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 from ase.stress import full_3x3_to_voigt_6_stress
 
+from .clusters import get_root_for_cluster, parse_model_string
 from .server import RootstockServer
 
 
@@ -25,31 +26,48 @@ class RootstockCalculator(Calculator):
     2. Communicates via i-PI protocol over Unix sockets
     3. Keeps the worker alive across calculations (no startup overhead)
 
-    Example:
+    Example (v0.3 API - recommended):
         from ase.build import bulk
         from rootstock import RootstockCalculator
 
         atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
 
+        # Using cluster name
         with RootstockCalculator(
-            environment="mace_env",
-            model="mace-mp-0",
+            cluster="modal",
+            model="mace-medium",
             device="cuda",
-            root="/shared/rootstock",
         ) as calc:
             atoms.calc = calc
             print(atoms.get_potential_energy())
-            print(atoms.get_forces())
+
+        # Using explicit root path
+        with RootstockCalculator(
+            root="/scratch/gpfs/SHARED/rootstock",
+            model="mace-medium",
+            device="cuda",
+        ) as calc:
+            atoms.calc = calc
+            print(atoms.get_potential_energy())
+
+    Example (power user - direct environment path):
+        with RootstockCalculator(
+            environment="/custom/path/mace.py",
+            model="medium",
+            device="cuda",
+        ) as calc:
+            ...
     """
 
     implemented_properties = ["energy", "free_energy", "forces", "stress"]
 
     def __init__(
         self,
-        environment: str,
-        model: str,
-        device: str = "cuda",
+        model: str = "mace-medium",
+        cluster: str | None = None,
         root: str | Path | None = None,
+        device: str = "cuda",
+        environment: str | None = None,
         log=None,
         **kwargs,
     ):
@@ -57,21 +75,59 @@ class RootstockCalculator(Calculator):
         Initialize the Rootstock calculator.
 
         Args:
-            environment: Name of registered environment or path to environment file.
-            model: Model identifier (e.g., "mace-mp-0", "medium", or path to weights)
-            device: Device for MLIP ("cuda", "cuda:0", "cpu")
-            root: Root directory for environments and cache. Required for named
-                  environments, optional for path-based environments.
+            model: Model identifier, e.g. "mace-medium", "chgnet", "mace-/path/to/weights.pt".
+                   Format is "{environment}-{model_arg}" or just "{environment}" for defaults.
+            cluster: Known cluster name ("modal", "della"). Mutually exclusive with root.
+            root: Path to rootstock directory. Mutually exclusive with cluster.
+            device: PyTorch device ("cuda", "cuda:0", "cpu")
+            environment: Direct path to environment file (power user, overrides model parsing).
+                        When specified, the model parameter is passed directly to setup().
             log: Optional file object for logging
             **kwargs: Additional arguments passed to ASE Calculator
         """
         super().__init__(**kwargs)
 
-        self.environment = environment
-        self.model = model
         self.device = device
-        self.root = Path(root) if root else None
         self.log = log
+
+        # Resolve root directory and environment path
+        if environment is not None:
+            # Power user mode: direct environment path
+            # Root is optional in this mode
+            self.root = Path(root) if root else None
+            self.environment_path = Path(environment)
+            self.model_arg = model  # Pass model string directly to setup()
+
+            if not self.environment_path.exists():
+                raise FileNotFoundError(f"Environment file not found: {self.environment_path}")
+        else:
+            # Standard mode: resolve cluster/root and parse model string
+            if cluster is not None and root is not None:
+                raise ValueError("Cannot specify both 'cluster' and 'root'")
+
+            if cluster is not None:
+                self.root = get_root_for_cluster(cluster)
+            elif root is not None:
+                self.root = Path(root)
+            else:
+                raise ValueError("Must specify either 'cluster' or 'root'")
+
+            # Parse model string to get environment name and model arg
+            env_name, model_arg = parse_model_string(model)
+            # Use {env_name}_env.py to avoid shadowing package names (e.g., mace_env.py)
+            self.environment_path = self.root / "environments" / f"{env_name}_env.py"
+            self.model_arg = model_arg
+
+            if not self.environment_path.exists():
+                env_dir = self.root / "environments"
+                if env_dir.exists():
+                    available = [p.stem for p in env_dir.glob("*.py")]
+                else:
+                    available = []
+                raise FileNotFoundError(
+                    f"Environment '{env_name}' not found at {self.environment_path}. "
+                    f"Available: {available}"
+                )
 
         # Generate unique socket name to avoid conflicts
         self._socket_name = f"rootstock_{uuid.uuid4().hex[:8]}"
@@ -80,14 +136,9 @@ class RootstockCalculator(Calculator):
     def _ensure_server(self):
         """Start server if not already running."""
         if self._server is None:
-            from .environment import EnvironmentManager
-
-            env_manager = EnvironmentManager(root=self.root)
-            env_path = env_manager.resolve_environment(self.environment)
-
             self._server = RootstockServer(
-                environment_path=env_path,
-                model=self.model,
+                environment_path=self.environment_path,
+                model=self.model_arg,
                 device=self.device,
                 socket_name=self._socket_name,
                 root=self.root,

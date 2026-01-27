@@ -97,7 +97,7 @@ def cmd_test(args) -> int:
         print(f"\n  Energy: {energy:.6f} eV")
         print(f"  Forces shape: {forces.shape}")
         print(f"  Max force: {abs(forces).max():.6f} eV/A")
-        print(f"\n  Calculation time: {calc_time*1000:.1f} ms")
+        print(f"\n  Calculation time: {calc_time * 1000:.1f} ms")
         print(f"  Total time (incl. setup): {total_time:.1f} s")
 
         print("\nTest PASSED")

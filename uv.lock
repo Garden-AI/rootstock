@@ -2280,8 +2280,8 @@ wheels = [
 ]
 
 [[package]]
-name = "rootstock-ipc-benchmark"
-version = "0.2.0"
+name = "rootstock"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "ase" },

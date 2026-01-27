@@ -18,7 +18,7 @@ from .pep723 import parse_pep723_metadata
 
 # Template for generated wrapper scripts
 # This script is run via `uv run --with rootstock wrapper.py`
-WRAPPER_TEMPLATE = '''# /// script
+WRAPPER_TEMPLATE = """# /// script
 # requires-python = "{requires_python}"
 # dependencies = {dependencies_json}
 # ///
@@ -35,7 +35,7 @@ run_worker(
     device="{device}",
     socket_path="{socket_path}",
 )
-'''
+"""
 
 
 def get_rootstock_path() -> Path:
@@ -178,6 +178,11 @@ class EnvironmentManager:
         Returns:
             Command list for subprocess.Popen, e.g.:
             ["uv", "run", "--with", "/path/to/rootstock", "/tmp/wrapper.py"]
+
+        Note:
+            We don't set --cache-dir here because some filesystems (like Modal volumes)
+            don't support uv's lock files. The uv cache uses its default location,
+            while HuggingFace cache is set via HF_HOME in get_environment_variables().
         """
         rootstock_path = get_rootstock_path()
         return ["uv", "run", "--with", str(rootstock_path), str(wrapper_path)]
@@ -188,13 +193,19 @@ class EnvironmentManager:
 
         Returns:
             Dict of environment variables, including HF_HOME if root is set.
+
+        Note:
+            We only set HF_HOME (HuggingFace cache) on the root volume, not UV_CACHE_DIR.
+            This is because some filesystems (like Modal volumes) don't support uv's
+            lock files. The HuggingFace cache stores large model weights that benefit
+            from persistence, while uv's pip cache can be rebuilt quickly.
         """
         import os
 
         env = os.environ.copy()
 
         if self.root is not None:
-            # Set HuggingFace cache directory
+            # Set HuggingFace cache directory (for model weights)
             hf_home = self.root / "cache" / "huggingface"
             hf_home.mkdir(parents=True, exist_ok=True)
             env["HF_HOME"] = str(hf_home)
