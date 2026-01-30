@@ -87,6 +87,7 @@ def run_md_direct(
     # Setup calculator
     calc = mace_mp(model=model, device=device, default_dtype="float32")
     atoms.calc = calc
+    atoms.get_potential_energy()
 
     # Initialize velocities
     MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
@@ -130,6 +131,7 @@ def run_md_rootstock(
 
     with RootstockCalculator(**calc_kwargs) as calc:
         atoms.calc = calc
+        atoms.get_potential_energy()
 
         # Initialize velocities
         MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
