@@ -19,8 +19,8 @@ def get_model_cache_env(root: Path) -> dict[str, str]:
     """
     Get environment variables to redirect model downloads to shared cache.
 
-    We set XDG_CACHE_HOME as a catch-all for libraries following the XDG spec
-    (MACE uses ~/.cache/mace/), plus explicit HF vars for HuggingFace.
+    We set HOME to redirect libraries that use ~/ for caching (FAIRChem, MatGL).
+    We also set XDG_CACHE_HOME for libraries that respect it (MACE).
 
     Args:
         root: Rootstock root directory.
@@ -29,7 +29,10 @@ def get_model_cache_env(root: Path) -> dict[str, str]:
         Dict of environment variables for model caching.
     """
     cache_dir = root / "cache"
+    home_dir = root / "home"
     return {
+        # Redirect HOME so libraries using ~/ find the shared cache
+        "HOME": str(home_dir),
         # XDG base directory - catches MACE and other well-behaved libraries
         "XDG_CACHE_HOME": str(cache_dir),
         # HuggingFace explicit (some tools check these before XDG)

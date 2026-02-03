@@ -143,6 +143,10 @@ def cmd_build(args) -> int:
     if find_links:
         print(f"  Find-links: {find_links}")
 
+    # Ensure home directory exists for model downloads
+    home_dir = root / "home"
+    home_dir.mkdir(parents=True, exist_ok=True)
+
     # Set up environment for uv commands.
     # UV_PYTHON_INSTALL_DIR ensures Python interpreters are stored in the rootstock
     # root directory, making the entire installation portable across machines/containers.

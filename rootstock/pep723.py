@@ -28,7 +28,7 @@ else:
 # Pattern to match PEP 723 metadata block
 # Matches: # /// script\n...# ///
 PEP723_PATTERN = re.compile(
-    r"^# /// script\s*\n((?:# .*\n)*?)# ///$",
+    r"^# /// script\s*\n((?:#[^\n]*\n)*?)# ///$",
     re.MULTILINE,
 )
 
