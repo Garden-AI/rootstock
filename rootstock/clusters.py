@@ -15,8 +15,8 @@ CLUSTER_REGISTRY: dict[str, str] = {
     "della": "/scratch/gpfs/SHARED/rootstock",
 }
 
-# Known environment prefixes for model string parsing
-KNOWN_ENVIRONMENTS = ["mace", "chgnet", "orb", "alignn"]
+# Known environment families (used for validation)
+KNOWN_ENVIRONMENTS = ["mace", "chgnet", "orb", "alignn", "uma", "tensornet"]
 
 
 def get_root_for_cluster(cluster: str) -> Path:
@@ -39,34 +39,3 @@ def get_root_for_cluster(cluster: str) -> Path:
             f"Use root='/path/to/rootstock' for custom locations."
         )
     return Path(CLUSTER_REGISTRY[cluster])
-
-
-def parse_model_string(model: str) -> tuple[str, str]:
-    """
-    Parse model string into (environment_name, model_arg).
-
-    The model string format is:
-        "{environment_name}" or "{environment_name}-{model_arg}"
-
-    Examples:
-        "mace-medium" -> ("mace", "medium")
-        "mace-small" -> ("mace", "small")
-        "mace-/path/to/custom.pt" -> ("mace", "/path/to/custom.pt")
-        "chgnet" -> ("chgnet", "")
-        "chgnet-0.3.0" -> ("chgnet", "0.3.0")
-
-    Args:
-        model: Model identifier string.
-
-    Returns:
-        Tuple of (environment_name, model_arg).
-    """
-    for env in KNOWN_ENVIRONMENTS:
-        if model == env:
-            return (env, "")
-        if model.startswith(f"{env}-"):
-            model_arg = model[len(env) + 1 :]  # Everything after "env-"
-            return (env, model_arg)
-
-    # Unknown format - treat entire string as environment name
-    return (model, "")

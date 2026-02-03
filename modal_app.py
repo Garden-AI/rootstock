@@ -169,7 +169,7 @@ def init_rootstock_volume():
     image=base_image,
     volumes={"/vol/rootstock": rootstock_volume},
     gpu="A10G",
-    timeout=600,
+    timeout=1800,
 )
 def test_prebuilt():
     """Test that pre-built environments work and are fast."""
@@ -189,11 +189,12 @@ def test_prebuilt():
     print("=" * 60)
 
     # Test 1: First run - should be fast since env is pre-built
-    print("\nTest 1: First run with mace-medium")
+    print("\nTest 1: First run with mace medium")
     t0 = time.time()
     with RootstockCalculator(
         cluster="modal",
-        model="mace-medium",
+        model="mace",
+        checkpoint="medium",
         device="cuda",
     ) as calc:
         atoms.calc = calc
@@ -207,7 +208,8 @@ def test_prebuilt():
     t0 = time.time()
     with RootstockCalculator(
         cluster="modal",
-        model="mace-medium",
+        model="mace",
+        checkpoint="medium",
         device="cuda",
     ) as calc:
         atoms.calc = calc
@@ -217,11 +219,12 @@ def test_prebuilt():
     print(f"  Time: {second_run:.1f}s")
 
     # Test 3: Different model
-    print("\nTest 3: Different model (mace-small)")
+    print("\nTest 3: Different checkpoint (mace small)")
     t0 = time.time()
     with RootstockCalculator(
         cluster="modal",
-        model="mace-small",
+        model="mace",
+        checkpoint="small",
         device="cuda",
     ) as calc:
         atoms.calc = calc
@@ -237,7 +240,7 @@ def test_prebuilt():
         cluster="modal",
         model="chgnet",
         device="cuda",
-    ) as calc:
+    ) as calc:  # no checkpoint = use default
         atoms.calc = calc
         energy = atoms.get_potential_energy()
         print(f"  Energy: {energy:.6f} eV")
@@ -427,7 +430,8 @@ def benchmark_v4(
         times = []
         with RootstockCalculator(
             cluster="modal",
-            model="mace-medium",
+            model="mace",
+            checkpoint="medium",
             device="cuda",
         ) as calc:
             atoms.calc = calc

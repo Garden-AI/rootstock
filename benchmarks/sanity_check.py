@@ -107,7 +107,8 @@ def run_md_rootstock(
     atoms,
     n_steps: int,
     cluster: str = "modal",
-    model: str = "mace-medium",
+    model: str = "mace",
+    checkpoint: str = "medium",
     device: str = "cuda",
     temperature_K: float = 300.0,
     timestep_fs: float = 1.0,
@@ -123,7 +124,7 @@ def run_md_rootstock(
     atoms = atoms.copy()
 
     # Setup calculator (outside timing)
-    calc_kwargs = {"model": model, "device": device}
+    calc_kwargs = {"model": model, "checkpoint": checkpoint, "device": device}
     if root:
         calc_kwargs["root"] = root
     else:
@@ -187,7 +188,8 @@ def sanity_check(
     rootstock_time = run_md_rootstock(
         atoms,
         n_steps=n_steps,
-        model=f"mace-{model}",
+        model="mace",
+        checkpoint=model,
         device=device,
         cluster=cluster,
         root=root,

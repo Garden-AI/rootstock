@@ -127,6 +127,10 @@ def cmd_build(args) -> int:
     dependencies = metadata.get("dependencies", [])
     requires_python = metadata.get("requires-python", ">=3.10")
 
+    # Extract uv-specific config (generic, works for any environment)
+    uv_config = metadata.get("tool", {}).get("uv", {})
+    find_links = uv_config.get("find-links", [])
+
     # Extract minimum version properly
     try:
         python_version = extract_minimum_python_version(requires_python)
@@ -136,6 +140,8 @@ def cmd_build(args) -> int:
 
     print(f"  Python: {requires_python} -> {python_version}")
     print(f"  Dependencies: {dependencies}")
+    if find_links:
+        print(f"  Find-links: {find_links}")
 
     # Set up environment for uv commands.
     # UV_PYTHON_INSTALL_DIR ensures Python interpreters are stored in the rootstock
@@ -193,8 +199,13 @@ def cmd_build(args) -> int:
     print("2. Installing dependencies...")
 
     if dependencies:
+        pip_cmd = ["uv", "pip", "install", "--python", str(env_python)]
+        for link in find_links:
+            pip_cmd.extend(["--find-links", link])
+        pip_cmd.extend(dependencies)
+
         result = subprocess.run(
-            ["uv", "pip", "install", "--python", str(env_python)] + dependencies,
+            pip_cmd,
             capture_output=not args.verbose,
             text=True,
             env=uv_env,

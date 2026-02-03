@@ -13,7 +13,7 @@ import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 from ase.stress import full_3x3_to_voigt_6_stress
 
-from .clusters import get_root_for_cluster, parse_model_string
+from .clusters import get_root_for_cluster
 from .server import RootstockServer
 
 
@@ -32,19 +32,19 @@ class RootstockCalculator(Calculator):
 
         atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
 
-        # Using cluster name
         with RootstockCalculator(
-            cluster="modal",
-            model="mace-medium",
+            cluster="della",
+            model="mace",
+            checkpoint="medium",
             device="cuda",
         ) as calc:
             atoms.calc = calc
             print(atoms.get_potential_energy())
 
-        # Using explicit root path
+        # Checkpoint defaults to environment's default if omitted
         with RootstockCalculator(
-            root="/scratch/gpfs/SHARED/rootstock",
-            model="mace-medium",
+            cluster="della",
+            model="uma",
             device="cuda",
         ) as calc:
             atoms.calc = calc
@@ -59,7 +59,8 @@ class RootstockCalculator(Calculator):
 
     def __init__(
         self,
-        model: str = "mace-medium",
+        model: str,
+        checkpoint: str | None = None,
         cluster: str | None = None,
         root: str | Path | None = None,
         device: str = "cuda",
@@ -70,8 +71,11 @@ class RootstockCalculator(Calculator):
         Initialize the Rootstock calculator.
 
         Args:
-            model: Model identifier, e.g. "mace-medium", "chgnet", "mace-/path/to/weights.pt".
-                   Format is "{environment}-{model_arg}" or just "{environment}" for defaults.
+            model: Environment family name (e.g. "mace", "uma", "tensornet").
+                   Maps to {model}_env environment.
+            checkpoint: Specific checkpoint/weights to load. Passed to the
+                        environment's setup() as the model argument. If omitted,
+                        the environment's default is used.
             cluster: Known cluster name ("modal", "della"). Mutually exclusive with root.
             root: Path to rootstock directory. Mutually exclusive with cluster.
             device: PyTorch device ("cuda", "cuda:0", "cpu")
@@ -94,10 +98,8 @@ class RootstockCalculator(Calculator):
         else:
             raise ValueError("Must specify either 'cluster' or 'root'")
 
-        # Parse model string to get environment name and model arg
-        env_name, model_arg = parse_model_string(model)
-        self.env_name = f"{env_name}_env"  # e.g., "mace" -> "mace_env"
-        self.model_arg = model_arg
+        self.env_name = f"{model}_env"
+        self.model_arg = checkpoint or ""
 
         # Verify environment is built
         env_python = self.root / "envs" / self.env_name / "bin" / "python"

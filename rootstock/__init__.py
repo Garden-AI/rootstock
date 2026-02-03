@@ -6,7 +6,7 @@ subprocess environments, communicating via the i-PI protocol.
 """
 
 from .calculator import RootstockCalculator
-from .clusters import CLUSTER_REGISTRY, get_root_for_cluster, parse_model_string
+from .clusters import CLUSTER_REGISTRY, KNOWN_ENVIRONMENTS, get_root_for_cluster
 from .environment import (
     EnvironmentManager,
     get_model_cache_env,
@@ -28,7 +28,7 @@ __all__ = [
     "validate_environment_file",
     "run_worker",
     "CLUSTER_REGISTRY",
+    "KNOWN_ENVIRONMENTS",
     "get_root_for_cluster",
-    "parse_model_string",
 ]
-__version__ = "0.4.0"
+__version__ = "0.5.0"

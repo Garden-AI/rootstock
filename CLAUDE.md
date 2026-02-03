@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rootstock is a proof-of-concept for running MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments, communicating via the i-PI protocol over Unix sockets.
 
-**Current version: v0.4** - Pre-built environments (no dynamic `uv run`).
+**Current version: v0.5** - Pre-built environments with UMA and TensorNet support.
 
 ## Commands
 
@@ -75,7 +75,7 @@ Main Process                          Worker Process (subprocess)
 - `rootstock/server.py` - Spawns worker subprocess, manages socket lifecycle
 - `rootstock/worker.py` - i-PI client state machine
 - `rootstock/environment.py` - Pre-built environment management, wrapper generation
-- `rootstock/clusters.py` - Cluster registry and model string parsing
+- `rootstock/clusters.py` - Cluster registry and known environments
 
 ### Directory Structure
 
@@ -85,7 +85,9 @@ Main Process                          Worker Process (subprocess)
 │   └── cpython-3.10.19-linux-x86_64-gnu/
 ├── environments/           # Environment SOURCE files (*.py with PEP 723)
 │   ├── mace_env.py
-│   └── chgnet_env.py
+│   ├── chgnet_env.py
+│   ├── uma_env.py
+│   └── tensornet_env.py
 ├── envs/                   # Pre-built virtual environments
 │   ├── mace_env/
 │   │   ├── bin/python      # Symlinks to .python/
@@ -111,21 +113,29 @@ the root directory is mounted (Modal Volume, HPC shared filesystem, etc.).
 ## API
 
 ```python
-# Standard usage
+# v0.5 API: explicit model and checkpoint parameters
 with RootstockCalculator(
-    cluster="modal",      # or root="/path/to/rootstock"
-    model="mace-medium",  # -> env_name="mace_env", model_arg="medium"
+    cluster="della",
+    model="mace",              # Environment family -> mace_env
+    checkpoint="medium",       # Specific checkpoint (optional, uses default if omitted)
     device="cuda",
 ) as calc:
     atoms.calc = calc
     energy = atoms.get_potential_energy()
+
+# Checkpoint defaults to environment's default if omitted
+with RootstockCalculator(cluster="della", model="uma") as calc:
+    ...  # Uses uma-s-1p1 by default
 ```
 
-### Model String Format
+### Available Models
 
-- `"mace-medium"` → env_name=mace_env, model_arg="medium"
-- `"chgnet"` → env_name=chgnet_env, model_arg=""
-- `"mace-/path/to/weights.pt"` → env_name=mace_env, model_arg="/path/to/weights.pt"
+| Model | Environment | Default Checkpoint | Other Checkpoints |
+|-------|-------------|-------------------|-------------------|
+| `mace` | mace_env | `medium` | `small`, `large` |
+| `chgnet` | chgnet_env | (pretrained) | — |
+| `uma` | uma_env | `uma-s-1p1` | — |
+| `tensornet` | tensornet_env | `TensorNet-MatPES-PBE-v2025.1-PES` | Other MatGL models |
 
 ## Build Process
 
