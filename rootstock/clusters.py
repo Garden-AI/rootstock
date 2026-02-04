@@ -12,7 +12,7 @@ from pathlib import Path
 # Registry of known clusters and their rootstock root directories
 CLUSTER_REGISTRY: dict[str, str] = {
     "modal": "/vol/rootstock",
-    "della": "/scratch/gpfs/SHARED/rootstock",
+    "della": "/scratch/gpfs/ROSENGROUP/common/rootstock",
 }
 
 # Known environment families (used for validation)
