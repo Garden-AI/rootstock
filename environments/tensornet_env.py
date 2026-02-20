@@ -42,4 +42,5 @@ def setup(model: str = "TensorNet-MatPES-PBE-v2025.1-PES", device: str = "cuda")
     from matgl.ext.ase import PESCalculator
 
     pot = matgl.load_model(model)
+    pot = pot.to(device)
     return PESCalculator(potential=pot)
