@@ -47,17 +47,22 @@ class MLIPWorker:
         socket_name: str,
         calculator: "Calculator",
         log=None,
+        socket_path: str | None = None,
     ):
         """
         Initialize the worker.
 
         Args:
-            socket_name: Name of Unix socket to connect to
+            socket_name: Name of Unix socket to connect to (used if socket_path not given)
             calculator: Pre-loaded ASE calculator
             log: Optional file object for logging
+            socket_path: Full Unix socket path (overrides socket_name if provided)
         """
         self.socket_name = socket_name
-        self.socket_path = create_unix_socket_path(socket_name)
+        if socket_path is not None:
+            self.socket_path = socket_path
+        else:
+            self.socket_path = create_unix_socket_path(socket_name)
         self.log = log
 
         self._calculator = calculator
@@ -262,12 +267,10 @@ def run_worker(
     if log:
         print(f"[Worker] Calculator loaded: {type(calculator).__name__}", file=log, flush=True)
 
-    # Extract socket name from path (e.g., /tmp/ipi_rootstock_abc -> rootstock_abc)
-    socket_name = socket_path.replace("/tmp/ipi_", "")
-
     worker = MLIPWorker(
-        socket_name=socket_name,
+        socket_name="rootstock",
         calculator=calculator,
         log=log,
+        socket_path=socket_path,
     )
     worker.run()

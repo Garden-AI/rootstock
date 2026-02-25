@@ -1,0 +1,27 @@
+# Force comparison test — dump forces for comparison with ASE reference
+#
+# Prerequisites:
+#   1. Generate reference: python reference_forces.py
+#   2. Start worker:
+#        rootstock serve mace --root $ROOTSTOCK_ROOT \
+#            --socket /tmp/rootstock_test.sock --model medium --device cuda
+#   3. Run: lmp -in test_forces.lammps
+#   4. Compare: python compare_forces.py
+
+units           metal
+atom_style      atomic
+boundary        p p p
+
+read_data       reference_structure.data
+
+fix             mlip all rootstock /tmp/rootstock_test.sock elements Cu
+
+# Single energy/force evaluation
+run             0
+
+# Dump forces to file
+dump            forces all custom 1 lammps_forces.dump id fx fy fz
+dump_modify     forces sort id format float %20.12e
+run             0
+
+print "FORCE DUMP COMPLETE — run compare_forces.py to validate"

@@ -1,0 +1,36 @@
+# NVE stability test — 100-step NVE trajectory
+#
+# Start the worker first:
+#   rootstock serve mace --root $ROOTSTOCK_ROOT \
+#       --socket /tmp/rootstock_test.sock --model medium --device cuda
+#
+# Then run:
+#   lmp -in test_nve.lammps
+
+units           metal
+atom_style      atomic
+boundary        p p p
+
+# 2x2x2 Cu FCC supercell (32 atoms)
+lattice         fcc 3.615
+region          box block 0 2 0 2 0 2
+create_box      1 box
+create_atoms    1 box
+mass            1 63.546
+
+# Small random perturbation to break symmetry
+displace_atoms  all random 0.05 0.05 0.05 12345
+
+velocity        all create 300.0 54321
+
+fix             mlip all rootstock /tmp/rootstock_test.sock elements Cu
+fix             nve all nve
+
+timestep        0.001
+
+thermo_style    custom step temp pe ke etotal f_mlip press
+thermo          10
+
+run             100
+
+print "NVE TEST PASSED"

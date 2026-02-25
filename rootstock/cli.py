@@ -7,11 +7,13 @@ Commands:
     rootstock status --root <path>
     rootstock register <env_file> --root <path>
     rootstock list --root <path>
+    rootstock serve <env_name> --root <path> --socket <path> --model <name> [--device <dev>]
 """
 
 import argparse
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -370,6 +372,70 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    """
+    Start a rootstock worker process for an external i-PI server (e.g., LAMMPS).
+
+    The worker connects to the given Unix socket path, loads the specified model,
+    and serves energy/forces via the i-PI protocol until the server disconnects.
+
+    Exit codes:
+        0: Clean shutdown
+        1: Error
+    """
+    from .environment import EnvironmentManager
+
+    root = Path(args.root)
+    env_name = f"{args.env_name}_env"
+    socket_path = args.socket
+    model = args.model
+    device = args.device
+
+    # Create environment manager and validate environment exists
+    env_mgr = EnvironmentManager(root=root)
+    try:
+        env_mgr.get_env_python(env_name)
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    # Generate wrapper script
+    wrapper_path = env_mgr.generate_wrapper(
+        env_name=env_name,
+        model=model,
+        device=device,
+        socket_path=socket_path,
+    )
+
+    # Get spawn command and environment
+    cmd = env_mgr.get_spawn_command(env_name, wrapper_path)
+    env = env_mgr.get_environment_variables()
+
+    print("Starting rootstock worker:")
+    print(f"  Environment: {env_name}")
+    print(f"  Model: {model}")
+    print(f"  Device: {device}")
+    print(f"  Socket: {socket_path}")
+
+    # Spawn worker subprocess
+    proc = subprocess.Popen(cmd, env=env)
+
+    # Forward signals to worker
+    def forward_signal(signum, frame):
+        proc.send_signal(signum)
+
+    signal.signal(signal.SIGTERM, forward_signal)
+    signal.signal(signal.SIGINT, forward_signal)
+
+    # Block until worker exits
+    try:
+        rc = proc.wait()
+    finally:
+        env_mgr.cleanup()
+
+    return rc
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="rootstock",
@@ -417,6 +483,19 @@ def main():
     )
     list_parser.add_argument("--root", required=True, help="Root directory")
     list_parser.set_defaults(func=cmd_list)
+
+    # serve command
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start a worker for an external i-PI server",
+        description="Start a rootstock worker that connects to a Unix socket.",
+    )
+    serve_parser.add_argument("env_name", help="Environment family (e.g., mace, uma, tensornet)")
+    serve_parser.add_argument("--root", required=True, help="Root directory")
+    serve_parser.add_argument("--socket", required=True, help="Unix socket path to connect to")
+    serve_parser.add_argument("--model", required=True, help="Model/checkpoint name")
+    serve_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
+    serve_parser.set_defaults(func=cmd_serve)
 
     args = parser.parse_args()
     sys.exit(args.func(args))

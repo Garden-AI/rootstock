@@ -10,7 +10,9 @@
       "Bash(uv run:*)",
       "Bash(uv pip install:*)",
       "Bash(.venv/bin/rootstock:*)",
-      "WebFetch(domain:modal.com)"
+      "WebFetch(domain:modal.com)",
+      "Bash(chmod +x:*)",
+      "Bash(uv tool:*)"
     ]
   }
 }
