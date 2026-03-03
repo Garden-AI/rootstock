@@ -3,7 +3,7 @@
 # dependencies = [
 #     "mace-torch>=0.3.0",
 #     "ase>=3.22",
-#     "torch>=2.0",
+#     "torch>=2.4.0,<2.10",
 # ]
 # ///
 """
