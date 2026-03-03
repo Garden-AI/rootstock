@@ -8,6 +8,8 @@ Commands:
     rootstock install <source> [--root <path>] [--models m1,m2] [--force]
         Install from file (validates, registers, builds):
             rootstock install ./mace_env.py --root /vol/rootstock
+        Install all environments from a directory:
+            rootstock install ./environments/ --root /vol/rootstock
         Rebuild existing environment by name:
             rootstock install mace_env --root /vol/rootstock --force
 
@@ -94,33 +96,22 @@ def extract_minimum_python_version(requires_python: str) -> str:
     return f"{min_version.major}.{min_version.minor}"
 
 
-def cmd_install(args) -> int:
+def _install_single_environment(
+    root: Path,
+    source: str,
+    force: bool,
+    models: str | None,
+    verbose: bool,
+) -> int:
     """
-    Install an environment from a file or rebuild an existing environment.
+    Install a single environment from a file path or environment name.
 
-    Accepts either:
-    - A file path: validates, copies to environments/, and builds
-    - An environment name: rebuilds an existing registered environment
-
-    Exit codes:
-        0: Success
-        1: Install failed
+    Returns 0 on success, 1 on failure.
     """
-    from .environment import check_uv_available, get_model_cache_env
+    from .environment import get_model_cache_env
     from .pep723 import parse_pep723_metadata, validate_environment_file
 
-    root = get_root_or_exit(args)
-    source = args.source
     source_path = Path(source)
-
-    # Check uv is available
-    if not check_uv_available():
-        print(
-            "Error: uv not found in PATH. Install uv: "
-            "https://docs.astral.sh/uv/getting-started/installation/",
-            file=sys.stderr,
-        )
-        return 1
 
     # Determine mode: file path or environment name
     if source_path.is_file():
@@ -135,7 +126,7 @@ def cmd_install(args) -> int:
             return 1
 
         # Check if already registered
-        if env_source.exists() and not args.force:
+        if env_source.exists() and not force:
             print(
                 f"Error: Environment '{env_name}' already registered at {env_source}",
                 file=sys.stderr,
@@ -169,7 +160,7 @@ def cmd_install(args) -> int:
 
     # Check if venv already exists
     if env_target.exists():
-        if args.force:
+        if force:
             print(f"Removing existing environment: {env_target}")
             shutil.rmtree(env_target)
         else:
@@ -274,13 +265,13 @@ def cmd_install(args) -> int:
 
         result = subprocess.run(
             pip_cmd,
-            capture_output=not args.verbose,
+            capture_output=not verbose,
             text=True,
             env=uv_env,
         )
         if result.returncode != 0:
             print(
-                f"Error installing dependencies: {result.stderr if not args.verbose else ''}",
+                f"Error installing dependencies: {result.stderr if not verbose else ''}",
                 file=sys.stderr,
             )
             return 1
@@ -294,13 +285,13 @@ def cmd_install(args) -> int:
 
     result = subprocess.run(
         ["uv", "pip", "install", "--python", str(env_python), str(rootstock_path)],
-        capture_output=not args.verbose,
+        capture_output=not verbose,
         text=True,
         env=uv_env,
     )
     if result.returncode != 0:
         print(
-            f"Error installing rootstock: {result.stderr if not args.verbose else ''}",
+            f"Error installing rootstock: {result.stderr if not verbose else ''}",
             file=sys.stderr,
         )
         return 1
@@ -310,14 +301,14 @@ def cmd_install(args) -> int:
     shutil.copy(env_source, env_target / "env_source.py")
 
     # Pre-download models if requested
-    if args.models:
-        models = [m.strip() for m in args.models.split(",")]
-        print(f"5. Pre-downloading models: {models}")
+    if models:
+        model_list = [m.strip() for m in models.split(",")]
+        print(f"5. Pre-downloading models: {model_list}")
 
         cache_env = get_model_cache_env(root)
         env = {**os.environ, **cache_env}
 
-        for model in models:
+        for model in model_list:
             print(f"   Downloading: {model}")
             script = f'''
 import sys
@@ -329,16 +320,101 @@ print(f"Downloaded model: {model}")
             result = subprocess.run(
                 [str(env_python), "-c", script],
                 env=env,
-                capture_output=not args.verbose,
+                capture_output=not verbose,
                 text=True,
             )
             if result.returncode != 0:
                 print(f"   Warning: Failed to download {model}", file=sys.stderr)
-                if args.verbose:
+                if verbose:
                     print(result.stderr, file=sys.stderr)
 
     print(f"\nBuilt environment: {env_target}")
     return 0
+
+
+def cmd_install(args) -> int:
+    """
+    Install environment(s) from a file, directory, or rebuild by name.
+
+    Accepts:
+    - A file path: validates, copies to environments/, and builds
+    - A directory path: installs all *.py environment files in the directory
+    - An environment name: rebuilds an existing registered environment
+
+    Exit codes:
+        0: Success (all environments installed)
+        1: One or more installs failed
+    """
+    from .environment import check_uv_available
+
+    root = get_root_or_exit(args)
+    source = args.source
+    source_path = Path(source)
+
+    # Check uv is available
+    if not check_uv_available():
+        print(
+            "Error: uv not found in PATH. Install uv: "
+            "https://docs.astral.sh/uv/getting-started/installation/",
+            file=sys.stderr,
+        )
+        return 1
+
+    # DIRECTORY MODE: install all *.py files
+    if source_path.is_dir():
+        env_files = sorted(source_path.glob("*.py"))
+        if not env_files:
+            print(f"Error: No *.py files found in {source_path}", file=sys.stderr)
+            return 1
+
+        print(f"Installing {len(env_files)} environment(s) from {source_path}:")
+        for f in env_files:
+            print(f"  - {f.name}")
+        print()
+
+        succeeded = []
+        failed = []
+
+        for env_file in env_files:
+            print(f"{'=' * 60}")
+            print(f"Installing: {env_file.name}")
+            print(f"{'=' * 60}")
+
+            result = _install_single_environment(
+                root=root,
+                source=str(env_file),
+                force=args.force,
+                models=args.models,
+                verbose=args.verbose,
+            )
+
+            if result == 0:
+                succeeded.append(env_file.stem)
+            else:
+                failed.append(env_file.stem)
+
+            print()
+
+        # Summary
+        print(f"{'=' * 60}")
+        print("Summary:")
+        print(f"  Succeeded: {len(succeeded)}")
+        if succeeded:
+            print(f"    {', '.join(succeeded)}")
+        print(f"  Failed: {len(failed)}")
+        if failed:
+            print(f"    {', '.join(failed)}")
+
+        return 1 if failed else 0
+
+    # FILE or NAME MODE: single environment
+    return _install_single_environment(
+        root=root,
+        source=source,
+        force=args.force,
+        models=args.models,
+        verbose=args.verbose,
+    )
 
 
 def cmd_status(args) -> int:
@@ -482,15 +558,17 @@ def main():
     # install command
     install_parser = subparsers.add_parser(
         "install",
-        help="Install an environment from file or rebuild existing",
+        help="Install environment(s) from file, directory, or rebuild by name",
         description=(
-            "Install an environment from a file (validates, registers, and builds) "
-            "or rebuild an existing environment by name."
+            "Install environment(s) from a file, directory, or rebuild by name. "
+            "File: validates, registers, and builds a single environment. "
+            "Directory: installs all *.py environment files. "
+            "Name: rebuilds an existing registered environment."
         ),
     )
     install_parser.add_argument(
         "source",
-        help="Environment file path (e.g., ./mace_env.py) or name (e.g., mace_env)",
+        help="File path, directory, or env name (e.g., ./mace_env.py, ./environments/, mace_env)",
     )
     install_parser.add_argument(
         "--root",
