@@ -35,16 +35,17 @@ FixStyle(rootstock, FixRootstock)
 namespace LAMMPS_NS {
 
 class FixRootstock : public Fix {
- public:
+public:
   FixRootstock(class LAMMPS *, int, char **);
   ~FixRootstock() override;
 
   int setmask() override;
   void init() override;
   void post_force(int) override;
+  void setup(int) override;
   double compute_scalar() override;
 
- private:
+private:
   // Socket state
   std::string socket_path_;
   int server_fd_;
@@ -74,7 +75,7 @@ class FixRootstock : public Fix {
   static int element_to_z(const std::string &symbol);
 };
 
-}    // namespace LAMMPS_NS
+} // namespace LAMMPS_NS
 
 #endif
 #endif
