@@ -253,6 +253,11 @@ void FixRootstock::init() {
   if (std::string(update->unit_style) != "metal")
     error->all(FLERR, "fix rootstock requires 'units metal'");
 
+  // Only do socket/worker setup on first call.
+  // LAMMPS calls init() at the start of every `run` command.
+  if (server_fd_ >= 0)
+    return;
+
   // Resolve cluster root directory
   std::string root = resolve_cluster(cluster_name_);
 
