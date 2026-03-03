@@ -1,0 +1,28 @@
+# Auto-spawn smoke test — verify LAMMPS spawns the worker automatically
+#
+# Run:
+#   mpirun -np 1 lmp_gpu -in test_autospawn.lammps
+#
+# Pass criteria: completes run 0 with nonzero f_mlip, no manual rootstock serve needed.
+
+units           metal
+atom_style      atomic
+boundary        p p p
+
+lattice         fcc 3.615
+region          box block 0 2 0 2 0 2
+create_box      1 box
+create_atoms    1 box
+mass            1 63.546
+
+pair_style      zero 6.0
+pair_coeff      * *
+
+fix             mlip all rootstock cluster della model mace checkpoint medium device cpu elements Cu
+
+thermo_style    custom step temp pe f_mlip
+thermo          1
+
+run             0
+
+print "AUTOSPAWN TEST PASSED"

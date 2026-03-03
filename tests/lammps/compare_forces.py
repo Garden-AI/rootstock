@@ -80,7 +80,7 @@ def main():
         print(f"  FAIL (>= {threshold} eV/A)")
         # Show worst atoms
         worst = np.unravel_index(np.argmax(diff), diff.shape)
-        print(f"  Worst atom: {worst[0]+1}, component: {'xyz'[worst[1]]}")
+        print(f"  Worst atom: {worst[0] + 1}, component: {'xyz'[worst[1]]}")
         print(f"    Reference: {ref[worst[0]]}")
         print(f"    LAMMPS:    {lmp[worst[0]]}")
         sys.exit(1)

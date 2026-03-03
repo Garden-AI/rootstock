@@ -16,7 +16,11 @@
 
    Communicates with a rootstock worker process that runs an MLIP model
    (MACE, CHGNet, UMA, TensorNet, etc.) in an isolated Python environment.
-   The worker is started externally via `rootstock serve`.
+   The worker is auto-spawned via `rootstock serve`.
+
+   Usage:
+     fix <id> <group> rootstock cluster <name> model <model> \
+         checkpoint <ckpt> device <dev> elements <e1> <e2> ...
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -30,6 +34,7 @@ FixStyle(rootstock, FixRootstock)
 
 #include "fix.h"
 #include <string>
+#include <sys/types.h>
 #include <vector>
 
 namespace LAMMPS_NS {
@@ -46,10 +51,20 @@ public:
   double compute_scalar() override;
 
 private:
+  // User-facing keywords
+  std::string cluster_name_;
+  std::string model_;
+  std::string checkpoint_;
+  std::string device_;
+  int timeout_;
+
   // Socket state
   std::string socket_path_;
   int server_fd_;
   int client_fd_;
+
+  // Worker process
+  pid_t worker_pid_;
 
   // Atom info
   std::vector<int> atomic_numbers_;
@@ -57,6 +72,10 @@ private:
 
   // Cached energy for thermo output
   double energy_;
+
+  // Auto-spawn helpers
+  std::string resolve_cluster(const std::string &cluster);
+  pid_t spawn_worker(const std::string &root);
 
   // Socket I/O helpers
   void sendall(const void *buf, size_t len);
