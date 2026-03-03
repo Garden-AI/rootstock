@@ -1,13 +1,15 @@
 """
 Rootstock CLI.
 
+The --root flag specifies the rootstock root directory. If not provided,
+the ROOTSTOCK_ROOT environment variable is used.
+
 Commands:
-    rootstock build <env_name> --root <path> [--models m1,m2] [--force]
-    rootstock build --all --root <path>
-    rootstock status --root <path>
-    rootstock register <env_file> --root <path>
-    rootstock list --root <path>
-    rootstock serve <env_name> --root <path> --socket <path> --model <name> [--device <dev>]
+    rootstock build <env_name> [--root <path>] [--models m1,m2] [--force]
+    rootstock status [--root <path>]
+    rootstock register <env_file> [--root <path>]
+    rootstock list [--root <path>]
+    rootstock serve <env_name> [--root <path>] --socket <path> --model <name> [--device <dev>]
 """
 
 import argparse
@@ -18,6 +20,25 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+# Environment variable for default root directory
+ROOTSTOCK_ROOT_ENV = "ROOTSTOCK_ROOT"
+
+
+def get_root_or_exit(args) -> Path:
+    """
+    Get the root directory from args or environment variable.
+
+    Exits with an error message if neither is set.
+    """
+    if args.root:
+        return Path(args.root)
+
+    print(
+        f"Error: --root is required (or set {ROOTSTOCK_ROOT_ENV} environment variable)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def extract_minimum_python_version(requires_python: str) -> str:
@@ -80,7 +101,7 @@ def cmd_build(args) -> int:
     from .environment import check_uv_available, get_model_cache_env
     from .pep723 import parse_pep723_metadata
 
-    root = Path(args.root)
+    root = get_root_or_exit(args)
     env_name = args.env_name
 
     # Check uv is available
@@ -283,7 +304,7 @@ def cmd_status(args) -> int:
     """Show status of rootstock installation."""
     from .environment import list_built_environments, list_environments
 
-    root = Path(args.root)
+    root = get_root_or_exit(args)
 
     print(f"Rootstock root: {root}")
 
@@ -329,7 +350,7 @@ def cmd_register(args) -> int:
     from .pep723 import validate_environment_file
 
     env_path = Path(args.env_file)
-    root = Path(args.root)
+    root = get_root_or_exit(args)
 
     # Validate the file
     print(f"Validating {env_path}...")
@@ -354,7 +375,7 @@ def cmd_list(args) -> int:
     """List registered environments."""
     from .environment import list_built_environments, list_environments
 
-    root = Path(args.root)
+    root = get_root_or_exit(args)
 
     sources = list_environments(root)
     built = list_built_environments(root)
@@ -385,7 +406,7 @@ def cmd_serve(args) -> int:
     """
     from .environment import EnvironmentManager
 
-    root = Path(args.root)
+    root = get_root_or_exit(args)
     env_name = f"{args.env_name}_env"
     socket_path = args.socket
     model = args.model
@@ -450,7 +471,11 @@ def main():
         description="Build a virtual environment from an environment source file.",
     )
     build_parser.add_argument("env_name", help="Name of environment to build (e.g., mace_env)")
-    build_parser.add_argument("--root", required=True, help="Root directory")
+    build_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
     build_parser.add_argument("--models", help="Comma-separated list of models to pre-download")
     build_parser.add_argument("--force", action="store_true", help="Rebuild if exists")
     build_parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
@@ -462,7 +487,11 @@ def main():
         help="Show status of rootstock installation",
         description="Show environment sources, built environments, and cache sizes.",
     )
-    status_parser.add_argument("--root", required=True, help="Root directory")
+    status_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
     status_parser.set_defaults(func=cmd_status)
 
     # register command
@@ -472,7 +501,11 @@ def main():
         description="Copy a validated environment file to the shared environments directory.",
     )
     reg_parser.add_argument("env_file", help="Path to environment file")
-    reg_parser.add_argument("--root", required=True, help="Root directory")
+    reg_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
     reg_parser.set_defaults(func=cmd_register)
 
     # list command
@@ -481,7 +514,11 @@ def main():
         help="List registered environments",
         description="List all environment files in the shared environments directory.",
     )
-    list_parser.add_argument("--root", required=True, help="Root directory")
+    list_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
     list_parser.set_defaults(func=cmd_list)
 
     # serve command
@@ -491,7 +528,11 @@ def main():
         description="Start a rootstock worker that connects to a Unix socket.",
     )
     serve_parser.add_argument("env_name", help="Environment family (e.g., mace, uma, tensornet)")
-    serve_parser.add_argument("--root", required=True, help="Root directory")
+    serve_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
     serve_parser.add_argument("--socket", required=True, help="Unix socket path to connect to")
     serve_parser.add_argument("--model", required=True, help="Model/checkpoint name")
     serve_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
