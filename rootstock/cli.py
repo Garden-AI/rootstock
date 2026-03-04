@@ -15,7 +15,8 @@ Commands:
 
     rootstock status [--root <path>]
     rootstock list [--root <path>]
-    rootstock serve <env_name> [--root <path>] --socket <path> --model <name> [--device <dev>]
+    rootstock serve <model> [--root <path>] --socket <path> --checkpoint <name> [--device <dev>]
+    rootstock resolve --cluster <name> [--json]
 """
 
 import argparse
@@ -484,6 +485,30 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_resolve(args) -> int:
+    """Resolve cluster configuration and print as JSON."""
+    import json as json_mod
+
+    from .clusters import get_root_for_cluster
+
+    try:
+        root = get_root_for_cluster(args.cluster)
+    except ValueError:
+        print(f"Error: unknown cluster '{args.cluster}'", file=sys.stderr)
+        return 1
+
+    result = {
+        "root": str(root),
+        "cluster": args.cluster,
+    }
+    if args.json:
+        print(json_mod.dumps(result))
+    else:
+        print(f"Cluster: {args.cluster}")
+        print(f"Root:    {root}")
+    return 0
+
+
 def cmd_serve(args) -> int:
     """
     Start a rootstock worker process for an external i-PI server (e.g., LAMMPS).
@@ -498,9 +523,9 @@ def cmd_serve(args) -> int:
     from .environment import EnvironmentManager
 
     root = get_root_or_exit(args)
-    env_name = f"{args.env_name}_env"
+    env_name = f"{args.model}_env"
     socket_path = args.socket
-    model = args.model
+    checkpoint = args.checkpoint
     device = args.device
 
     # Create environment manager and validate environment exists
@@ -514,7 +539,7 @@ def cmd_serve(args) -> int:
     # Generate wrapper script
     wrapper_path = env_mgr.generate_wrapper(
         env_name=env_name,
-        model=model,
+        model=checkpoint,
         device=device,
         socket_path=socket_path,
     )
@@ -524,8 +549,8 @@ def cmd_serve(args) -> int:
     env = env_mgr.get_environment_variables()
 
     print("Starting rootstock worker:")
-    print(f"  Environment: {env_name}")
-    print(f"  Model: {model}")
+    print(f"  Model: {args.model} (env: {env_name})")
+    print(f"  Checkpoint: {checkpoint}")
     print(f"  Device: {device}")
     print(f"  Socket: {socket_path}")
 
@@ -608,20 +633,30 @@ def main():
     )
     list_parser.set_defaults(func=cmd_list)
 
+    # resolve command
+    resolve_parser = subparsers.add_parser(
+        "resolve",
+        help="Resolve cluster configuration",
+        description="Look up the root directory for a known cluster.",
+    )
+    resolve_parser.add_argument("--cluster", required=True, help="Cluster name")
+    resolve_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    resolve_parser.set_defaults(func=cmd_resolve)
+
     # serve command
     serve_parser = subparsers.add_parser(
         "serve",
         help="Start a worker for an external i-PI server",
         description="Start a rootstock worker that connects to a Unix socket.",
     )
-    serve_parser.add_argument("env_name", help="Environment family (e.g., mace, uma, tensornet)")
+    serve_parser.add_argument("model", help="Model family (e.g., mace, uma, tensornet)")
     serve_parser.add_argument(
         "--root",
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
     )
     serve_parser.add_argument("--socket", required=True, help="Unix socket path to connect to")
-    serve_parser.add_argument("--model", required=True, help="Model/checkpoint name")
+    serve_parser.add_argument("--checkpoint", required=True, help="Checkpoint/weights name")
     serve_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
     serve_parser.set_defaults(func=cmd_serve)
 

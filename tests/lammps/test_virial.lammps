@@ -1,0 +1,28 @@
+# Virial / pressure test — compare pressure against ASE reference
+#
+# Prerequisites:
+#   1. Generate reference: python reference_pressure.py
+#
+# Run:
+#   mpirun -np 1 lmp_gpu -in test_virial.lammps
+#
+# Pass criteria: LAMMPS press matches ASE pressure to within 1%.
+
+units           metal
+atom_style      atomic
+boundary        p p p
+
+read_data       reference_structure.data
+mass            1 63.546
+
+pair_style      zero 6.0
+pair_coeff      * *
+
+fix             mlip all rootstock cluster della model mace checkpoint medium device cpu elements Cu
+
+thermo_style    custom step press
+thermo          1
+
+run             0
+
+print "VIRIAL TEST COMPLETE — compare press against ASE reference"

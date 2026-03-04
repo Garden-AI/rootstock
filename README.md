@@ -156,3 +156,83 @@ uv pip install -e ".[dev]"
 ruff check rootstock/
 ruff format rootstock/
 ```
+
+## Experimental: LAMMPS Support
+
+Rootstock can drive LAMMPS simulations through a native `fix` that auto-spawns
+a worker subprocess over Unix sockets using the i-PI protocol. No separate
+process management needed — add one line to your input script:
+
+```
+fix mlip all rootstock cluster della model mace checkpoint medium device cuda elements Cu
+```
+
+### Building
+
+The fix ships as two files (`fix_rootstock.h`, `fix_rootstock.cpp`) with no
+dependencies beyond the C++ standard library and POSIX sockets. Copy them into
+your LAMMPS `src/` directory and rebuild:
+
+```bash
+./lammps/install.sh /path/to/lammps/src
+cd /path/to/lammps/build
+cmake ../cmake [your usual flags]
+make -j 4
+```
+
+Rootstock must also be installed and on `PATH` so the fix can call
+`rootstock resolve` and `rootstock serve`:
+
+```bash
+pip install rootstock
+```
+
+### Syntax
+
+```
+fix <id> <group> rootstock cluster <n> model <model> \
+    checkpoint <ckpt> device <dev> [timeout <sec>] elements <e1> <e2> ...
+```
+
+| Keyword | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `cluster` | yes | — | Cluster name (e.g., `della`) |
+| `model` | yes | — | `mace`, `chgnet`, `uma`, `tensornet` |
+| `checkpoint` | no | `default` | Model weights (e.g., `medium`, `uma-s-1p1`) |
+| `device` | no | `cuda` | `cuda` or `cpu` |
+| `timeout` | no | `120` | Seconds to wait for worker startup |
+| `elements` | yes | — | Element symbols mapping atom types (must be last) |
+
+### Example: NPT
+
+```
+units metal
+boundary p p p
+read_data structure.data
+mass 1 63.546
+mass 2 16.000
+
+pair_style zero 6.0
+pair_coeff * *
+
+fix mlip all rootstock cluster della model uma checkpoint uma-s-1p1 device cuda elements Cu O
+
+velocity all create 300 300
+fix 1 all npt temp 300 300 0.1 iso 0 0 1.0
+timestep 0.001
+
+thermo_style custom step temp press vol f_mlip
+thermo 100
+run 10000
+```
+
+The fix contributes virial information, so barostats (`npt`, `nph`) work
+correctly. Energy is accessible via `f_mlip` in thermo output.
+
+### Notes
+
+- Requires `units metal`. The fix checks this at startup.
+- Use `pair_style zero` unless you intentionally want to combine potentials
+  (the fix adds forces via `+=`).
+- Single-node only — the worker sees all atoms and computes its own
+  neighborhoods.

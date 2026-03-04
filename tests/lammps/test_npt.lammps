@@ -1,0 +1,32 @@
+# NPT stability test — 200-step NPT trajectory
+#
+# Prerequisites:
+#   1. Generate reference structure: python reference_pressure.py
+#
+# Run:
+#   mpirun -np 1 lmp_gpu -in test_npt.lammps
+#
+# Pass criteria: completes without crashes/hangs/NaN, volume fluctuates.
+
+units           metal
+atom_style      atomic
+boundary        p p p
+
+read_data       reference_structure.data
+mass            1 63.546
+
+pair_style      zero 6.0
+pair_coeff      * *
+
+fix             mlip all rootstock cluster della model mace checkpoint medium device cpu elements Cu
+
+velocity        all create 300 12345
+fix             npt_int all npt temp 300 300 0.1 iso 0 0 1.0
+timestep        0.001
+
+thermo_style    custom step temp pe ke press vol f_mlip
+thermo          10
+
+run             200
+
+print "NPT TEST PASSED"
