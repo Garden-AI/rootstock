@@ -3,7 +3,7 @@
 # dependencies = [
 #     "torch>=2.4.0",
 #     "ase>=3.22",
-#     "matgl @ git+https://github.com/materialsvirtuallab/matgl.git",
+#     "matgl",
 #     "nvalchemi-toolkit-ops",
 #     "torch-geometric",
 #     "torch-scatter",
