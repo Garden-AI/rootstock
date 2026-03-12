@@ -102,14 +102,11 @@ The worker process uses a pre-built virtual environment, providing:
 ## CLI Commands
 
 ```bash
-# Build a pre-built environment
-rootstock build <env_name> --root <path> [--models m1,m2] [--force]
+# Install a pre-built environment
+rootstock install <env_name> --root <path> [--models m1,m2] [--force]
 
 # Show status
 rootstock status --root <path>
-
-# Register an environment source file
-rootstock register <env_file> --root <path>
 
 # List environments
 rootstock list --root <path>
@@ -119,34 +116,54 @@ rootstock list --root <path>
 
 Environments must be pre-built before users can run calculations.
 
-### 1. Create Directory Structure
+### 1. Initalize rootstock
 
 ```bash
-mkdir -p /scratch/gpfs/ROSENGROUP/common/rootstock/{environments,envs,cache,home}
+rootstock init
 ```
 
-### 2. Register Environment Source Files
+`init` will prompt you for the following values:
+- root -- the roostock root directory
+- api_key -- optional, auth key needed to push the manifest to the backend API
+- api_secret -- optional, auth secret needed to push the manifest to the backend API
+- api_url -- optional, the url for the backend API
+- maintainer name -- the name of the primary administrator of the rootstock installation
+- maintainer email -- the email address of the primary administrator of the rootstock installation
+
+The api_key and api_secret are Modal [Proxy Auth Tokens](https://modal.com/docs/guide/webhook-proxy-auth). Contact
+a rootstock maintainer if you need access to the API.
+
+### 2. Install Environments
 
 ```bash
-rootstock register environments/mace_env.py --root /scratch/gpfs/ROSENGROUP/common/rootstock
-rootstock register environments/chgnet_env.py --root /scratch/gpfs/ROSENGROUP/common/rootstock
-rootstock register environments/uma_env.py --root /scratch/gpfs/ROSENGROUP/common/rootstock
-rootstock register environments/tensornet_env.py --root /scratch/gpfs/ROSENGROUP/common/rootstock
-```
+ROOTSTOCK_ROOT=/scratch/gpfs/ROSENGROUP/common/rootstock
 
-### 3. Build Environments
+rootstock install mace_env --models small,medium
+rootstock install chgnet_env
+rootstock install uma_env --models uma-s-1p1
+rootstock install tensornet_env
 
-```bash
-ROOT=/scratch/gpfs/ROSENGROUP/common/rootstock
-
-rootstock build mace_env --root $ROOT --models small,medium
-rootstock build chgnet_env --root $ROOT
-rootstock build uma_env --root $ROOT --models uma-s-1p1
-rootstock build tensornet_env --root $ROOT
+# or point it at a direcrory with multiple environments
+rootstock install ./environments/
 
 # Verify
-rootstock status --root $ROOT
+rootstock status
 ```
+
+### 3. Manage the manifest 
+
+Roostock automatically tracks information about the installed environments where it is deployed in `ROOTSTOCK_ROOT/manifest.json`.
+When changes are made to installed environments or new environments are added, the manifest is automatically updated.
+
+Rootstock attempts to push the manifest to the backend any time a change is made.
+
+There are two backend routes, one for development purposes and one for production.
+
+Dev api url: `https://garden-ai-dev--rootstock-admin-manifest.modal.run`
+Dev admin page: `https://garden-ai-dev--rootstock-admin-dashboard.modal.run`
+
+Prod api url: `https://garden-ai-prod--rootstock-admin-manifest.modal.run`
+Prod admin page: `https://garden-ai-prod--rootstock-admin-dashboard.modal.run`
 
 ## Local Development
 
