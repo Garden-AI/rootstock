@@ -39,3 +39,20 @@ def get_root_for_cluster(cluster: str) -> Path:
             f"Use root='/path/to/rootstock' for custom locations."
         )
     return Path(CLUSTER_REGISTRY[cluster])
+
+
+def get_cluster_for_root(root: Path | str) -> str | None:
+    """
+    Get cluster name for a given root path (reverse lookup).
+
+    Args:
+        root: Path to a rootstock root directory
+
+    Returns:
+        Cluster name if root matches a known cluster, None otherwise.
+    """
+    root_str = str(root)
+    for cluster, path in CLUSTER_REGISTRY.items():
+        if root_str == path:
+            return cluster
+    return None

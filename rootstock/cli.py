@@ -20,6 +20,7 @@ Commands:
 """
 
 import argparse
+import json as json_module
 import os
 import shutil
 import signal
@@ -28,21 +29,191 @@ import sys
 import tempfile
 from pathlib import Path
 
+from .client import RootstockClient
+from .clusters import get_cluster_for_root
+from .config import (
+    DEFAULT_CONFIG_FILE,
+    load_config,
+    save_config,
+)
+from .manifest import (
+    EnvironmentInfo,
+    Manifest,
+    compute_source_hash,
+    create_manifest,
+    get_installed_versions,
+    load_manifest,
+    now_iso,
+    save_manifest,
+)
+from .pep723 import get_dependencies, get_requires_python
+
 # Environment variable for default root directory
 ROOTSTOCK_ROOT_ENV = "ROOTSTOCK_ROOT"
 
 
+def prompt_with_default(prompt: str, default: str | None = None) -> str | None:
+    """Prompt for input with an optional default value."""
+    if default:
+        full_prompt = f"{prompt} [{default}]: "
+    else:
+        full_prompt = f"{prompt}: "
+
+    value = input(full_prompt).strip()
+    if not value and default:
+        return default
+    return value if value else None
+
+
+def prompt_secret(prompt: str, existing: str | None = None) -> str | None:
+    """Prompt for a secret value without displaying it."""
+    if existing:
+        # Show that a value exists but don't reveal it
+        full_prompt = f"{prompt} [configured]: "
+    else:
+        full_prompt = f"{prompt}: "
+
+    value = input(full_prompt).strip()
+    if not value and existing:
+        return existing
+    return value if value else None
+
+
+def cmd_init(args) -> int:
+    """
+    Interactive initialization of rootstock configuration.
+
+    Prompts user for:
+    - Root directory
+    - Maintainer name and email
+    - API credentials (optional)
+
+    Creates the directory structure and saves config.
+    """
+    from .clusters import CLUSTER_REGISTRY
+
+    print("Welcome to Rootstock!")
+    print("This will help you set up your configuration.\n")
+
+    config = load_config()
+
+    # Prompt for root directory
+    print("Root directory is where environments and caches are stored.")
+    print(f"Known clusters: {', '.join(CLUSTER_REGISTRY.keys())}")
+    print("You can enter a cluster name or a custom path.\n")
+
+    root_default = config.root or os.environ.get(ROOTSTOCK_ROOT_ENV)
+    root_input = prompt_with_default("Root directory", root_default)
+
+    if not root_input:
+        print("Error: Root directory is required.", file=sys.stderr)
+        return 1
+
+    # Check if input is a cluster name
+    if root_input in CLUSTER_REGISTRY:
+        cluster = root_input
+        root = Path(CLUSTER_REGISTRY[root_input])
+        print(f"  -> Using cluster '{cluster}' root: {root}")
+    else:
+        root = Path(root_input).expanduser().resolve()
+        cluster = get_cluster_for_root(root)
+        if cluster:
+            print(f"  -> Detected cluster: {cluster}")
+
+    config.root = str(root)
+
+    print()
+
+    # Prompt for maintainer info
+    print("Maintainer information (shown in manifests):")
+    config.name = prompt_with_default("  Name", config.name)
+    config.email = prompt_with_default("  Email", config.email)
+
+    print()
+
+    # Prompt for API credentials (optional)
+    print("API credentials for pushing manifests (optional, press Enter to skip):")
+    api_key = prompt_secret("  API Key", config.api_key)
+    if api_key:
+        config.api_key = api_key
+        config.api_secret = prompt_secret("  API Secret", config.api_secret)
+        config.api_url = prompt_with_default("  API URL", config.api_url)
+
+    print()
+
+    # Save configuration
+    save_config(config)
+    print(f"Configuration saved to {DEFAULT_CONFIG_FILE}")
+
+    # Create directory structure
+    if not args.skip_dirs:
+        print("\nCreating directory structure...")
+        dirs_to_create = [
+            root / "environments",
+            root / "envs",
+            root / "cache",
+            root / "home",
+            root / ".python",
+        ]
+
+        for dir_path in dirs_to_create:
+            if not dir_path.exists():
+                try:
+                    dir_path.mkdir(parents=True, exist_ok=True)
+                    print(f"  Created: {dir_path}")
+                except PermissionError:
+                    print(f"  Skipped (no permission): {dir_path}")
+            else:
+                print(f"  Exists:  {dir_path}")
+
+    # Initialize manifest if we have a cluster
+    if cluster and not args.skip_manifest:
+        print("\nInitializing manifest...")
+        manifest = create_manifest(root, cluster, config)
+        save_manifest(manifest, root)
+        print(f"  Created: {root}/manifest.json")
+
+        # Push if configured
+        if config.is_push_enabled():
+            from .client import RootstockClient
+
+            client = RootstockClient(config)
+            success, message = client.push_manifest(manifest)
+            if success:
+                print(f"  Pushed manifest: {message}")
+            else:
+                print(f"  Warning: Failed to push: {message}", file=sys.stderr)
+
+    print("\nSetup complete!")
+    print("\nNext steps:")
+    print("  1. Install environments: rootstock install <env_file.py>")
+    print("  2. Check status: rootstock status")
+
+    return 0
+
+
 def get_root_or_exit(args) -> Path:
     """
-    Get the root directory from args or environment variable.
+    Get the root directory from args, environment variable, or config file.
 
-    Exits with an error message if neither is set.
+    Priority:
+    1. --root CLI flag
+    2. ROOTSTOCK_ROOT environment variable
+    3. root in ~/.config/rootstock/config.toml
+
+    Exits with an error message if none are set.
     """
     if args.root:
         return Path(args.root)
 
+    # Check config file as fallback
+    config = load_config()
+    if config.root:
+        return Path(config.root)
+
     print(
-        f"Error: --root is required (or set {ROOTSTOCK_ROOT_ENV} environment variable)",
+        f"Error: --root is required (or set {ROOTSTOCK_ROOT_ENV} environment variable, "
+        "or configure root in ~/.config/rootstock/config.toml)",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -330,6 +501,10 @@ print(f"Downloaded model: {model}")
                     print(result.stderr, file=sys.stderr)
 
     print(f"\nBuilt environment: {env_target}")
+
+    # Update manifest (quiet=True to avoid cluttering build output)
+    update_and_push_manifest(root, quiet=False)
+
     return 0
 
 
@@ -573,12 +748,354 @@ def cmd_serve(args) -> int:
     return rc
 
 
+def update_and_push_manifest(
+    root: Path,
+    cluster: str | None = None,
+    quiet: bool = False,
+) -> bool:
+    """
+    Update manifest with current state and push to backend.
+
+    Called after any state-changing operation.
+
+    Args:
+        root: Rootstock root directory
+        cluster: Cluster name (optional, will try to detect)
+        quiet: Suppress output
+
+    Returns:
+        True if push succeeded or was skipped (no API key), False on error
+    """
+    config = load_config()
+
+    # Load existing manifest first
+    manifest = load_manifest(root)
+
+    # Determine cluster: provided > existing manifest > detect from path
+    if cluster is None:
+        if manifest is not None:
+            cluster = manifest.cluster
+        else:
+            cluster = get_cluster_for_root(root)
+
+    if cluster is None:
+        if not quiet:
+            print(
+                "Warning: Cannot update manifest - cluster not specified and "
+                "root doesn't match any known cluster. "
+                "Run 'rootstock manifest init --cluster <name>' first.",
+                file=sys.stderr,
+            )
+        return False
+
+    # Create manifest if it doesn't exist
+    if manifest is None:
+        manifest = create_manifest(root, cluster, config)
+
+    # Refresh environment info from current state
+    manifest = _refresh_manifest_environments(manifest, root)
+
+    # Save locally
+    save_manifest(manifest, root)
+
+    # Push to backend if configured
+    if config.is_push_enabled():
+        client = RootstockClient(config)
+        success, message = client.push_manifest(manifest)
+        if not quiet:
+            if success:
+                print(f"Manifest pushed: {message}")
+            else:
+                print(
+                    f"Warning: Failed to push manifest: {message}",
+                    file=sys.stderr,
+                )
+                print(
+                    "Manifest saved locally. Run 'rootstock manifest push' to retry.",
+                    file=sys.stderr,
+                )
+        return success
+
+    return True  # No API key = skip push (not an error)
+
+
+def _refresh_manifest_environments(manifest: Manifest, root: Path) -> Manifest:
+    """
+    Update manifest with current environment state.
+
+    Scans built environments and updates their info in the manifest.
+    """
+    from . import __version__
+    from .environment import list_built_environments
+
+    # Update rootstock version
+    manifest.rootstock_version = __version__
+
+    # Get current built environments
+    built = list_built_environments(root)
+
+    for env_name, env_path in built:
+        # Check if env_source.py exists
+        source_file = env_path / "env_source.py"
+        if not source_file.exists():
+            continue
+
+        # Get source hash and content
+        source_hash = compute_source_hash(source_file)
+        source_content = source_file.read_text()
+
+        # Get python requires from source
+        python_requires = get_requires_python(source_file) or ">=3.10"
+
+        # Get direct dependencies from source
+        direct_deps = get_dependencies(source_file)
+        # Always track rootstock itself
+        if "rootstock" not in [d.lower() for d in direct_deps]:
+            direct_deps.append("rootstock")
+
+        # Get installed package versions (filtered to direct dependencies)
+        dependencies = get_installed_versions(env_path, only_packages=direct_deps)
+
+        # Get checkpoints (from existing manifest if available)
+        existing_env = manifest.environments.get(env_name)
+        checkpoints = existing_env.checkpoints if existing_env else []
+
+        manifest.environments[env_name] = EnvironmentInfo(
+            status="ready",
+            built_at=existing_env.built_at if existing_env else now_iso(),
+            source_hash=source_hash,
+            source=source_content,
+            python_requires=python_requires,
+            dependencies=dependencies,
+            checkpoints=checkpoints,
+        )
+
+    return manifest
+
+
+# ============================================================================
+# Config commands
+# ============================================================================
+
+
+def cmd_config(args) -> int:
+    """Handle config subcommands."""
+    if args.config_action == "show":
+        return cmd_config_show(args)
+    elif args.config_action == "set":
+        return cmd_config_set(args)
+    return 0
+
+
+def cmd_config_show(args) -> int:
+    """Show current configuration."""
+    config = load_config()
+
+    print(f"Config file: {DEFAULT_CONFIG_FILE}")
+    print()
+
+    print(f"root:       {config.root or '(not set)'}")
+
+    # Mask API key and secret for display
+    if config.api_key:
+        masked_key = "*" * 8 + config.api_key[-4:]
+        print(f"api_key:    {masked_key}")
+    else:
+        print("api_key:    (not set)")
+
+    if config.api_secret:
+        masked_secret = "*" * 8 + config.api_secret[-4:]
+        print(f"api_secret: {masked_secret}")
+    else:
+        print("api_secret: (not set)")
+
+    print(f"api_url:    {config.api_url or '(not set)'}")
+    print()
+    print("[maintainer]")
+    print(f"name:       {config.name or '(not set)'}")
+    print(f"email:      {config.email or '(not set)'}")
+
+    return 0
+
+
+def cmd_config_set(args) -> int:
+    """Set configuration values."""
+    config = load_config()
+
+    if args.root:
+        config.root = args.root
+    if args.api_key:
+        config.api_key = args.api_key
+    if args.api_secret:
+        config.api_secret = args.api_secret
+    if args.api_url:
+        config.api_url = args.api_url
+    if args.name:
+        config.name = args.name
+    if args.email:
+        config.email = args.email
+
+    save_config(config)
+    print(f"Configuration saved to {DEFAULT_CONFIG_FILE}")
+    return 0
+
+
+# ============================================================================
+# Manifest commands
+# ============================================================================
+
+
+def cmd_manifest(args) -> int:
+    """Handle manifest subcommands."""
+    if args.manifest_action == "show":
+        return cmd_manifest_show(args)
+    elif args.manifest_action == "push":
+        return cmd_manifest_push(args)
+    elif args.manifest_action == "init":
+        return cmd_manifest_init(args)
+    return 0
+
+
+def cmd_manifest_show(args) -> int:
+    """Show current manifest."""
+    root = get_root_or_exit(args)
+    manifest = load_manifest(root)
+
+    if manifest is None:
+        print(f"No manifest found at {root}/manifest.json", file=sys.stderr)
+        print("Run 'rootstock manifest init --cluster <name>' to create one.", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json_module.dumps(manifest.to_dict(), indent=2))
+    else:
+        print(f"Manifest: {root}/manifest.json")
+        print(f"  Schema version:    {manifest.schema_version}")
+        print(f"  Cluster:           {manifest.cluster}")
+        print(f"  Root:              {manifest.root}")
+        print(f"  Rootstock version: {manifest.rootstock_version}")
+        print(f"  Python version:    {manifest.python_version}")
+        print(f"  Last updated:      {manifest.last_updated}")
+        print()
+        print("  Maintainer:")
+        print(f"    Name:  {manifest.maintainer.name}")
+        print(f"    Email: {manifest.maintainer.email}")
+        print()
+        print(f"  Environments ({len(manifest.environments)}):")
+        for name, env in manifest.environments.items():
+            print(f"    {name}:")
+            print(f"      Status:       {env.status}")
+            print(f"      Built at:     {env.built_at}")
+            print(f"      Source hash:  {env.source_hash[:20]}...")
+            print(f"      Dependencies: {len(env.dependencies)} packages")
+            if env.checkpoints:
+                print(f"      Checkpoints:  {', '.join(env.checkpoints)}")
+
+    return 0
+
+
+def cmd_manifest_push(args) -> int:
+    """Push manifest to backend."""
+    root = get_root_or_exit(args)
+    config = load_config()
+
+    # Validate config
+    valid, error = config.validate()
+    if not valid:
+        print(f"Error: {error}", file=sys.stderr)
+        print(
+            "Run 'rootstock config set --api-key <key> --api-secret <secret> "
+            "--api-url <url>' to configure.",
+            file=sys.stderr,
+        )
+        return 1
+
+    manifest = load_manifest(root)
+    if manifest is None:
+        print(f"No manifest found at {root}/manifest.json", file=sys.stderr)
+        return 1
+
+    # Validate manifest
+    valid, error = manifest.validate()
+    if not valid:
+        print(f"Error: Invalid manifest: {error}", file=sys.stderr)
+        return 1
+
+    client = RootstockClient(config)
+    success, message = client.push_manifest(manifest)
+
+    if success:
+        print(message)
+        return 0
+    else:
+        print(f"Error: {message}", file=sys.stderr)
+        return 1
+
+
+def cmd_manifest_init(args) -> int:
+    """Initialize manifest for a cluster."""
+    root = get_root_or_exit(args)
+    cluster = args.cluster
+    config = load_config()
+
+    # Check if manifest already exists
+    existing = load_manifest(root)
+    if existing and not args.force:
+        print(f"Error: Manifest already exists at {root}/manifest.json", file=sys.stderr)
+        print("Use --force to overwrite.", file=sys.stderr)
+        return 1
+
+    # Check maintainer info is configured
+    if not config.name or not config.email:
+        print("Warning: Maintainer info not configured.", file=sys.stderr)
+        print("Run 'rootstock config set --name <name> --email <email>' to set.", file=sys.stderr)
+
+    # Create and save manifest
+    manifest = create_manifest(root, cluster, config)
+    manifest = _refresh_manifest_environments(manifest, root)
+    save_manifest(manifest, root)
+
+    print(f"Manifest initialized: {root}/manifest.json")
+    print(f"  Cluster: {cluster}")
+    print(f"  Environments: {len(manifest.environments)}")
+
+    # Push if configured
+    if config.is_push_enabled():
+        client = RootstockClient(config)
+        success, message = client.push_manifest(manifest)
+        if success:
+            print(f"Manifest pushed: {message}")
+        else:
+            print(f"Warning: Failed to push manifest: {message}", file=sys.stderr)
+            print("Run 'rootstock manifest push' to retry.", file=sys.stderr)
+
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="rootstock",
         description="Rootstock MLIP environment manager",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # init command
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Interactive setup of rootstock configuration",
+        description="Guided setup for root directory, maintainer info, and API credentials.",
+    )
+    init_parser.add_argument(
+        "--skip-dirs",
+        action="store_true",
+        help="Skip creating directory structure",
+    )
+    init_parser.add_argument(
+        "--skip-manifest",
+        action="store_true",
+        help="Skip initializing manifest",
+    )
+    init_parser.set_defaults(func=cmd_init)
 
     # install command
     install_parser = subparsers.add_parser(
@@ -659,6 +1176,95 @@ def main():
     serve_parser.add_argument("--checkpoint", required=True, help="Checkpoint/weights name")
     serve_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
     serve_parser.set_defaults(func=cmd_serve)
+
+    # config command
+    config_parser = subparsers.add_parser(
+        "config",
+        help="Manage user configuration",
+        description="Manage user configuration (API key, maintainer info).",
+    )
+    config_subparsers = config_parser.add_subparsers(
+        dest="config_action",
+        required=True,
+    )
+
+    # config show
+    config_show_parser = config_subparsers.add_parser(
+        "show",
+        help="Show current configuration",
+    )
+    config_show_parser.set_defaults(func=cmd_config)
+
+    # config set
+    config_set_parser = config_subparsers.add_parser(
+        "set",
+        help="Set configuration values",
+    )
+    config_set_parser.add_argument("--root", help="Default rootstock root directory")
+    config_set_parser.add_argument("--api-key", dest="api_key", help="API key for backend")
+    config_set_parser.add_argument("--api-secret", dest="api_secret", help="API secret for backend")
+    config_set_parser.add_argument("--api-url", dest="api_url", help="API URL for backend")
+    config_set_parser.add_argument("--name", help="Maintainer name")
+    config_set_parser.add_argument("--email", help="Maintainer email")
+    config_set_parser.set_defaults(func=cmd_config)
+
+    # manifest command
+    manifest_parser = subparsers.add_parser(
+        "manifest",
+        help="Manage installation manifest",
+        description="Manage the manifest that tracks installation state.",
+    )
+    manifest_subparsers = manifest_parser.add_subparsers(
+        dest="manifest_action",
+        required=True,
+    )
+
+    # manifest show
+    manifest_show_parser = manifest_subparsers.add_parser(
+        "show",
+        help="Show current manifest",
+    )
+    manifest_show_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    manifest_show_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    manifest_show_parser.set_defaults(func=cmd_manifest)
+
+    # manifest push
+    manifest_push_parser = manifest_subparsers.add_parser(
+        "push",
+        help="Push manifest to backend",
+    )
+    manifest_push_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    manifest_push_parser.set_defaults(func=cmd_manifest)
+
+    # manifest init
+    manifest_init_parser = manifest_subparsers.add_parser(
+        "init",
+        help="Initialize manifest for a cluster",
+    )
+    manifest_init_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    manifest_init_parser.add_argument(
+        "--cluster",
+        required=True,
+        help="Cluster name (e.g., della, modal)",
+    )
+    manifest_init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing manifest",
+    )
+    manifest_init_parser.set_defaults(func=cmd_manifest)
 
     args = parser.parse_args()
     sys.exit(args.func(args))
