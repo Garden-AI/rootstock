@@ -635,6 +635,9 @@ def cmd_status(args) -> int:
     else:
         print("  (no cache directory)")
 
+    # Show config file location
+    print(f"\nConfig file: {DEFAULT_CONFIG_FILE}")
+
     return 0
 
 
@@ -874,73 +877,6 @@ def _refresh_manifest_environments(manifest: Manifest, root: Path) -> Manifest:
 
 
 # ============================================================================
-# Config commands
-# ============================================================================
-
-
-def cmd_config(args) -> int:
-    """Handle config subcommands."""
-    if args.config_action == "show":
-        return cmd_config_show(args)
-    elif args.config_action == "set":
-        return cmd_config_set(args)
-    return 0
-
-
-def cmd_config_show(args) -> int:
-    """Show current configuration."""
-    config = load_config()
-
-    print(f"Config file: {DEFAULT_CONFIG_FILE}")
-    print()
-
-    print(f"root:       {config.root or '(not set)'}")
-
-    # Mask API key and secret for display
-    if config.api_key:
-        masked_key = "*" * 8 + config.api_key[-4:]
-        print(f"api_key:    {masked_key}")
-    else:
-        print("api_key:    (not set)")
-
-    if config.api_secret:
-        masked_secret = "*" * 8 + config.api_secret[-4:]
-        print(f"api_secret: {masked_secret}")
-    else:
-        print("api_secret: (not set)")
-
-    print(f"api_url:    {config.api_url or '(not set)'}")
-    print()
-    print("[maintainer]")
-    print(f"name:       {config.name or '(not set)'}")
-    print(f"email:      {config.email or '(not set)'}")
-
-    return 0
-
-
-def cmd_config_set(args) -> int:
-    """Set configuration values."""
-    config = load_config()
-
-    if args.root:
-        config.root = args.root
-    if args.api_key:
-        config.api_key = args.api_key
-    if args.api_secret:
-        config.api_secret = args.api_secret
-    if args.api_url:
-        config.api_url = args.api_url
-    if args.name:
-        config.name = args.name
-    if args.email:
-        config.email = args.email
-
-    save_config(config)
-    print(f"Configuration saved to {DEFAULT_CONFIG_FILE}")
-    return 0
-
-
-# ============================================================================
 # Manifest commands
 # ============================================================================
 
@@ -1176,37 +1112,6 @@ def main():
     serve_parser.add_argument("--checkpoint", required=True, help="Checkpoint/weights name")
     serve_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
     serve_parser.set_defaults(func=cmd_serve)
-
-    # config command
-    config_parser = subparsers.add_parser(
-        "config",
-        help="Manage user configuration",
-        description="Manage user configuration (API key, maintainer info).",
-    )
-    config_subparsers = config_parser.add_subparsers(
-        dest="config_action",
-        required=True,
-    )
-
-    # config show
-    config_show_parser = config_subparsers.add_parser(
-        "show",
-        help="Show current configuration",
-    )
-    config_show_parser.set_defaults(func=cmd_config)
-
-    # config set
-    config_set_parser = config_subparsers.add_parser(
-        "set",
-        help="Set configuration values",
-    )
-    config_set_parser.add_argument("--root", help="Default rootstock root directory")
-    config_set_parser.add_argument("--api-key", dest="api_key", help="API key for backend")
-    config_set_parser.add_argument("--api-secret", dest="api_secret", help="API secret for backend")
-    config_set_parser.add_argument("--api-url", dest="api_url", help="API URL for backend")
-    config_set_parser.add_argument("--name", help="Maintainer name")
-    config_set_parser.add_argument("--email", help="Maintainer email")
-    config_set_parser.set_defaults(func=cmd_config)
 
     # manifest command
     manifest_parser = subparsers.add_parser(
