@@ -136,8 +136,6 @@ a rootstock maintainer if you need access to the API.
 ### 2. Install Environments
 
 ```bash
-ROOTSTOCK_ROOT=/scratch/gpfs/ROSENGROUP/common/rootstock
-
 rootstock install mace_env --models small,medium
 rootstock install chgnet_env
 rootstock install uma_env --models uma-s-1p1
