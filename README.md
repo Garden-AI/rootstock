@@ -165,6 +165,9 @@ Dev admin page: `https://garden-ai-dev--rootstock-admin-dashboard.modal.run`
 Prod api url: `https://garden-ai-prod--rootstock-admin-manifest.modal.run`
 Prod admin page: `https://garden-ai-prod--rootstock-admin-dashboard.modal.run`
 
+If pushing the manifest fails due to a network error, or misconfigued api keys, it can be manually pushed with
+`rootstock manifest push`
+
 ## Local Development
 
 ```bash
