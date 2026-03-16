@@ -18,7 +18,7 @@ Commands:
 
     rootstock status [--root <path>]
     rootstock list [--root <path>]
-    rootstock serve <model> [--root <path>] --socket <path> --checkpoint <name> [--device <dev>]
+    rootstoc serve <model> [--root <path>] --socket <path> --checkpoint <name> [--device <dev>]
     rootstock resolve --cluster <name> [--json]
 """
 

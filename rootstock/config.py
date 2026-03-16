@@ -46,6 +46,7 @@ class UserConfig:
     api_url: str | None = None
     name: str | None = None
     email: str | None = None
+    is_maintainer: bool = False
 
     def is_push_enabled(self) -> bool:
         """Check if api_key, api_secret, and api_url are configured for pushing."""
@@ -92,6 +93,7 @@ def load_config(config_path: Path | None = None) -> UserConfig:
         config.api_key = data.get("api_key")
         config.api_secret = data.get("api_secret")
         config.api_url = data.get("api_url")
+        config.is_maintainer = data.get("is_maintainer", False)
         maintainer = data.get("maintainer", {})
         config.name = maintainer.get("name")
         config.email = maintainer.get("email")
@@ -121,6 +123,7 @@ def save_config(config: UserConfig, config_path: Path | None = None) -> None:
     lines = []
     if config.root:
         lines.append(f'root = "{config.root}"')
+    lines.append(f"is_maintainer = {str(config.is_maintainer).lower()}")
     if config.api_key:
         lines.append(f'api_key = "{config.api_key}"')
     if config.api_secret:

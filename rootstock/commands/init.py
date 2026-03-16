@@ -10,6 +10,7 @@ from ..clusters import CLUSTER_REGISTRY, get_cluster_for_root
 from ..config import DEFAULT_CONFIG_FILE, load_config, save_config
 from ..manifest import create_manifest, save_manifest
 from .common import ROOTSTOCK_ROOT_ENV
+from .manifest import _refresh_manifest_environments
 
 
 def prompt_with_default(prompt: str, default: str | None = None) -> str | None:
@@ -82,22 +83,33 @@ def cmd_init(args) -> int:
 
     print()
 
-    # Prompt for maintainer info
-    print("Maintainer information (shown in manifests):")
-    config.name = prompt_with_default("  Name", config.name)
-    config.email = prompt_with_default("  Email", config.email)
+    # Ask if user is the maintainer
+    print("Are you the maintainer of this rootstock installation?")
+    print("Maintainers can configure API credentials to push manifests to the backend.")
+    is_maintainer_input = prompt_with_default("Maintainer (y/n)", "n")
+    config.is_maintainer = is_maintainer_input.lower() in ("y", "yes")
 
     print()
 
-    # Prompt for API credentials (optional)
-    print("API credentials for pushing manifests (optional, press Enter to skip):")
-    api_key = prompt_secret("  API Key", config.api_key)
-    if api_key:
-        config.api_key = api_key
-        config.api_secret = prompt_secret("  API Secret", config.api_secret)
-        config.api_url = prompt_with_default("  API URL", config.api_url)
+    if config.is_maintainer:
+        # Prompt for maintainer info
+        print("Maintainer information (shown in manifests):")
+        config.name = prompt_with_default("  Name", config.name)
+        config.email = prompt_with_default("  Email", config.email)
 
-    print()
+        print()
+
+        # Prompt for API credentials (optional)
+        print("API credentials for pushing manifests (optional, press Enter to skip):")
+        api_key = prompt_secret("  API Key", config.api_key)
+        if api_key:
+            config.api_key = api_key
+            config.api_secret = prompt_secret("  API Secret", config.api_secret)
+            config.api_url = prompt_with_default("  API URL", config.api_url)
+
+        print()
+    else:
+        print("Skipping maintainer and API configuration.")
 
     # Save configuration
     save_config(config)
@@ -128,11 +140,15 @@ def cmd_init(args) -> int:
     if cluster and not args.skip_manifest:
         print("\nInitializing manifest...")
         manifest = create_manifest(root, cluster, config)
+        # Scan for existing built environments
+        manifest = _refresh_manifest_environments(manifest, root)
         save_manifest(manifest, root)
         print(f"  Created: {root}/manifest.json")
+        if manifest.environments:
+            print(f"  Found {len(manifest.environments)} existing environment(s)")
 
-        # Push if configured
-        if config.is_push_enabled():
+        # Push if configured AND user is maintainer
+        if config.is_maintainer and config.is_push_enabled():
             from ..client import RootstockClient
 
             client = RootstockClient(config)
