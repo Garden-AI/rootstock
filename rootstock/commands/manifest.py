@@ -73,8 +73,8 @@ def update_and_push_manifest(
     # Save locally
     save_manifest(manifest, root)
 
-    # Push to backend if configured
-    if config.is_push_enabled():
+    # Push to backend only if user is maintainer and API is configured
+    if config.is_maintainer and config.is_push_enabled():
         client = RootstockClient(config)
         success, message = client.push_manifest(manifest)
         if not quiet:
@@ -90,8 +90,10 @@ def update_and_push_manifest(
                     file=sys.stderr,
                 )
         return success
+    elif not config.is_maintainer and not quiet:
+        print("Manifest saved locally (not pushing - you are not the maintainer).")
 
-    return True  # No API key = skip push (not an error)
+    return True  # Not maintainer or no API key = skip push (not an error)
 
 
 def _refresh_manifest_environments(manifest: Manifest, root: Path) -> Manifest:
@@ -264,8 +266,8 @@ def cmd_manifest_init(args) -> int:
     print(f"  Cluster: {cluster}")
     print(f"  Environments: {len(manifest.environments)}")
 
-    # Push if configured
-    if config.is_push_enabled():
+    # Push if configured AND user is maintainer
+    if config.is_maintainer and config.is_push_enabled():
         client = RootstockClient(config)
         success, message = client.push_manifest(manifest)
         if success:
@@ -273,5 +275,7 @@ def cmd_manifest_init(args) -> int:
         else:
             print(f"Warning: Failed to push manifest: {message}", file=sys.stderr)
             print("Run 'rootstock manifest push' to retry.", file=sys.stderr)
+    elif not config.is_maintainer:
+        print("Manifest saved locally (not pushing - you are not the maintainer).")
 
     return 0
