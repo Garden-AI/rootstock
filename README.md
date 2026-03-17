@@ -1,8 +1,21 @@
 # Rootstock
 
-A proof-of-concept package for running MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments, communicating via the i-PI protocol over Unix sockets. Currently deployed on Princeton's Della cluster.
+Rootstock makes it easier to use machine learning interatomic potentials (MLIPs) on academic HPC clusters. Rootstock lets researchers use multiple MLIPs (MACE, CHGNet, UMA, TensorNet, and others) through a single interface, without managing the conflicting Python environments that each one requires.
+
+Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment behind the scenes. Swapping models is a one-line change, even if the MLIPs require different Python or library versions. Rootstock also integrates with LAMMPS through a `fix` with any supported MLIP.
+
+## Status
+
+Rootstock is **early-stage software under active development.** It is currently deployed on two HPC clusters:
+
+- **Della** — Princeton Research Computing
+- **Sophia** — Argonne Leadership Computing Facility (ALCF)
+
+We are looking for additional clusters and early users to help shape the tool. If you're interested in trying Rootstock on your cluster or for a specific project, please reach out to Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
 
 ## Quick Start
+
+Rootstock is designed for use on an HPC cluster where it has already been set up by a maintainer. The code below runs in your normal Python environment — inside a SLURM job script, an interactive session, or a Jupyter notebook on the cluster. Rootstock handles the MLIP environment isolation.
 
 ```python
 from ase.build import bulk
@@ -21,12 +34,11 @@ with RootstockCalculator(
     print(atoms.get_forces())
 ```
 
-This runs locally where rootstock is configured, see [Architecture](#architecture) for details. The model runs in an isolated environment, making it trivial
-to use a different MLIP in your workflow by changing the `model='...'` arg. See [Available Models](#available-models) below.
-
-**Note:** Environments must be pre-built before use. See [Administrator Setup](#administrator-setup).
+Changing `model="mace"` to `model="uma"` or `model="tensornet"` swaps the underlying potential — no other changes needed.
 
 ## Installation
+
+Users install only the lightweight `rootstock` package. The heavy ML dependencies (PyTorch, MACE, FAIRChem, etc.) live in the pre-built environments on the cluster.
 
 ```bash
 pip install rootstock
@@ -36,36 +48,32 @@ uv pip install rootstock
 
 ## API
 
-The `model` parameter selects the environment family. The optional `checkpoint` parameter selects specific model weights (defaults to the environment's default if omitted).
+The `model` parameter selects the MLIP family. The optional `checkpoint` parameter selects specific model weights (defaults to each environment's default if omitted).
 
 ```python
 # Explicit checkpoint
 RootstockCalculator(cluster="della", model="mace", checkpoint="medium")
 
-# Default checkpoint (each environment has a sensible default)
+# Default checkpoint (each environment defines a sensible default)
 RootstockCalculator(cluster="della", model="uma")
 
 # Custom root path instead of a known cluster
-RootstockCalculator(root="/scratch/gpfs/ROSENGROUP/common/rootstock", model="mace")
+RootstockCalculator(root="/scratch/gpfs/specific/install/path/rootstock", model="mace")
 ```
 
 ## Available Models
 
-| Model | Checkpoint | Description |
-|-------|------------|-------------|
-| `mace` | `small` | MACE-MP-0 small |
-| `mace` | `medium` (default) | MACE-MP-0 medium |
-| `chgnet` | _(pretrained)_ | CHGNet pretrained universal model |
-| `uma` | `uma-s-1p1` (default) | Meta UMA small model (FAIRChem) |
-| `tensornet` | `TensorNet-MatPES-PBE-v2025.1-PES` (default) | TensorNet MatPES PBE (MatGL) |
+The set of available models varies by cluster and changes as new environments are added. See the [live dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for what is currently deployed on each cluster.
 
 ## Architecture
 
+When you create a `RootstockCalculator`, Rootstock spawns a subprocess that runs the MLIP in its own pre-built virtual environment. The main process and worker communicate over a Unix domain socket using the [i-PI protocol](http://ipi-code.org/). This happens on a single node (no remote network calls).
+
 ```
-Main Process                          Worker Process (subprocess)
+Your script (on cluster node)          Worker subprocess
 +-------------------------+          +-----------------------------+
-| RootstockCalculator     |          | Pre-built venv Python       |
-| (ASE-compatible)        |          | (mace_env/bin/python)       |
+| RootstockCalculator     |          | Pre-built MLIP environment  |
+| (ASE-compatible)        |          |                             |
 |                         |          |                             |
 | server.py (i-PI server) |<-------->| worker.py (i-PI client)     |
 | - sends positions       |   Unix   | - receives positions        |
@@ -73,63 +81,23 @@ Main Process                          Worker Process (subprocess)
 +-------------------------+          +-----------------------------+
 ```
 
-The worker process uses a pre-built virtual environment, providing:
-- **Fast startup**: No dependency installation at runtime
-- **Filesystem compatibility**: Works on NFS, Lustre, GPFS
-- **Reproducibility**: Same environment every time
+This design takes out the pain of environment conflicts when experimenting with different MLIPs or using multiple MLIPs in a single workflow. The tradeoff is that it adds some overhead due to the inter-process communication, around 4% on an 864 atom system.
 
-## Directory Structure
+## LAMMPS Support (Experimental)
 
-```
-{root}/
-├── .python/                # uv-managed Python interpreters (portable)
-├── environments/           # Environment SOURCE files (*.py with PEP 723)
-│   ├── mace_env.py
-│   ├── chgnet_env.py
-│   ├── uma_env.py
-│   └── tensornet_env.py
-├── envs/                   # Pre-built virtual environments
-│   ├── mace_env/
-│   │   ├── bin/python
-│   │   ├── lib/python3.11/site-packages/
-│   │   └── env_source.py   # Copy of environment source
-│   └── ...
-├── home/                   # Fake HOME for build & workers
-│   ├── .cache/fairchem/    # FAIRChem weights
-│   └── .matgl/             # MatGL weights
-└── cache/                  # XDG_CACHE_HOME for well-behaved libs
-    ├── mace/
-    └── huggingface/
-```
+Rootstock includes a native LAMMPS `fix` that auto-spawns a worker subprocess, giving LAMMPS users access to any Rootstock-managed MLIP. 
 
-## CLI Commands
-
-```bash
-# Install a pre-built environment
-rootstock install <env_file> --root <path> [--models m1,m2] [--force]
-
-# Show status
-rootstock status --root <path>
-
-# List environments
-rootstock list --root <path>
-```
-
-## Experimental: LAMMPS Support
-
-Rootstock can drive LAMMPS simulations through a native `fix` that auto-spawns
-a worker subprocess over Unix sockets using the i-PI protocol. No separate
-process management needed — add one line to your input script:
+Add one line to your LAMMPS input script:
 
 ```
 fix mlip all rootstock cluster della model mace checkpoint medium device cuda elements Cu
 ```
 
-### Building
+The fix handles worker lifecycle, socket communication, and cleanup automatically. Virial information is passed through, so barostats (`npt`, `nph`) work correctly. Energy is accessible via `f_mlip` in thermo output.
 
-The fix ships as two files (`fix_rootstock.h`, `fix_rootstock.cpp`) with no
-dependencies beyond the C++ standard library and POSIX sockets. Copy them into
-your LAMMPS `src/` directory and rebuild:
+### Building the Fix
+
+The fix ships as two files (`fix_rootstock.h`, `fix_rootstock.cpp`) with no dependencies beyond the C++ standard library and POSIX sockets. Copy them into your LAMMPS `src/` directory and rebuild:
 
 ```bash
 ./lammps/install.sh /path/to/lammps/src
@@ -138,14 +106,13 @@ cmake ../cmake [your usual flags]
 make -j 4
 ```
 
-Rootstock must also be installed and on `PATH` so the fix can call
-`rootstock resolve` and `rootstock serve`:
+Rootstock must also be installed and on `PATH` so the fix can call `rootstock resolve` and `rootstock serve`:
 
 ```bash
 pip install rootstock
 ```
 
-### Syntax
+### LAMMPS Fix Syntax
 
 ```
 fix <id> <group> rootstock cluster <n> model <model> \
@@ -155,115 +122,131 @@ fix <id> <group> rootstock cluster <n> model <model> \
 | Keyword | Required | Default | Description |
 |---------|----------|---------|-------------|
 | `cluster` | yes | — | Cluster name (e.g., `della`) |
-| `model` | yes | — | `mace`, `chgnet`, `uma`, `tensornet` |
+| `model` | yes | — | MLIP family: `mace`, `chgnet`, `uma`, `tensornet` |
 | `checkpoint` | no | `default` | Model weights (e.g., `medium`, `uma-s-1p1`) |
 | `device` | no | `cuda` | `cuda` or `cpu` |
 | `timeout` | no | `120` | Seconds to wait for worker startup |
 | `elements` | yes | — | Element symbols mapping atom types (must be last) |
 
-### Example: NPT
-
-```
-units metal
-boundary p p p
-read_data structure.data
-mass 1 63.546
-mass 2 16.000
-
-pair_style zero 6.0
-pair_coeff * *
-
-fix mlip all rootstock cluster della model uma checkpoint uma-s-1p1 device cuda elements Cu O
-
-velocity all create 300 300
-fix 1 all npt temp 300 300 0.1 iso 0 0 1.0
-timestep 0.001
-
-thermo_style custom step temp press vol f_mlip
-thermo 100
-run 10000
-```
-
-The fix contributes virial information, so barostats (`npt`, `nph`) work
-correctly. Energy is accessible via `f_mlip` in thermo output.
-
 ### Notes
 
 - Requires `units metal`. The fix checks this at startup.
-- Use `pair_style zero` unless you intentionally want to combine potentials
-  (the fix adds forces via `+=`).
-- Single-node only — the worker sees all atoms and computes its own
-  neighborhoods.
+- Use `pair_style zero` unless you intentionally want to combine potentials (the fix adds forces via `+=`).
+- Single-node only — the worker sees all atoms and computes its own neighborhoods.
+- This is experimental and has not been tested as thoroughly as the ASE integration yet. If you try it and run into issues, please reach out.
 
-## Administrator Setup
+## Setting Up a New Cluster
 
-Environments must be pre-built before users can run calculations.
+This section is for people setting up Rootstock on a new cluster. All commands below are run **on the cluster itself** (SSH in first). You'll need write access to a shared filesystem location visible to your users.
 
-See depolyed environments [here](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for examples
-that may work on your cluster.
+### 1. Install Rootstock
 
-### 1. Initalize rootstock
+On a login node:
+
+```bash
+pip install rootstock
+```
+
+### 2. Initialize the Rootstock directory
+
+Choose a location on an appropriate shared filesystem where users can read but only maintainers can write. Then run:
 
 ```bash
 rootstock init
 ```
 
-`init` will prompt you for the following values:
-- root -- the roostock root directory
+This will interactively prompt you for:
 
-If you are the primary maintiner of the rootstock installation:
-- api_key -- optional, auth key needed to push the manifest to the backend API
-- api_secret -- optional, auth secret needed to push the manifest to the backend API
-- api_url -- optional, the url for the backend API
-- maintainer name -- the name of the primary administrator of the rootstock installation
-- maintainer email -- the email address of the primary administrator of the rootstock installation
+- **root** — the shared directory path (e.g., `/scratch/shared/rootstock`)
+- **api_key / api_secret** — optional credentials for pushing the cluster manifest to the Rootstock dashboard. Contact a Rootstock maintainer if you want your cluster to appear on the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/). These are [Modal Proxy Auth Tokens](https://modal.com/docs/guide/webhook-proxy-auth).
+- **maintainer name / email** — identifies the maintainer for this installation
 
-The api_key and api_secret are Modal [Proxy Auth Tokens](https://modal.com/docs/guide/webhook-proxy-auth). Contact
-a rootstock maintainer if you need access to the API.
+### 3. Install environments
 
-### 2. Install Environments
+Still on the login node:
 
 ```bash
+# Install individual environments
 rootstock install mace_env.py --models small,medium
 rootstock install chgnet_env.py
 rootstock install uma_env.py --models uma-s-1p1
 rootstock install tensornet_env.py
 
-# or point it at a direcrory with multiple environments
+# Or point it at a directory with multiple environments
 rootstock install ./environments/
 
-# Verify
+# Verify everything is set up
 rootstock status
 ```
 
-See depolyed environments [here](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for examples
-that may work on your cluster.
+Each `rootstock install` command creates an isolated virtual environment under `{root}/envs/`, installs the MLIP's dependencies, and optionally pre-downloads model weights (via `--models`). This can take several minutes per environment depending on the MLIP.
 
-### 3. Manage the manifest 
+See the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for environment files that are known to work — you can use these as a starting point for your cluster.
 
-Roostock automatically tracks information about the installed environments where it is deployed in `ROOTSTOCK_ROOT/manifest.json`.
-When changes are made to installed environments or new environments are added, the manifest is automatically updated.
+### 4. Register with the dashboard (optional)
 
-Rootstock attempts to push the manifest to the backend any time a change is made.
+If you configured API credentials during `rootstock init`, the manifest is pushed automatically when you install or update environments. If the push failed (e.g., due to network issues), you can retry:
 
-There are two backend routes, one for development purposes and one for production.
+```bash
+rootstock manifest push
+```
 
-Dev api url: <https://garden-ai-dev--rootstock-admin-manifest.modal.run>
+### Directory Structure
 
-Dev admin page: <https://garden-ai-dev--rootstock-admin-dashboard.modal.run>
+After setup, the rootstock root directory will look like this:
 
-Prod api url: <https://garden-ai-prod--rootstock-admin-manifest.modal.run>
+```
+{root}/
+├── .python/                # uv-managed Python interpreters
+├── environments/           # Environment source files (*.py with PEP 723 metadata)
+│   ├── mace_env.py
+│   ├── chgnet_env.py
+│   ├── uma_env.py
+│   └── tensornet_env.py
+├── envs/                   # Pre-built virtual environments
+│   ├── mace_env/
+│   │   ├── bin/python
+│   │   ├── lib/python3.11/site-packages/
+│   │   └── env_source.py
+│   └── ...
+├── home/                   # Redirected HOME for not-well-behaved libraries
+│   ├── .cache/fairchem/
+│   └── .matgl/
+└── cache/                  # XDG_CACHE_HOME and HF_HOME for well-behaved libraries
+    ├── mace/
+    └── huggingface/
+```
 
-Prod admin page: <https://garden-ai-prod--rootstock-admin-dashboard.modal.run>
+The `home/` directory exists because some ML libraries (FAIRChem, MatGL) ignore `XDG_CACHE_HOME` and write to `~/.cache/` unconditionally. Rootstock redirects `HOME` during builds and at worker runtime so that model weights end up in the shared directory rather than in individual users' home directories.
 
-If pushing the manifest fails due to a network error, or misconfigued api keys, it can be manually pushed with
-`rootstock manifest push`
+## Writing Environment Files
+
+Each MLIP is defined by a small Python file with [PEP 723](https://peps.python.org/pep-0723/) inline metadata specifying its dependencies and a `setup()` function that returns an ASE calculator:
+
+```python
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["mace-torch>=0.3.14", "ase>=3.22", "torch>=2.0,<2.10"]
+# ///
+
+def setup(model: str, device: str = "cuda"):
+    from mace.calculators import mace_mp
+    return mace_mp(model=model, device=device, default_dtype="float32")
+```
+
+Rootstock uses `uv` to build an isolated virtual environment from these dependencies. The `setup()` function is called once when a worker starts, and the returned calculator is reused for all subsequent calculations in that session.
 
 ## Local Development
 
 ```bash
+git clone https://github.com/Garden-AI/rootstock.git
+cd rootstock
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 ruff check rootstock/
 ruff format rootstock/
 ```
+
+## Get Involved
+
+Rootstock is an early-stage project and we welcome feedback, bug reports, and collaborators. If you're interested in deploying Rootstock on your cluster, contributing environment files for new MLIPs, or using it for a research project, please contact Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
