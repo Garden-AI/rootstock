@@ -11,8 +11,8 @@ from pathlib import Path
 
 # Registry of known clusters and their rootstock root directories
 CLUSTER_REGISTRY: dict[str, str] = {
-    "modal": "/vol/rootstock",
     "della": "/scratch/gpfs/ROSENGROUP/common/rootstock",
+    "sophia": "/eagle/Garden-Ai/rootstock",
 }
 
 # Known environment families (used for validation)
@@ -24,7 +24,7 @@ def get_root_for_cluster(cluster: str) -> Path:
     Get the rootstock root directory for a known cluster.
 
     Args:
-        cluster: Name of a known cluster (e.g., "modal", "della")
+        cluster: Name of a known cluster (e.g., "sophia", "della")
 
     Returns:
         Path to the rootstock root directory for that cluster.
