@@ -13,6 +13,7 @@ from pathlib import Path
 CLUSTER_REGISTRY: dict[str, str] = {
     "modal": "/vol/rootstock",
     "della": "/scratch/gpfs/ROSENGROUP/common/rootstock",
+    "sophia": "/eagle/Garden-Ai/rootstock",
 }
 
 # Known environment families (used for validation)
