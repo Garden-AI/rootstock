@@ -1,8 +1,8 @@
 # Rootstock
 
-Rootstock makes it easier to use machine learning interatomic potentials (MLIPs) on academic HPC clusters. Rootstock lets researchers use multiple MLIPs (MACE, CHGNet, UMA, TensorNet, and others) through a single interface, without managing the conflicting Python environments that each one requires.
+Rootstock makes it easy to use machine-learned interatomic potentials (MLIPs) on academic HPC clusters. Researchers can use multiple MLIPs (MACE, CHGNet, UMA, TensorNet, and others) with ASE or LAMMPS without managing the conflicting Python environments that each MLIP requires.
 
-Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment behind the scenes. Swapping models is a one-line change, even if the MLIPs require different Python or library versions. Rootstock also integrates with LAMMPS through a `fix` with any supported MLIP.
+Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment behind the scenes. Swapping models is a one-line change, even if the MLIPs require different Python or library versions. Rootstock also integrates with [LAMMPS](https://www.lammps.org/) through a `fix` with any supported MLIP.
 
 ## Status
 
@@ -34,7 +34,7 @@ with RootstockCalculator(
     print(atoms.get_forces())
 ```
 
-Changing `model="mace"` to `model="uma"` or `model="tensornet"` swaps the underlying potential — no other changes needed.
+Changing `model="mace"` to `model="uma"` or `model="tensornet"` swaps the underlying potential.
 
 ## Installation
 
@@ -63,7 +63,7 @@ RootstockCalculator(root="/scratch/gpfs/specific/install/path/rootstock", model=
 
 ## Available Models
 
-The set of available models varies by cluster and changes as new environments are added. See the [live dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for what is currently deployed on each cluster.
+The set of available models varies by cluster and changes as new environments are added. See the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for what is currently deployed on each cluster.
 
 ## Architecture
 
@@ -131,9 +131,9 @@ fix <id> <group> rootstock cluster <n> model <model> \
 ### Notes
 
 - Requires `units metal`. The fix checks this at startup.
-- Use `pair_style zero` unless you intentionally want to combine potentials (the fix adds forces via `+=`).
+- Use `pair_style zero`. The fix provides all interatomic forces.
 - Single-node only — the worker sees all atoms and computes its own neighborhoods.
-- This is experimental and has not been tested as thoroughly as the ASE integration yet. If you try it and run into issues, please reach out.
+- LAMMPS integration is experimental and has not been tested as thoroughly as the ASE integration yet. If you try it and run into issues, please reach out.
 
 ## Setting Up a New Cluster
 
