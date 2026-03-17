@@ -21,6 +21,9 @@ with RootstockCalculator(
     print(atoms.get_forces())
 ```
 
+This runs locally where rootstock is configured, see [Architecture](#architecture) for details. The model runs in an isolated environment, making it trivial
+to use a different MLIP in your workflow by changing the `model='...'` arg. See [Available Models](#available-models) below.
+
 **Note:** Environments must be pre-built before use. See [Administrator Setup](#administrator-setup).
 
 ## Installation
@@ -103,76 +106,13 @@ The worker process uses a pre-built virtual environment, providing:
 
 ```bash
 # Install a pre-built environment
-rootstock install <env_name> --root <path> [--models m1,m2] [--force]
+rootstock install <env_file> --root <path> [--models m1,m2] [--force]
 
 # Show status
 rootstock status --root <path>
 
 # List environments
 rootstock list --root <path>
-```
-
-## Administrator Setup
-
-Environments must be pre-built before users can run calculations.
-
-### 1. Initalize rootstock
-
-```bash
-rootstock init
-```
-
-`init` will prompt you for the following values:
-- root -- the roostock root directory
-- api_key -- optional, auth key needed to push the manifest to the backend API
-- api_secret -- optional, auth secret needed to push the manifest to the backend API
-- api_url -- optional, the url for the backend API
-- maintainer name -- the name of the primary administrator of the rootstock installation
-- maintainer email -- the email address of the primary administrator of the rootstock installation
-
-The api_key and api_secret are Modal [Proxy Auth Tokens](https://modal.com/docs/guide/webhook-proxy-auth). Contact
-a rootstock maintainer if you need access to the API.
-
-### 2. Install Environments
-
-```bash
-rootstock install mace_env --models small,medium
-rootstock install chgnet_env
-rootstock install uma_env --models uma-s-1p1
-rootstock install tensornet_env
-
-# or point it at a direcrory with multiple environments
-rootstock install ./environments/
-
-# Verify
-rootstock status
-```
-
-### 3. Manage the manifest 
-
-Roostock automatically tracks information about the installed environments where it is deployed in `ROOTSTOCK_ROOT/manifest.json`.
-When changes are made to installed environments or new environments are added, the manifest is automatically updated.
-
-Rootstock attempts to push the manifest to the backend any time a change is made.
-
-There are two backend routes, one for development purposes and one for production.
-
-Dev api url: `https://garden-ai-dev--rootstock-admin-manifest.modal.run`
-Dev admin page: `https://garden-ai-dev--rootstock-admin-dashboard.modal.run`
-
-Prod api url: `https://garden-ai-prod--rootstock-admin-manifest.modal.run`
-Prod admin page: `https://garden-ai-prod--rootstock-admin-dashboard.modal.run`
-
-If pushing the manifest fails due to a network error, or misconfigued api keys, it can be manually pushed with
-`rootstock manifest push`
-
-## Local Development
-
-```bash
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-ruff check rootstock/
-ruff format rootstock/
 ```
 
 ## Experimental: LAMMPS Support
@@ -254,3 +194,76 @@ correctly. Energy is accessible via `f_mlip` in thermo output.
   (the fix adds forces via `+=`).
 - Single-node only — the worker sees all atoms and computes its own
   neighborhoods.
+
+## Administrator Setup
+
+Environments must be pre-built before users can run calculations.
+
+See depolyed environments [here](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for examples
+that may work on your cluster.
+
+### 1. Initalize rootstock
+
+```bash
+rootstock init
+```
+
+`init` will prompt you for the following values:
+- root -- the roostock root directory
+
+If you are the primary maintiner of the rootstock installation:
+- api_key -- optional, auth key needed to push the manifest to the backend API
+- api_secret -- optional, auth secret needed to push the manifest to the backend API
+- api_url -- optional, the url for the backend API
+- maintainer name -- the name of the primary administrator of the rootstock installation
+- maintainer email -- the email address of the primary administrator of the rootstock installation
+
+The api_key and api_secret are Modal [Proxy Auth Tokens](https://modal.com/docs/guide/webhook-proxy-auth). Contact
+a rootstock maintainer if you need access to the API.
+
+### 2. Install Environments
+
+```bash
+rootstock install mace_env.py --models small,medium
+rootstock install chgnet_env.py
+rootstock install uma_env.py --models uma-s-1p1
+rootstock install tensornet_env.py
+
+# or point it at a direcrory with multiple environments
+rootstock install ./environments/
+
+# Verify
+rootstock status
+```
+
+See depolyed environments [here](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for examples
+that may work on your cluster.
+
+### 3. Manage the manifest 
+
+Roostock automatically tracks information about the installed environments where it is deployed in `ROOTSTOCK_ROOT/manifest.json`.
+When changes are made to installed environments or new environments are added, the manifest is automatically updated.
+
+Rootstock attempts to push the manifest to the backend any time a change is made.
+
+There are two backend routes, one for development purposes and one for production.
+
+Dev api url: <https://garden-ai-dev--rootstock-admin-manifest.modal.run>
+
+Dev admin page: <https://garden-ai-dev--rootstock-admin-dashboard.modal.run>
+
+Prod api url: <https://garden-ai-prod--rootstock-admin-manifest.modal.run>
+
+Prod admin page: <https://garden-ai-prod--rootstock-admin-dashboard.modal.run>
+
+If pushing the manifest fails due to a network error, or misconfigued api keys, it can be manually pushed with
+`rootstock manifest push`
+
+## Local Development
+
+```bash
+uv venv && source .venv/bin/activate
+uv pip install -e ".[dev]"
+ruff check rootstock/
+ruff format rootstock/
+```
