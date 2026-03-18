@@ -1,166 +1,75 @@
----
-icon: lucide/rocket
----
+# Rootstock
 
-# Get started
+Rootstock makes it easy to use machine-learned interatomic potentials (MLIPs) on national lab and academic HPC clusters. Researchers can use multiple MLIPs (MACE, CHGNet, UMA, TensorNet, and others) with ASE or LAMMPS without managing the conflicting Python environments that each MLIP requires.
 
-For full documentation visit [zensical.org](https://zensical.org/docs/).
+Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment behind the scenes. Swapping models is a one-line change, even if the MLIPs require different Python or library versions. Rootstock also integrates with [LAMMPS](https://www.lammps.org/) through a `fix` with any supported MLIP.
 
-## Commands
+## Status
 
-* [`zensical new`][new] - Create a new project
-* [`zensical serve`][serve] - Start local web server
-* [`zensical build`][build] - Build your site
+Rootstock is **early-stage software under active development.** It is currently deployed on two HPC clusters:
 
-  [new]: https://zensical.org/docs/usage/new/
-  [serve]: https://zensical.org/docs/usage/preview/
-  [build]: https://zensical.org/docs/usage/build/
+- **Della** — Princeton Research Computing
+- **Sophia** — Argonne Leadership Computing Facility (ALCF)
 
-## Examples
+We are looking for additional clusters and early users to help shape the tool. If you're interested in trying Rootstock on your cluster or for a specific project, please reach out to Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
 
-### Admonitions
+## Quick Start
 
-> Go to [documentation](https://zensical.org/docs/authoring/admonitions/)
+Rootstock is designed for use on an HPC cluster where it has already been set up by a maintainer. The code below runs in your normal Python environment — inside a SLURM job script, an interactive session, or a Jupyter notebook on the cluster. Rootstock handles the MLIP environment isolation.
 
-!!! note
+```python
+from ase.build import bulk
+from rootstock import RootstockCalculator
 
-    This is a **note** admonition. Use it to provide helpful information.
+atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
 
-!!! warning
-
-    This is a **warning** admonition. Be careful!
-
-### Details
-
-> Go to [documentation](https://zensical.org/docs/authoring/admonitions/#collapsible-blocks)
-
-??? info "Click to expand for more info"
-    
-    This content is hidden until you click to expand it.
-    Great for FAQs or long explanations.
-
-## Code Blocks
-
-> Go to [documentation](https://zensical.org/docs/authoring/code-blocks/)
-
-``` python hl_lines="2" title="Code blocks"
-def greet(name):
-    print(f"Hello, {name}!") # (1)!
-
-greet("Python")
+with RootstockCalculator(
+    cluster="della",
+    model="mace",
+    checkpoint="medium",
+    device="cuda",
+) as calc:
+    atoms.calc = calc
+    print(atoms.get_potential_energy())
+    print(atoms.get_forces())
 ```
 
-1.  > Go to [documentation](https://zensical.org/docs/authoring/code-blocks/#code-annotations)
+Changing `model="mace"` to `model="uma"` or `model="tensornet"` swaps the underlying potential.
 
-    Code annotations allow to attach notes to lines of code.
+## Next Steps
 
-Code can also be highlighted inline: `#!python print("Hello, Python!")`.
+<div class="grid cards" markdown>
 
-## Content tabs
+-   :material-download:{ .lg .middle } **Installation**
 
-> Go to [documentation](https://zensical.org/docs/authoring/content-tabs/)
+    ---
 
-=== "Python"
+    Install the lightweight `rootstock` package in your environment.
 
-    ``` python
-    print("Hello from Python!")
-    ```
+    [:octicons-arrow-right-24: Installation](installation.md)
 
-=== "Rust"
+-   :material-api:{ .lg .middle } **API Reference**
 
-    ``` rs
-    println!("Hello from Rust!");
-    ```
+    ---
 
-## Diagrams
+    Learn about the `RootstockCalculator` API and available models.
 
-> Go to [documentation](https://zensical.org/docs/authoring/diagrams/)
+    [:octicons-arrow-right-24: API](api.md)
 
-``` mermaid
-graph LR
-  A[Start] --> B{Error?};
-  B -->|Yes| C[Hmm...];
-  C --> D[Debug];
-  D --> B;
-  B ---->|No| E[Yay!];
-```
+-   :material-earth:{ .lg .middle } **Example Configs**
 
-## Footnotes
+    ---
 
-> Go to [documentation](https://zensical.org/docs/authoring/footnotes/)
+    See example environment configurations from deployed clusters.
 
-Here's a sentence with a footnote.[^1]
+    [:octicons-arrow-right-24: Example Configs](clusters.md)
 
-Hover it, to see a tooltip.
+-   :material-server:{ .lg .middle } **Cluster Setup**
 
-[^1]: This is the footnote.
+    ---
 
+    Set up Rootstock on a new HPC cluster.
 
-## Formatting
+    [:octicons-arrow-right-24: Cluster Setup](cluster-setup.md)
 
-> Go to [documentation](https://zensical.org/docs/authoring/formatting/)
-
-- ==This was marked (highlight)==
-- ^^This was inserted (underline)^^
-- ~~This was deleted (strikethrough)~~
-- H~2~O
-- A^T^A
-- ++ctrl+alt+del++
-
-## Icons, Emojis
-
-> Go to [documentation](https://zensical.org/docs/authoring/icons-emojis/)
-
-* :sparkles: `:sparkles:`
-* :rocket: `:rocket:`
-* :tada: `:tada:`
-* :memo: `:memo:`
-* :eyes: `:eyes:`
-
-## Maths
-
-> Go to [documentation](https://zensical.org/docs/authoring/math/)
-
-$$
-\cos x=\sum_{k=0}^{\infty}\frac{(-1)^k}{(2k)!}x^{2k}
-$$
-
-!!! warning "Needs configuration"
-    Note that MathJax is included via a `script` tag on this page and is not
-    configured in the generated default configuration to avoid including it
-    in a pages that do not need it. See the documentation for details on how
-    to configure it on all your pages if they are more Maths-heavy than these
-    simple starter pages.
-
-<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
-<script>
-  window.MathJax = {
-    tex: {
-      inlineMath: [["\\(", "\\)"]],
-      displayMath: [["\\[", "\\]"]],
-      processEscapes: true,
-      processEnvironments: true
-    },
-    options: {
-      ignoreHtmlClass: ".*|",
-      processHtmlClass: "arithmatex"
-    }
-  };
-</script>
-
-## Task Lists
-
-> Go to [documentation](https://zensical.org/docs/authoring/lists/#using-task-lists)
-
-* [x] Install Zensical
-* [x] Configure `zensical.toml`
-* [x] Write amazing documentation
-* [ ] Deploy anywhere
-
-## Tooltips
-
-> Go to [documentation](https://zensical.org/docs/authoring/tooltips/)
-
-[Hover me][example]
-
-  [example]: https://example.com "I'm a tooltip!"
+</div>
