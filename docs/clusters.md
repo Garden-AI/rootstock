@@ -35,7 +35,7 @@ Example environment configurations from clusters where Rootstock is deployed. Us
 </div>
 
 <script>
-const API_URL = 'https://garden-ai-dev--rootstock-admin-dashboard-dev.modal.run/';
+const API_URL = 'https://garden-ai-prod--rootstock-admin-dashboard.modal.run/';
 
 function toggle(el) {
   el.classList.toggle('open');
