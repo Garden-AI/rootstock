@@ -27,9 +27,10 @@ def update_and_push_manifest(
     root: Path,
     cluster: str | None = None,
     quiet: bool = False,
+    push: bool = True,
 ) -> bool:
     """
-    Update manifest with current state and push to backend.
+    Update manifest with current state and optionally push to backend.
 
     Called after any state-changing operation.
 
@@ -37,6 +38,7 @@ def update_and_push_manifest(
         root: Rootstock root directory
         cluster: Cluster name (optional, will try to detect)
         quiet: Suppress output
+        push: Whether to push to backend (default True)
 
     Returns:
         True if push succeeded or was skipped (no API key), False on error
@@ -72,6 +74,12 @@ def update_and_push_manifest(
 
     # Save locally
     save_manifest(manifest, root)
+
+    # Skip push if explicitly disabled
+    if not push:
+        if not quiet:
+            print("Manifest saved locally (push disabled via --no-push).")
+        return True
 
     # Push to backend only if user is maintainer and API is configured
     if config.is_maintainer and config.is_push_enabled():
@@ -265,6 +273,11 @@ def cmd_manifest_init(args) -> int:
     print(f"Manifest initialized: {root}/manifest.json")
     print(f"  Cluster: {cluster}")
     print(f"  Environments: {len(manifest.environments)}")
+
+    # Skip push if explicitly disabled
+    if getattr(args, "no_push", False):
+        print("Manifest saved locally (push disabled via --no-push).")
+        return 0
 
     # Push if configured AND user is maintainer
     if config.is_maintainer and config.is_push_enabled():

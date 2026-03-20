@@ -90,6 +90,11 @@ def main():
         "--force", action="store_true", help="Update registration and/or rebuild if exists"
     )
     install_parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    install_parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Don't push manifest to backend (useful during development)",
+    )
     install_parser.set_defaults(func=cmd_install)
 
     # status command
@@ -200,6 +205,11 @@ def main():
         "--force",
         action="store_true",
         help="Overwrite existing manifest",
+    )
+    manifest_init_parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Don't push manifest to backend (useful during development)",
     )
     manifest_init_parser.set_defaults(func=cmd_manifest)
 
