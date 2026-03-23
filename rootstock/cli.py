@@ -8,6 +8,11 @@ Commands:
     rootstock init
         Interactive setup of configuration and directory structure.
 
+    rootstock new-env <name> [-o <path>] [--force]
+        Create a new environment file from template:
+            rootstock new-env mace
+            rootstock new-env mace -o ./environments/mace_env.py
+
     rootstock install <source> [--root <path>] [--models m1,m2] [--force]
         Install from file (validates, registers, builds):
             rootstock install ./mace_env.py --root /vol/rootstock
@@ -31,6 +36,7 @@ from .commands import (
     cmd_install,
     cmd_list,
     cmd_manifest,
+    cmd_new_env,
     cmd_resolve,
     cmd_serve,
     cmd_status,
@@ -64,6 +70,28 @@ def main():
         help="Skip initializing manifest",
     )
     init_parser.set_defaults(func=cmd_init)
+
+    # new-env command
+    new_env_parser = subparsers.add_parser(
+        "new-env",
+        help="Create a new environment file from template",
+        description="Scaffold a new environment source file with the required structure.",
+    )
+    new_env_parser.add_argument(
+        "name",
+        help="Environment name (e.g., 'mace' or 'mace_env')",
+    )
+    new_env_parser.add_argument(
+        "-o",
+        "--output",
+        help="Output file path (default: ./<name>_env.py)",
+    )
+    new_env_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing file",
+    )
+    new_env_parser.set_defaults(func=cmd_new_env)
 
     # install command
     install_parser = subparsers.add_parser(
