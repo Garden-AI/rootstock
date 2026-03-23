@@ -67,6 +67,7 @@ def _install_single_environment(
     force: bool,
     models: str | None,
     verbose: bool,
+    no_push: bool = False,
 ) -> int:
     """
     Install a single environment from a file path or environment name.
@@ -297,7 +298,7 @@ print(f"Downloaded model: {model}")
     print(f"\nBuilt environment: {env_target}")
 
     # Update manifest (quiet=True to avoid cluttering build output)
-    update_and_push_manifest(root, quiet=False)
+    update_and_push_manifest(root, quiet=False, push=not no_push)
 
     return 0
 
@@ -356,6 +357,7 @@ def cmd_install(args) -> int:
                 force=args.force,
                 models=args.models,
                 verbose=args.verbose,
+                no_push=args.no_push,
             )
 
             if result == 0:
@@ -384,4 +386,5 @@ def cmd_install(args) -> int:
         force=args.force,
         models=args.models,
         verbose=args.verbose,
+        no_push=args.no_push,
     )
