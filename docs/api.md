@@ -58,12 +58,15 @@ with RootstockCalculator(...) as calc:
     # Use the calculator
     atoms.calc = calc
     energy = atoms.get_potential_energy()
-# Worker process is automatically terminated
+# Worker process is automatically terminated when exiting the context
 ```
+
+!!! tip "Manual Cleanup"
+    If you cannot use a context manager, call `calc.close()` manually to terminate the worker process.
 
 ## Available Models
 
-The set of available models varies by cluster and changes as new environments are added. See the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for what is currently deployed on each cluster.
+Available models vary by cluster and change as new environments are added. See the [Example Configs](clusters.md) page for current deployments on each cluster.
 
 ### Model Reference
 
@@ -76,18 +79,137 @@ The set of available models varies by cluster and changes as new environments ar
 
 ### Checking Available Models
 
-To see what models are available on your cluster:
+To see available models on your cluster, check the [Example Configs](clusters.md) page or run:
 
 ```bash
-rootstock status --cluster della
+rootstock status
 ```
 
-Or programmatically:
+This command displays installed environments, their checkpoints, and cache sizes.
 
-```python
-from rootstock import list_environments
+## CLI Reference
 
-envs = list_environments(cluster="della")
-for env in envs:
-    print(f"{env.name}: {env.checkpoints}")
+The Rootstock CLI provides commands for both administrators (setting up clusters) and users (querying available environments).
+
+### User Commands
+
+Commands users can run to explore available environments:
+
+#### `rootstock status`
+
+Display installation status, including all installed environments and cache usage.
+
+```bash
+rootstock status
+```
+
+#### `rootstock list`
+
+List all registered environments in the shared environments directory.
+
+```bash
+rootstock list
+```
+
+#### `rootstock resolve`
+
+Look up the root directory for a known cluster.
+
+```bash
+# Human-readable output
+rootstock resolve --cluster della
+
+# JSON output
+rootstock resolve --cluster della --json
+```
+
+### Administrator Commands
+
+Commands for cluster administrators to set up and manage Rootstock installations:
+
+#### `rootstock init`
+
+Interactive setup wizard for creating a new Rootstock installation. Prompts for:
+
+- Root directory path
+- API credentials for dashboard integration (optional)
+- Maintainer information
+
+```bash
+rootstock init
+
+# Skip directory creation
+rootstock init --skip-dirs
+
+# Skip manifest initialization
+rootstock init --skip-manifest
+```
+
+#### `rootstock new-env`
+
+Create a new environment template file with the required PEP 723 structure.
+
+```bash
+# Create template in current directory
+rootstock new-env mace
+
+# Specify output path
+rootstock new-env mace -o ./environments/mace_env.py
+
+# Overwrite existing file
+rootstock new-env mace --force
+```
+
+#### `rootstock install`
+
+Install environment(s) from a file, directory, or rebuild by name.
+
+```bash
+# Install from a single file
+rootstock install ./mace_env.py --models small,medium
+
+# Install all environments from a directory
+rootstock install ./environments/
+
+# Rebuild an existing environment
+rootstock install mace_env --force
+
+# Install without pushing manifest to backend
+rootstock install mace_env.py --no-push
+```
+
+Options:
+
+- `--root <path>`: Specify root directory (or use `$ROOTSTOCK_ROOT`)
+- `--models <list>`: Comma-separated list of models to pre-download
+- `--force`: Update registration and rebuild if environment exists
+- `--verbose`, `-v`: Verbose output
+- `--no-push`: Skip pushing manifest to backend
+
+#### `rootstock serve`
+
+Start a worker process for an external i-PI server (advanced usage).
+
+```bash
+rootstock serve mace \
+  --socket /tmp/ipi_socket \
+  --checkpoint medium \
+  --device cuda
+```
+
+#### `rootstock manifest`
+
+Manage the installation manifest that tracks environment state.
+
+```bash
+# Show current manifest
+rootstock manifest show
+rootstock manifest show --json
+
+# Push manifest to dashboard
+rootstock manifest push
+
+# Initialize new manifest
+rootstock manifest init --cluster della
+rootstock manifest init --cluster della --force
 ```

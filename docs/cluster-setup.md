@@ -1,6 +1,6 @@
 # Setting Up a New Cluster
 
-This section is for people setting up Rootstock on a new cluster. All commands below are run **on the cluster itself** (SSH in first). You'll need write access to a shared filesystem location visible to your users.
+This guide is for administrators setting up Rootstock on a new cluster. Run all commands below **on the cluster itself** after SSH access is established. Write access to a shared filesystem location visible to users is required.
 
 ## Prerequisites
 
@@ -19,7 +19,14 @@ pip install rootstock
 
 ## Step 2: Initialize the Rootstock Directory
 
-Choose a location on an appropriate shared filesystem where users can read but only maintainers can write. Then run:
+Choose a location on a shared filesystem where other users have access:
+
+```bash
+# Choose a shared directory path
+# Example: /scratch/shared/rootstock
+```
+
+Then run the initialization command:
 
 ```bash
 rootstock init
@@ -30,11 +37,11 @@ This will interactively prompt you for:
 | Setting | Description |
 |---------|-------------|
 | **root** | The shared directory path (e.g., `/scratch/shared/rootstock`) |
-| **api_key / api_secret** | Optional credentials for pushing the cluster manifest to the Rootstock dashboard |
+| **api_key / api_secret** | Optional credentials for pushing the cluster manifest to the dashboard |
 | **maintainer name / email** | Identifies the maintainer for this installation |
 
 !!! tip "Dashboard Integration"
-    Contact a Rootstock maintainer if you want your cluster to appear on the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/). The API credentials are [Modal Proxy Auth Tokens](https://modal.com/docs/guide/webhook-proxy-auth).
+    Contact a Rootstock maintainer if you want your cluster to appear on the [Example Configs](clusters.md) page. The API credentials are [Modal Proxy Auth Tokens](https://modal.com/docs/guide/webhook-proxy-auth).
 
 ## Step 3: Install Environments
 
@@ -54,23 +61,57 @@ rootstock install ./environments/
 rootstock status
 ```
 
-Each `rootstock install` command:
+Each `rootstock install` command performs the following:
 
 1. Creates an isolated virtual environment under `{root}/envs/`
-2. Installs the MLIP's dependencies
-3. Optionally pre-downloads model weights (via `--models`)
+2. Installs MLIP dependencies
+3. Pre-downloads model weights (when `--models` is specified)
 
-This can take several minutes per environment depending on the MLIP.
+This process can take several minutes per environment, depending on the MLIP and network conditions.
 
 !!! note "Finding Environment Files"
-    See the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for environment files that are known to work — you can use these as a starting point for your cluster.
+    See the [Example Configs](clusters.md) page for environment files that are known to work — you can use these as a starting point for your cluster.
+    Some minor tweaks may be required depending on site specific requirements.
 
 ## Step 4: Register with the Dashboard (Optional)
 
-If you configured API credentials during `rootstock init`, the manifest is pushed automatically when you install or update environments. If the push failed (e.g., due to network issues), you can retry:
+If you configured API credentials during `rootstock init`, the manifest is pushed automatically when you install or update environments.
+
+### Managing the Manifest
+
+The manifest tracks the state of your Rootstock installation and is used by the dashboard to display available environments. You can manage it with the following commands:
+
+#### View Current Manifest
+
+```bash
+# Display the manifest in human-readable format
+rootstock manifest show
+
+# Output as JSON
+rootstock manifest show --json
+```
+
+#### Push Manifest to Dashboard
+
+If the automatic push failed (e.g., due to network issues), you can manually retry:
 
 ```bash
 rootstock manifest push
+```
+
+#### Initialize a New Manifest
+
+To create or reinitialize a manifest for a cluster:
+
+```bash
+# Create a new manifest
+rootstock manifest init --cluster della
+
+# Overwrite existing manifest
+rootstock manifest init --cluster della --force
+
+# Skip automatic push to backend
+rootstock manifest init --cluster della --no-push
 ```
 
 ## Verifying the Installation
@@ -83,14 +124,11 @@ rootstock status
 
 # List all environments
 rootstock list
-
-# Test a specific model (if you have GPU access)
-rootstock test --model mace --checkpoint medium
 ```
 
 ## Directory Structure
 
-After setup, the rootstock root directory will look like this:
+After setup, the Rootstock root directory will look like this:
 
 ```
 {root}/
@@ -150,12 +188,8 @@ ls -la {root}/cache/
 
 ### Dashboard push fails
 
-Check your API credentials and network connectivity:
+Check your API credentials and network connectivity, then retry the push:
 
 ```bash
-# Verify credentials are configured
-rootstock config show
-
-# Retry push
-rootstock manifest push --verbose
+rootstock manifest push
 ```

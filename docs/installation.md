@@ -26,8 +26,14 @@ After installation, verify that Rootstock is working:
 ```python
 from rootstock import RootstockCalculator
 
-# Check available clusters
-print(RootstockCalculator.list_clusters())
+# Verify import works
+print(f"Rootstock installed successfully")
+```
+
+You can also check available clusters from the command line:
+
+```bash
+rootstock resolve --cluster della --json
 ```
 
 ## What Gets Installed
@@ -38,4 +44,4 @@ The `rootstock` package is intentionally minimal. It includes:
 - The i-PI protocol client/server implementation
 - CLI tools for cluster administrators
 
-The heavy dependencies (PyTorch, CUDA, MACE, CHGNet, FAIRChem, etc.) are **not** installed on your system. Instead, they live in pre-built virtual environments managed by cluster administrators.
+Heavy dependencies (PyTorch, CUDA, MACE, CHGNet, FAIRChem, etc.) are **not** installed on your system. They live in pre-built virtual environments managed by cluster administrators.

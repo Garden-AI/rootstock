@@ -2,7 +2,7 @@
 
 ## Overview
 
-When you create a `RootstockCalculator`, Rootstock spawns a subprocess that runs the MLIP in its own pre-built virtual environment. The main process and worker communicate over a Unix domain socket using the [i-PI protocol](http://ipi-code.org/). This happens on a single node (no remote network calls).
+When you create a `RootstockCalculator`, Rootstock spawns a subprocess that runs the MLIP in its own pre-built virtual environment. The main process and worker communicate over a Unix domain socket using the [i-PI protocol](http://ipi-code.org/). All communication occurs on a single node with no remote network calls.
 
 ```
 Your script (on cluster node)          Worker subprocess
@@ -18,7 +18,7 @@ Your script (on cluster node)          Worker subprocess
 
 ## Design Benefits
 
-This design takes out the pain of environment conflicts when experimenting with different MLIPs or using multiple MLIPs in a single workflow:
+This design eliminates environment conflicts when experimenting with different MLIPs or using multiple MLIPs in a single workflow:
 
 - **No environment conflicts**: Each MLIP runs in isolation with its exact required dependencies
 - **One-line model swapping**: Change `model="mace"` to `model="uma"` without reinstalling anything
@@ -27,17 +27,17 @@ This design takes out the pain of environment conflicts when experimenting with 
 
 ## Tradeoffs
 
-The tradeoff is that the architecture adds some overhead due to inter-process communication:
+The architecture introduces minimal overhead due to inter-process communication:
 
-- **~4% overhead** on an 864 atom system
-- Communication happens via Unix domain socket (fast, no network)
+- **~4% overhead** on an 864-atom system
+- Communication occurs via Unix domain socket (fast, local-only)
 - Positions and forces are serialized using the i-PI protocol
 
-For most use cases, this overhead is negligible compared to the time spent in the MLIP forward pass.
+For most use cases, this overhead is negligible compared to MLIP forward pass time.
 
 ## Directory Structure
 
-After setup, the rootstock root directory looks like this:
+After setup, the Rootstock root directory looks like this:
 
 ```
 {root}/
@@ -63,15 +63,15 @@ After setup, the rootstock root directory looks like this:
 
 ### Why the `home/` Directory?
 
-The `home/` directory exists because some ML libraries (FAIRChem, MatGL) ignore `XDG_CACHE_HOME` and write to `~/.cache/` unconditionally. Rootstock redirects `HOME` during builds and at worker runtime so that model weights end up in the shared directory rather than in individual users' home directories.
+Some ML libraries (FAIRChem, MatGL) ignore `XDG_CACHE_HOME` and write to `~/.cache/` unconditionally. Rootstock redirects `HOME` during environment builds and worker runtime to ensure model weights are stored in the shared directory rather than in individual user home directories.
 
 ## i-PI Protocol
 
 Rootstock uses the [i-PI protocol](http://ipi-code.org/) for communication between the main process and worker:
 
-1. **Main process** sends atomic positions and cell parameters
-2. **Worker** receives positions, runs the MLIP forward pass
-3. **Worker** sends back energy, forces, and stress
-4. **Main process** receives results and returns them to ASE
+1. Main process sends atomic positions and cell parameters
+2. Worker receives positions and runs the MLIP forward pass
+3. Worker sends back energy, forces, and stress
+4. Main process receives results and returns them to ASE
 
-The protocol is text-based and designed for interoperability between different simulation codes.
+The protocol is text-based and designed for interoperability between simulation codes.

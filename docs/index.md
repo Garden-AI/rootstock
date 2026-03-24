@@ -1,8 +1,8 @@
 # Rootstock
 
-Rootstock makes it easy to use machine-learned interatomic potentials (MLIPs) on national lab and academic HPC clusters. Researchers can use multiple MLIPs (MACE, CHGNet, UMA, TensorNet, and others) with ASE or LAMMPS without managing the conflicting Python environments that each MLIP requires.
+Rootstock makes it easy to use machine-learned interatomic potentials (MLIPs) on HPC clusters. Researchers can use multiple MLIPs (MACE, CHGNet, UMA, TensorNet, and others) with ASE or LAMMPS without managing conflicting Python environments.
 
-Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment behind the scenes. Swapping models is a one-line change, even if the MLIPs require different Python or library versions. Rootstock also integrates with [LAMMPS](https://www.lammps.org/) through a `fix` with any supported MLIP.
+Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment. Swapping models is a one-line change, even when MLIPs require different Python or library versions. Rootstock also integrates with [LAMMPS](https://www.lammps.org/) through a `fix` command for any supported MLIP.
 
 ## Status
 
@@ -11,11 +11,11 @@ Rootstock is **early-stage software under active development.** It is currently 
 - **Della** — Princeton Research Computing
 - **Sophia** — Argonne Leadership Computing Facility (ALCF)
 
-We are looking for additional clusters and early users to help shape the tool. If you're interested in trying Rootstock on your cluster or for a specific project, please reach out to Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
+We are seeking additional clusters and early users to help shape the tool. If you are interested in deploying Rootstock on your cluster or using it for a specific project, contact Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
 
 ## Quick Start
 
-Rootstock is designed for use on an HPC cluster where it has already been set up by a maintainer. The code below runs in your normal Python environment — inside a SLURM job script, an interactive session, or a Jupyter notebook on the cluster. Rootstock handles the MLIP environment isolation.
+Rootstock is designed for HPC clusters where it has been set up by a system maintainer. The code below runs in your normal Python environment — inside a SLURM job script, an interactive session, or a Jupyter notebook. Rootstock handles MLIP environment isolation automatically.
 
 ```python
 from ase.build import bulk

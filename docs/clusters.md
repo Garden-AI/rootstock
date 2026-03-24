@@ -1,6 +1,8 @@
 # Example Configs
 
-Example environment configurations from clusters where Rootstock is deployed. Use these as a starting point when setting up your own cluster.
+View live environment configurations from clusters where Rootstock is currently deployed. The configurations below are fetched from the dashboard API and show the exact environments, dependencies, and checkpoints available on each cluster.
+
+Use these as a starting point when setting up your own cluster.
 
 <style>
 #clusters-container h2 { scroll-margin-top: 80px; }
