@@ -63,7 +63,7 @@ RootstockCalculator(root="/scratch/gpfs/specific/install/path/rootstock", model=
 
 ## Available Models
 
-The set of available models varies by cluster and changes as new environments are added. See the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for what is currently deployed on each cluster.
+The set of available models varies by cluster and changes as new environments are added. See the [example configs](https://garden-ai.github.io/rootstock/clusters/) in the docs for what is currently deployed on each cluster.
 
 ## Architecture
 
