@@ -44,3 +44,6 @@ Thumbs.db
 
 # Sockets (shouldn't be committed but just in case)
 /tmp/ipi_*
+
+# zensical
+site/
