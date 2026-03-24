@@ -67,6 +67,7 @@ def _install_single_environment(
     force: bool,
     models: str | None,
     verbose: bool,
+    no_push: bool = False,
 ) -> int:
     """
     Install a single environment from a file path or environment name.
@@ -171,8 +172,13 @@ def _install_single_environment(
     # Set up environment for uv commands.
     # UV_PYTHON_INSTALL_DIR ensures Python interpreters are stored in the rootstock
     # root directory, making the entire installation portable across machines/containers.
+    # UV_CACHE_DIR ensures the package cache is shared across users and stored with
+    # the rootstock installation rather than in individual home directories.
     python_install_dir = root / ".python"
     python_install_dir.mkdir(parents=True, exist_ok=True)
+
+    uv_cache_dir = root / ".uv-cache"
+    uv_cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Create virtual environment
     print("\n1. Creating virtual environment...")
@@ -182,6 +188,7 @@ def _install_single_environment(
         # Download Python to local temp directory
         download_env = os.environ.copy()
         download_env["UV_PYTHON_INSTALL_DIR"] = str(tmp_python_dir)
+        download_env["UV_CACHE_DIR"] = str(uv_cache_dir)
 
         result = subprocess.run(
             ["uv", "python", "install", python_version],
@@ -207,6 +214,7 @@ def _install_single_environment(
     # Phase 2: Create venv using the Python we just installed
     uv_env = os.environ.copy()
     uv_env["UV_PYTHON_INSTALL_DIR"] = str(python_install_dir)
+    uv_env["UV_CACHE_DIR"] = str(uv_cache_dir)
 
     result = subprocess.run(
         ["uv", "venv", str(env_target), "--python", python_version],
@@ -297,7 +305,7 @@ print(f"Downloaded model: {model}")
     print(f"\nBuilt environment: {env_target}")
 
     # Update manifest (quiet=True to avoid cluttering build output)
-    update_and_push_manifest(root, quiet=False)
+    update_and_push_manifest(root, quiet=False, push=not no_push)
 
     return 0
 
@@ -356,6 +364,7 @@ def cmd_install(args) -> int:
                 force=args.force,
                 models=args.models,
                 verbose=args.verbose,
+                no_push=args.no_push,
             )
 
             if result == 0:
@@ -384,4 +393,5 @@ def cmd_install(args) -> int:
         force=args.force,
         models=args.models,
         verbose=args.verbose,
+        no_push=args.no_push,
     )
