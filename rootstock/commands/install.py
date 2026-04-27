@@ -252,13 +252,15 @@ def _install_single_environment(
 
     # Install rootstock
     print("3. Installing rootstock...")
-    # Find rootstock package path
-    import rootstock
+    # Pin to the running rootstock's version so the env matches the driver,
+    # without depending on where the driver itself was installed from.
+    from importlib.metadata import version as _pkg_version
 
-    rootstock_path = Path(rootstock.__file__).parent.parent
+    rootstock_spec = f"rootstock=={_pkg_version('rootstock')}"
+    print(f"  Installing: {rootstock_spec}")
 
     result = subprocess.run(
-        ["uv", "pip", "install", "--python", str(env_python), str(rootstock_path)],
+        ["uv", "pip", "install", "--python", str(env_python), rootstock_spec],
         capture_output=not verbose,
         text=True,
         env=uv_env,
