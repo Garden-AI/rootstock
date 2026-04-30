@@ -118,7 +118,10 @@ def _run_probe_subprocess(checkpoint: str, system: str, device: str = "cuda") ->
     if checkpoint:
         cmd += ["--checkpoint", checkpoint]
     print(f"PROBE_CMD: {' '.join(cmd)}", flush=True)
-    return subprocess.run(cmd, env=sub_env).returncode
+    result = subprocess.run(cmd, env=sub_env)
+    if result.returncode != 0:
+        raise RuntimeError(f"Probe subprocess failed with code {result.returncode}")
+    return result.returncode
 
 
 # -----------------------------------------------------------------------------
@@ -145,6 +148,19 @@ def probe_esen(checkpoint: str = "esen-md-direct-all-omol", system: str = "molec
 )
 def probe_m3gnet(checkpoint: str = "", system: str = "crystal"):
     """M3GNet-PES unavailable in modern matgl; loads CHGNet as substitute."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# CHGNet — charge-informed universal potential
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "chgnet_env.py",
+    ["chgnet>=0.3.0", "ase>=3.22", "torch>=2.0"],
+)
+def probe_chgnet(checkpoint: str = "", system: str = "crystal"):
+    """Probe CHGNet. Empty checkpoint loads the default pretrained model."""
     return _run_probe_subprocess(checkpoint, system)
 
 
@@ -181,6 +197,19 @@ def probe_tensornet(checkpoint: str = "materialyze/TensorNet-PES-MatPES-PBE-2025
 )
 def probe_mace_off23(checkpoint: str = "medium", system: str = "molecule"):
     """Probe a MACE-OFF23 checkpoint. Default: medium model on H2O."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# MACE-MP-0 / MACE-Large — MACE foundation models for inorganic materials
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "mace_env.py",
+    ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.4.0,<2.10"],
+)
+def probe_mace(checkpoint: str = "medium", system: str = "crystal"):
+    """Probe a MACE-MP-0 checkpoint. Use --checkpoint large for MACE-Large."""
     return _run_probe_subprocess(checkpoint, system)
 
 
@@ -265,18 +294,143 @@ def probe_torchmdnet(checkpoint: str, system: str = "molecule"):
 
 
 # -----------------------------------------------------------------------------
-# OCP — Open Catalyst Project models (GemNet-OC/T, EquiformerV2, SCN, eSCN,
-#        DimeNet++, PaiNN, SchNet) via fairchem-core
+# GemNet — OC20 GemNet-OC / GemNet-dT via fairchem-core 1.x
 # -----------------------------------------------------------------------------
 
 @probe_image(
-    "ocp_env.py",
+    "gemnet_env.py",
     [
         "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
         "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_ocp(checkpoint: str = "GemNet-OC-Large-S2EF-OC20-All+MD", system: str = "slab_co"):
-    """Probe an OC20 model via fairchem 1.x. Default: GemNet-OC on CO/Cu slab."""
+def probe_gemnet(checkpoint: str = "GemNet-OC-Large-S2EF-OC20-All+MD", system: str = "slab_co"):
+    """Probe a GemNet OC20 checkpoint. Default: GemNet-OC on CO/Cu slab."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# EquiformerV2 — OC20 EquiformerV2 via fairchem-core 1.x
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "equiformer_env.py",
+    [
+        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
+        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+    ],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_equiformer(checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD", system: str = "slab_co"):
+    """Probe an EquiformerV2 OC20 checkpoint on CO/Cu slab."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# DimeNet++ — OC20 DimeNet++ via fairchem-core 1.x
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "dimenet_env.py",
+    [
+        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
+        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+    ],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_dimenet(checkpoint: str = "DimeNet++-S2EF-OC20-All", system: str = "slab_co"):
+    """Probe a DimeNet++ OC20 checkpoint on CO/Cu slab."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# SCN — OC20 SCN via fairchem-core 1.x
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "scn_env.py",
+    [
+        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
+        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+    ],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_scn(checkpoint: str = "SCN-S2EF-OC20-All+MD", system: str = "slab_co"):
+    """Probe an SCN OC20 checkpoint on CO/Cu slab."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# eSCN — OC20 eSCN via fairchem-core 1.x
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "escn_env.py",
+    [
+        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
+        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+    ],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_escn(checkpoint: str = "eSCN-L6-M2-Lay12-S2EF-OC20-All+MD", system: str = "slab_co"):
+    """Probe an eSCN OC20 checkpoint on CO/Cu slab."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# PaiNN — OC20 PaiNN via fairchem-core 1.x
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "painn_env.py",
+    [
+        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
+        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+    ],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_painn(checkpoint: str = "PaiNN-S2EF-OC20-All", system: str = "slab_co"):
+    """Probe a PaiNN OC20 checkpoint on CO/Cu slab."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# SchNet — OC20 SchNet via fairchem-core 1.x
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "schnet_env.py",
+    [
+        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
+        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+    ],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_schnet(checkpoint: str = "SchNet-S2EF-OC20-All", system: str = "slab_co"):
+    """Probe a SchNet OC20 checkpoint on CO/Cu slab."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# UMA — FAIRChem multi-task universal model (small and medium)
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "uma_env.py",
+    ["torch>=2.4.0", "fairchem-core>=2.0.0", "ase>=3.22", "torch-geometric"],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_uma_small(checkpoint: str = "uma-s-1p1", system: str = "crystal"):
+    """Probe UMA Small on OMAT-style bulk materials."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+@probe_image(
+    "uma_env.py",
+    ["torch>=2.4.0", "fairchem-core>=2.0.0", "ase>=3.22", "torch-geometric"],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_uma_medium(checkpoint: str = "uma-m-1p1", system: str = "crystal"):
+    """Probe UMA Medium on OMAT-style bulk materials."""
     return _run_probe_subprocess(checkpoint, system)

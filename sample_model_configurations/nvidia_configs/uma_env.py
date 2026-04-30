@@ -18,7 +18,12 @@ via the FAIRChem library.
 
 Models:
     - "uma-s-1p1": UMA small model (default)
-    - Other UMA variants as released by FAIRChem
+    - "uma-m-1p1": UMA medium model (more accurate, more memory intensive)
+
+Task:
+    This config defaults to the "omat" task for inorganic materials. For
+    catalysis, molecules, MOFs, or molecular crystals, copy this env and set
+    task_name to "oc20", "omol", "odac", or "omc" respectively.
 """
 
 
@@ -27,7 +32,7 @@ def setup(model: str = "uma-s-1p1", device: str = "cuda"):
     Load a UMA calculator.
 
     Args:
-        model: Model identifier (e.g., "uma-s-1p1"). Passed directly to
+        model: Model identifier (e.g., "uma-s-1p1" or "uma-m-1p1"). Passed directly to
                pretrained_mlip.get_predict_unit().
         device: PyTorch device string (e.g., "cuda", "cuda:0", "cpu")
 
