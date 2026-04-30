@@ -15,8 +15,8 @@ Usage:
     modal run modal_app.py::probe_esen
     modal run modal_app.py::probe_esen --checkpoint esen-sm-conserving-all-oc25 --system slab_co
 
-To add a new MLIP: define a new `<name>_image` and a new `probe_<name>`
-function below, following the eSEN block as a template.
+To add a new MLIP: add a `probe_<name>` function decorated with `@probe_image(...)`,
+following the eSEN block as a template.
 """
 
 from pathlib import Path
@@ -59,6 +59,42 @@ IMG_PROBE = "/workshop/probe.py"
 HF_SECRET = modal.Secret.from_name("huggingface-token")
 
 
+def probe_image(
+    config_file: str,
+    deps: list[str],
+    *,
+    python_version: str = "3.10",
+    find_links: str | None = None,
+    apt_packages: list[str] | None = None,
+    no_deps: list[str] | None = None,
+    gpu: str = "A10G",
+):
+    """Decorator factory: builds a Modal image from deps and wires up app.function.
+
+    no_deps: packages installed with --no-deps after the main install (useful
+    when a package's declared deps can't resolve but the package itself works).
+    """
+    img = modal.Image.debian_slim(python_version=python_version)
+    if apt_packages:
+        img = img.apt_install(*apt_packages)
+    img = img.uv_pip_install(*deps, **({"find_links": find_links} if find_links else {}))
+    if no_deps:
+        img = img.run_commands(
+            f"/.uv/uv pip install --system --no-deps {' '.join(repr(p) for p in no_deps)}"
+        )
+    img = (
+        img.add_local_file(str(CONFIGS / config_file), IMG_CONFIG)
+           .add_local_file(str(AGENT / "probe.py"), IMG_PROBE)
+    )
+    return app.function(
+        image=img,
+        gpu=gpu,
+        volumes={CACHE_MOUNT: model_cache},
+        secrets=[HF_SECRET],
+        timeout=900,
+    )
+
+
 def _run_probe_subprocess(checkpoint: str, system: str, device: str = "cuda") -> int:
     """
     Run probe.py as a subprocess so its STAGE markers stream to stdout in
@@ -89,30 +125,158 @@ def _run_probe_subprocess(checkpoint: str, system: str, device: str = "cuda") ->
 # eSEN — FAIRChem single-task (OMol25, OC25, ODAC25)
 # -----------------------------------------------------------------------------
 
-esen_image = (
-    modal.Image.debian_slim(python_version="3.10")
-    .uv_pip_install(
-        "torch>=2.4.0",
-        "fairchem-core>=2.0.0",
-        "ase>=3.22",
-        "torch-geometric",
-        find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
-    )
-    .add_local_file(str(CONFIGS / "esen_env.py"), IMG_CONFIG)
-    .add_local_file(str(AGENT / "probe.py"), IMG_PROBE)
+@probe_image(
+    "esen_env.py",
+    ["torch>=2.4.0", "fairchem-core>=2.0.0", "ase>=3.22", "torch-geometric"],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-
-
-@app.function(
-    image=esen_image,
-    gpu="A10G",
-    volumes={CACHE_MOUNT: model_cache},
-    secrets=[HF_SECRET],
-    timeout=900,
-)
-def probe_esen(
-    checkpoint: str = "esen-md-direct-all-omol",
-    system: str = "molecule",
-):
+def probe_esen(checkpoint: str = "esen-md-direct-all-omol", system: str = "molecule"):
     """Probe an eSEN checkpoint. Default: OMol25 H2O."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# M3GNet — MatGL universal potential (Materials Project / materialyze HF)
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "m3gnet_env.py",
+    ["chgnet>=0.4.0", "ase>=3.22", "torch>=2.0"],
+)
+def probe_m3gnet(checkpoint: str = "", system: str = "crystal"):
+    """M3GNet-PES unavailable in modern matgl; loads CHGNet as substitute."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# TensorNet — MatGL universal potential (MatPES)
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "tensornet_env.py",
+    [
+        "torch>=2.4.0", "ase>=3.22",
+        "torch>=2.4.0", "ase>=3.22", "huggingface_hub",
+        "pymatgen", "monty", "ruamel.yaml", "scipy",
+        "torch-geometric", "torch-scatter", "torch-sparse",
+        "torch-cluster", "torch-spline-conv",
+    ],
+    python_version="3.11",
+    apt_packages=["git"],
+    no_deps=["matgl @ git+https://github.com/materialsvirtuallab/matgl.git"],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_tensornet(checkpoint: str = "materialyze/TensorNet-PES-MatPES-PBE-2025.2", system: str = "crystal"):
+    """Probe a TensorNet/MatGL checkpoint. Default: MatPES PBE on Cu bulk."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# MACE-OFF23 — MACE force field for organic molecules
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "mace_off23_env.py",
+    ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.4.0,<2.10"],
+)
+def probe_mace_off23(checkpoint: str = "medium", system: str = "molecule"):
+    """Probe a MACE-OFF23 checkpoint. Default: medium model on H2O."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# ANI-2x — TorchANI neural network potential for organic molecules
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "ani_env.py",
+    ["torchani>=2.2", "ase>=3.22", "torch>=2.0"],
+)
+def probe_ani(checkpoint: str = "ANI2x", system: str = "molecule"):
+    """Probe an ANI model. Default: ANI-2x on H2O."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# Orb — Orbital Materials universal potential (v2, v3)
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "orb_env.py",
+    ["orb-models>=0.4.0", "ase>=3.22", "torch>=2.0"],
+)
+def probe_orb(checkpoint: str = "orb-v2", system: str = "crystal"):
+    """Probe an Orb checkpoint. Default: orb-v2 on Cu bulk."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# MatterSim — Microsoft universal potential (v1)
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "mattersim_env.py",
+    ["mattersim>=1.1.0", "ase>=3.22", "torch>=2.0"],
+)
+def probe_mattersim(checkpoint: str = "MatterSim-v1.0.0-5M", system: str = "crystal"):
+    """Probe a MatterSim checkpoint. Default: v1 5M on Cu bulk."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# NequIP — E(3)-equivariant GNN (system-specific, deployed model required)
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "nequip_env.py",
+    ["nequip>=0.6.0", "ase>=3.22", "torch>=2.0", "torch-geometric"],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_nequip(checkpoint: str, system: str = "crystal"):
+    """Probe a NequIP deployed model. Requires path to a deployed .pth file."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# Allegro — scalable E(3)-equivariant GNN (NequIP family)
+# Note: No public checkpoint; probe_allegro is not included here.
+# allegro_env.py exists for use in rootstock environments where a deployed
+# Allegro model file is provided. Install with:
+#   uv pip install --no-deps "allegro @ git+https://github.com/mir-group/allegro.git"
+# -----------------------------------------------------------------------------
+
+
+# -----------------------------------------------------------------------------
+# TorchMD-Net — equivariant transformer for MD
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "torchmdnet_env.py",
+    [
+        "ase>=3.22", "torch>=2.0",
+        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+    ],
+    no_deps=["torchmd-net>=2.0.0"],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_torchmdnet(checkpoint: str, system: str = "molecule"):
+    """Probe a TorchMD-Net checkpoint (.ckpt path or HF repo ID)."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# OCP — Open Catalyst Project models (GemNet-OC/T, EquiformerV2, SCN, eSCN,
+#        DimeNet++, PaiNN, SchNet) via fairchem-core
+# -----------------------------------------------------------------------------
+
+@probe_image(
+    "ocp_env.py",
+    [
+        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
+        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+    ],
+    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+)
+def probe_ocp(checkpoint: str = "GemNet-OC-Large-S2EF-OC20-All+MD", system: str = "slab_co"):
+    """Probe an OC20 model via fairchem 1.x. Default: GemNet-OC on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)

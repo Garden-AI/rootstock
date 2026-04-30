@@ -47,10 +47,10 @@ def build_system(kind: str):
         return bulk("Cu", "fcc", a=3.6) * (2, 2, 2)
 
     if kind == "slab_co":
-        from ase.build import add_adsorbate, fcc111
+        from ase.build import add_adsorbate, fcc111, molecule
 
         slab = fcc111("Cu", size=(2, 2, 3), vacuum=10.0)
-        add_adsorbate(slab, "CO", height=2.0, position="ontop")
+        add_adsorbate(slab, molecule("CO"), height=2.0, position="ontop")
         return slab
 
     raise ValueError(f"Unknown --system kind: {kind!r}")
