@@ -90,8 +90,15 @@ def _install_single_environment(
             print(f"Error: {error}", file=sys.stderr)
             return 1
 
-        # Check if already registered
-        if env_source.exists() and not force:
+        # If the source file is already the registered file (the natural flow
+        # on a shared install: drop file into <root>/environments/ then run
+        # install), skip the copy and the "already registered" guard.
+        already_at_canonical = (
+            env_source.exists()
+            and source_path.resolve() == env_source.resolve()
+        )
+
+        if env_source.exists() and not force and not already_at_canonical:
             print(
                 f"Error: Environment '{env_name}' already registered at {env_source}",
                 file=sys.stderr,
@@ -99,11 +106,12 @@ def _install_single_environment(
             print("Use --force to update and rebuild", file=sys.stderr)
             return 1
 
-        # Create environments directory and copy file
+        # Create environments directory and copy file (unless already there)
         env_dir = root / "environments"
         env_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, env_source)
-        print(f"Registered: {source_path} -> {env_source}")
+        if not already_at_canonical:
+            shutil.copy2(source_path, env_source)
+            print(f"Registered: {source_path} -> {env_source}")
 
     else:
         # NAME MODE: use existing registered environment
