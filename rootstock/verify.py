@@ -1,0 +1,119 @@
+"""
+Checkpoint verification for Rootstock.
+
+A single helper that spawns a worker against a (env, checkpoint, device,
+setup_kwargs) combination, runs one forward pass on a hardcoded test structure,
+and asserts the result is finite and non-degenerate.
+
+Used by both ``rootstock add`` (one checkpoint) and ``rootstock smoke-test``
+(all of them). The smoke test only asks "did the computational pipeline
+produce a finite, non-degenerate result?" — not "is the answer chemically
+meaningful?". A water molecule in vacuum is out-of-domain for inorganic-only
+MLIPs, but those models still return finite numbers; that's all we need.
+"""
+
+from __future__ import annotations
+
+import uuid
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from ase import Atoms
+
+
+# Threshold below which we consider forces "all zero" — guards against the
+# silent failure where a model returns zeros for everything.
+_FORCE_ZERO_THRESHOLD = 1e-8
+
+
+def _smoke_test_atoms() -> "Atoms":  # noqa: UP037 — Atoms is TYPE_CHECKING-only
+    """Hardcoded H2O-in-a-box used as input for every smoke test."""
+    from ase import Atoms
+
+    atoms = Atoms(
+        "H2O",
+        positions=[
+            [0.00, 0.00, 0.00],
+            [0.96, 0.00, 0.00],
+            [0.24, 0.93, 0.00],
+        ],
+        cell=[10.0, 10.0, 10.0],
+        pbc=True,
+    )
+    # eSEN OMol checkpoints expect these. Harmless for everyone else.
+    atoms.info["charge"] = 0
+    atoms.info["spin"] = 1
+    # Break any accidental symmetry so forces aren't trivially zero.
+    atoms.positions[1, 1] += 0.05
+    return atoms
+
+
+def verify_checkpoint(
+    root: Path,
+    env_name: str,
+    checkpoint: str,
+    device: str,
+    setup_kwargs: dict | None = None,
+) -> tuple[bool, str | None]:
+    """
+    Run a single forward pass to verify a checkpoint loads and computes.
+
+    Args:
+        root: Rootstock root directory.
+        env_name: Name of pre-built environment (e.g., "mace_env").
+        checkpoint: Checkpoint identifier passed to setup() as the model arg.
+        device: PyTorch device (e.g., "cuda", "cpu").
+        setup_kwargs: Extra keyword arguments forwarded to setup().
+
+    Returns:
+        (success, error_message). On success, error_message is None.
+        On failure, success is False and error_message is a short string
+        describing what went wrong.
+    """
+    from .server import RootstockServer
+
+    setup_kwargs = setup_kwargs or {}
+    atoms = _smoke_test_atoms()
+    socket_name = f"rootstock_verify_{uuid.uuid4().hex[:8]}"
+
+    server = RootstockServer(
+        env_name=env_name,
+        model=checkpoint,
+        device=device,
+        socket_name=socket_name,
+        root=Path(root),
+        setup_kwargs=setup_kwargs,
+    )
+
+    try:
+        server.start()
+        energy, forces, virial = server.calculate(
+            positions=atoms.positions,
+            cell=np.array(atoms.cell),
+            atomic_numbers=atoms.numbers,
+            pbc=list(atoms.pbc),
+        )
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    finally:
+        try:
+            server.stop()
+        except Exception:
+            pass
+
+    n_atoms = len(atoms)
+    if not np.isfinite(energy):
+        return False, f"non-finite energy: {energy!r}"
+    if forces.shape != (n_atoms, 3):
+        return False, f"forces shape {forces.shape} != ({n_atoms}, 3)"
+    if not np.all(np.isfinite(forces)):
+        return False, "non-finite values in forces"
+    if np.linalg.norm(forces) <= _FORCE_ZERO_THRESHOLD:
+        return False, "forces are all (near-)zero — model likely returned zeros"
+    if not np.all(np.isfinite(virial)):
+        return False, "non-finite values in virial"
+
+    return True, None

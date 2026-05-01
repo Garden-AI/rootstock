@@ -9,6 +9,7 @@ This module handles:
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -41,19 +42,25 @@ def get_model_cache_env(root: Path) -> dict[str, str]:
     }
 
 
-# Simplified wrapper template for pre-built environments
-# No PEP 723 metadata needed since dependencies are already installed
+# Simplified wrapper template for pre-built environments.
+# No PEP 723 metadata needed since dependencies are already installed.
+# setup_kwargs travel via a JSON sidecar file rather than being baked into
+# the source — keeps us out of the repr()/escaping business for arbitrary values.
 WRAPPER_TEMPLATE = """
-import sys
+import sys, json
 sys.path.insert(0, "{env_dir}")
 from env_source import setup
 from rootstock.worker import run_worker
+
+with open("{kwargs_path}") as f:
+    setup_kwargs = json.load(f)
 
 run_worker(
     setup_fn=setup,
     model="{model}",
     device="{device}",
     socket_path="{socket_path}",
+    setup_kwargs=setup_kwargs,
 )
 """
 
@@ -113,6 +120,7 @@ class EnvironmentManager:
         model: str,
         device: str,
         socket_path: str,
+        setup_kwargs: dict | None = None,
     ) -> Path:
         """
         Generate a wrapper script for the given environment.
@@ -122,11 +130,19 @@ class EnvironmentManager:
             model: Model identifier to pass to setup()
             device: Device string to pass to setup()
             socket_path: Unix socket path for IPC
+            setup_kwargs: Extra keyword arguments forwarded to setup() via JSON sidecar
 
         Returns:
             Path to the generated wrapper script (temp file).
         """
         env_dir = self.root / "envs" / env_name
+
+        # Write setup_kwargs to a JSON sidecar that the wrapper reads at startup.
+        kwargs_fd, kwargs_path = tempfile.mkstemp(suffix=".json", prefix="rootstock_kwargs_")
+        with open(kwargs_fd, "w") as f:
+            json.dump(setup_kwargs or {}, f)
+        kwargs_path = Path(kwargs_path)
+        self._temp_files.append(kwargs_path)
 
         # Generate wrapper content
         wrapper_content = WRAPPER_TEMPLATE.format(
@@ -134,6 +150,7 @@ class EnvironmentManager:
             model=model,
             device=device,
             socket_path=socket_path,
+            kwargs_path=str(kwargs_path),
         )
 
         # Write to temp file

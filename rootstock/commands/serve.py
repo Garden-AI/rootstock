@@ -21,12 +21,19 @@ def cmd_serve(args) -> int:
         1: Error
     """
     from ..environment import EnvironmentManager
+    from .add import _kwargs_from_args
 
     root = get_root_or_exit(args)
     env_name = f"{args.model}_env"
     socket_path = args.socket
     checkpoint = args.checkpoint
     device = args.device
+
+    try:
+        setup_kwargs = _kwargs_from_args(getattr(args, "kwarg", None))
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
 
     # Create environment manager and validate environment exists
     env_mgr = EnvironmentManager(root=root)
@@ -42,6 +49,7 @@ def cmd_serve(args) -> int:
         model=checkpoint,
         device=device,
         socket_path=socket_path,
+        setup_kwargs=setup_kwargs,
     )
 
     # Get spawn command and environment

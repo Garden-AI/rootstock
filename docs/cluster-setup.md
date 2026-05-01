@@ -45,13 +45,13 @@ This will interactively prompt you for:
 
 ## Step 3: Install Environments
 
-Still on the login node:
+Still on the login node — `install` only builds the venv, no model weights yet:
 
 ```bash
 # Install individual environments
-rootstock install mace_env.py --models small,medium
+rootstock install mace_env.py
 rootstock install chgnet_env.py
-rootstock install uma_env.py --models uma-s-1p1
+rootstock install uma_env.py
 rootstock install tensornet_env.py
 
 # Or point it at a directory with multiple environments
@@ -61,13 +61,39 @@ rootstock install ./environments/
 rootstock status
 ```
 
-Each `rootstock install` command performs the following:
+Each `rootstock install` command:
 
 1. Creates an isolated virtual environment under `{root}/envs/`
 2. Installs MLIP dependencies
-3. Pre-downloads model weights (when `--models` is specified)
 
 This process can take several minutes per environment, depending on the MLIP and network conditions.
+
+## Step 4: Add Checkpoints
+
+`rootstock add` is a separate, idempotent step that **downloads** weights and (where available) **verifies** them with a forward pass. Splitting download from verify lets you do the right thing on each kind of node:
+
+```bash
+# Login node (CPU, has network): download weights only
+rootstock add mace medium --no-verify
+rootstock add uma uma-s-1p1 --no-verify --kwarg task=omat
+
+# GPU node (no network): skip download (already fetched), verify on GPU
+rootstock add mace medium
+rootstock add uma uma-s-1p1 --kwarg task=omat
+```
+
+If a node has both network access and a GPU, run without `--no-verify` to do everything in one shot.
+
+`rootstock add` is idempotent — re-running it after a successful download will skip the download phase and just re-verify.
+
+`rootstock smoke-test` re-verifies every fetched checkpoint and is suitable for nightly cron:
+
+```bash
+0 4 * * * rootstock smoke-test --json > /var/log/rootstock-smoke.log 2>&1
+```
+
+!!! note "Smoke-test always uses default kwargs"
+    `smoke-test` calls each env's `setup()` with no extra kwargs. A checkpoint that only works with non-default kwargs (e.g., a UMA checkpoint that needs `task=omol`) will appear failing in nightly smoke-test even though `add` succeeded. The remedy is to make the preferred kwargs the env's default in the env file.
 
 !!! note "Finding Environment Files"
     See the [Example Configs](clusters.md) page for environment files that are known to work — you can use these as a starting point for your cluster.
@@ -154,15 +180,22 @@ After setup, the Rootstock root directory will look like this:
 
 ## Updating Environments
 
-To update an environment with new dependencies or model weights:
+To update an environment with new dependencies:
 
 ```bash
-# Rebuild with new models
-rootstock install mace_env.py --models small,medium,large --force
+# Rebuild the venv (drops verification timestamps for that env's checkpoints)
+rootstock install mace_env.py --force
+
+# Re-verify checkpoints after the rebuild
+rootstock add mace small
+rootstock add mace medium
+rootstock add mace large
 
 # Push updated manifest
 rootstock manifest push
 ```
+
+Rebuilding an env invalidates prior verifications (the venv changed; weights in `cache/` are unaffected). `rootstock status` will show those checkpoints as **stale** until you re-run `add` or `smoke-test`.
 
 ## Troubleshooting
 

@@ -21,6 +21,8 @@ from pathlib import Path
 
 from .config import UserConfig
 
+SCHEMA_VERSION = 2
+
 
 @dataclass
 class Maintainer:
@@ -38,6 +40,33 @@ class Maintainer:
 
 
 @dataclass
+class CheckpointInfo:
+    """Metadata for a single checkpoint registered with an environment."""
+
+    fetched_at: str | None = None       # ISO 8601, set when download succeeds
+    verified_at: str | None = None      # ISO 8601, set when smoke test passes
+    verified_device: str | None = None  # "cuda", "cpu", etc.
+    last_error: str | None = None       # most recent error from add or smoke-test
+
+    def to_dict(self) -> dict:
+        return {
+            "fetched_at": self.fetched_at,
+            "verified_at": self.verified_at,
+            "verified_device": self.verified_device,
+            "last_error": self.last_error,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> CheckpointInfo:
+        return cls(
+            fetched_at=data.get("fetched_at"),
+            verified_at=data.get("verified_at"),
+            verified_device=data.get("verified_device"),
+            last_error=data.get("last_error"),
+        )
+
+
+@dataclass
 class EnvironmentInfo:
     """Metadata for a single built environment."""
 
@@ -47,7 +76,7 @@ class EnvironmentInfo:
     source: str  # Full source code of the environment file
     python_requires: str  # ">=3.10"
     dependencies: dict[str, str]  # {"mace-torch": "0.3.6"}
-    checkpoints: list[str] = field(default_factory=list)
+    checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
     error_message: str | None = None
 
     def to_dict(self) -> dict:
@@ -58,7 +87,7 @@ class EnvironmentInfo:
             "source": self.source,
             "python_requires": self.python_requires,
             "dependencies": self.dependencies,
-            "checkpoints": self.checkpoints,
+            "checkpoints": {name: ckpt.to_dict() for name, ckpt in self.checkpoints.items()},
         }
         if self.error_message:
             d["error_message"] = self.error_message
@@ -66,6 +95,11 @@ class EnvironmentInfo:
 
     @classmethod
     def from_dict(cls, data: dict) -> EnvironmentInfo:
+        checkpoints_data = data.get("checkpoints", {})
+        checkpoints = {
+            name: CheckpointInfo.from_dict(ckpt_data)
+            for name, ckpt_data in checkpoints_data.items()
+        }
         return cls(
             status=data["status"],
             built_at=data["built_at"],
@@ -73,16 +107,23 @@ class EnvironmentInfo:
             source=data.get("source", ""),
             python_requires=data["python_requires"],
             dependencies=data["dependencies"],
-            checkpoints=data.get("checkpoints", []),
+            checkpoints=checkpoints,
             error_message=data.get("error_message"),
         )
+
+
+def is_verified(env: EnvironmentInfo, ckpt: CheckpointInfo) -> bool:
+    """Return True if checkpoint was verified after the env was last built."""
+    if ckpt.verified_at is None:
+        return False
+    return ckpt.verified_at > env.built_at  # ISO 8601 sorts lexically
 
 
 @dataclass
 class Manifest:
     """Root manifest for a rootstock installation."""
 
-    schema_version: str
+    schema_version: int
     cluster: str
     root: str
     maintainer: Maintainer
@@ -105,12 +146,23 @@ class Manifest:
 
     @classmethod
     def from_dict(cls, data: dict) -> Manifest:
+        # TODO: remove this v1 rejection once known clusters are migrated
+        # (see scripts/migrate_manifest_v1_to_v2.py). Tracked in follow-up.
+        version = data.get("schema_version")
+        if version != SCHEMA_VERSION:
+            raise RuntimeError(
+                f"manifest is schema_version={version!r}, expected {SCHEMA_VERSION}.\n"
+                f"Run scripts/migrate_manifest_v1_to_v2.py against this manifest "
+                f"before continuing.\n"
+                f"This script will be removed in a follow-up release."
+            )
+
         environments = {}
         for name, env_data in data.get("environments", {}).items():
             environments[name] = EnvironmentInfo.from_dict(env_data)
 
         return cls(
-            schema_version=data["schema_version"],
+            schema_version=version,
             cluster=data["cluster"],
             root=data["root"],
             maintainer=Maintainer.from_dict(data["maintainer"]),
@@ -327,7 +379,7 @@ def create_manifest(
     from . import __version__
 
     return Manifest(
-        schema_version="1",
+        schema_version=SCHEMA_VERSION,
         cluster=cluster,
         root=str(root),
         maintainer=Maintainer(

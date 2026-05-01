@@ -65,7 +65,6 @@ def _install_single_environment(
     root: Path,
     source: str,
     force: bool,
-    models: str | None,
     verbose: bool,
     no_push: bool = False,
 ) -> int:
@@ -74,7 +73,6 @@ def _install_single_environment(
 
     Returns 0 on success, 1 on failure.
     """
-    from ..environment import get_model_cache_env
     from ..pep723 import parse_pep723_metadata, validate_environment_file
     from .manifest import update_and_push_manifest
 
@@ -276,34 +274,6 @@ def _install_single_environment(
     print("4. Copying environment source...")
     shutil.copy(env_source, env_target / "env_source.py")
 
-    # Pre-download models if requested
-    if models:
-        model_list = [m.strip() for m in models.split(",")]
-        print(f"5. Pre-downloading models: {model_list}")
-
-        cache_env = get_model_cache_env(root)
-        env = {**os.environ, **cache_env}
-
-        for model in model_list:
-            print(f"   Downloading: {model}")
-            script = f'''
-import sys
-sys.path.insert(0, "{env_target}")
-from env_source import setup
-calc = setup("{model}", "cpu")
-print(f"Downloaded model: {model}")
-'''
-            result = subprocess.run(
-                [str(env_python), "-c", script],
-                env=env,
-                capture_output=not verbose,
-                text=True,
-            )
-            if result.returncode != 0:
-                print(f"   Warning: Failed to download {model}", file=sys.stderr)
-                if verbose:
-                    print(result.stderr, file=sys.stderr)
-
     print(f"\nBuilt environment: {env_target}")
 
     # Update manifest (quiet=True to avoid cluttering build output)
@@ -326,6 +296,14 @@ def cmd_install(args) -> int:
         1: One or more installs failed
     """
     from ..environment import check_uv_available
+
+    if getattr(args, "models", None):
+        print(
+            "Error: --models has been removed. Use 'rootstock add' instead:\n"
+            "  rootstock add <env> <checkpoint>",
+            file=sys.stderr,
+        )
+        return 2
 
     root = get_root_or_exit(args)
     source = args.source
@@ -364,7 +342,6 @@ def cmd_install(args) -> int:
                 root=root,
                 source=str(env_file),
                 force=args.force,
-                models=args.models,
                 verbose=args.verbose,
                 no_push=args.no_push,
             )
@@ -393,7 +370,6 @@ def cmd_install(args) -> int:
         root=root,
         source=source,
         force=args.force,
-        models=args.models,
         verbose=args.verbose,
         no_push=args.no_push,
     )

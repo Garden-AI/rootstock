@@ -33,11 +33,17 @@ uv pip install -e ".[dev]"
 
 ### CLI Commands
 ```bash
-# Build a pre-built environment
-rootstock build <env_name> --root <path> [--models m1,m2] [--force]
+# Build a pre-built environment (venv only — no model weights)
+rootstock install <env_source.py> [--root <path>] [--force]
 
-# Show status
-rootstock status --root <path>
+# Download + verify a checkpoint (idempotent). Use --no-verify on login nodes.
+rootstock add <env> <checkpoint> [--kwarg key=val ...] [--device cuda] [--no-verify]
+
+# Re-verify all fetched checkpoints (suitable for nightly cron)
+rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--json]
+
+# Show status (per-checkpoint verified/stale grid; --json for machine-readable)
+rootstock status [--root <path>] [--json]
 
 # List environments
 rootstock list --root <path>
@@ -113,19 +119,25 @@ the root directory is mounted (Modal Volume, HPC shared filesystem, etc.).
 ## API
 
 ```python
-# v0.5 API: explicit model and checkpoint parameters
+# v0.8 API: model and checkpoint are required; setup_kwargs is optional
 with RootstockCalculator(
     cluster="della",
     model="mace",              # Environment family -> mace_env
-    checkpoint="medium",       # Specific checkpoint (optional, uses default if omitted)
+    checkpoint="medium",       # Specific checkpoint — required
     device="cuda",
 ) as calc:
     atoms.calc = calc
     energy = atoms.get_potential_energy()
 
-# Checkpoint defaults to environment's default if omitted
-with RootstockCalculator(cluster="della", model="uma") as calc:
-    ...  # Uses uma-s-1p1 by default
+# Forward extra kwargs to the env's setup() function. Cannot contain
+# "model" or "device" — those are passed at the top level.
+with RootstockCalculator(
+    cluster="della",
+    model="uma",
+    checkpoint="uma-s-1p1",
+    setup_kwargs={"task": "omol"},
+) as calc:
+    ...
 ```
 
 ### Available Models
@@ -152,9 +164,13 @@ def setup(model: str, device: str = "cuda"):
     return mace_mp(model=model, device=device, default_dtype="float32")
 EOF
 
-# 2. Build pre-built environment
-rootstock build mace_env --root /path/to/rootstock --models small,medium
+# 2. Build pre-built environment (venv only — no model weights)
+rootstock install environments/mace_env.py --root /path/to/rootstock
 
-# 3. Verify
+# 3. Download and verify checkpoints (idempotent; use --no-verify on login nodes)
+rootstock add mace medium --root /path/to/rootstock
+rootstock add mace small --root /path/to/rootstock
+
+# 4. Verify install state
 rootstock status --root /path/to/rootstock
 ```

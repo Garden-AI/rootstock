@@ -162,11 +162,11 @@ rootstock new-env mace --force
 
 #### `rootstock install`
 
-Install environment(s) from a file, directory, or rebuild by name.
+Build environment(s) from a file or directory. Builds the venv only — no model weights. Use `rootstock add` separately to download and verify checkpoints.
 
 ```bash
 # Install from a single file
-rootstock install ./mace_env.py --models small,medium
+rootstock install ./mace_env.py
 
 # Install all environments from a directory
 rootstock install ./environments/
@@ -181,10 +181,57 @@ rootstock install mace_env.py --no-push
 Options:
 
 - `--root <path>`: Specify root directory (or use `$ROOTSTOCK_ROOT`)
-- `--models <list>`: Comma-separated list of models to pre-download
 - `--force`: Update registration and rebuild if environment exists
 - `--verbose`, `-v`: Verbose output
 - `--no-push`: Skip pushing manifest to backend
+
+!!! note "`--models` was removed in v0.8.0"
+    Pre-downloading weights at install time is now a separate step. Use `rootstock add <env> <checkpoint>` instead. Passing `--models` to `install` will exit with a migration error.
+
+#### `rootstock add`
+
+Download and verify a checkpoint for a built environment. Idempotent — safe to re-run.
+
+```bash
+# Login node (CPU, has network): download only
+rootstock add mace medium --no-verify
+
+# GPU node (no network): skip download (already fetched), verify on GPU
+rootstock add mace medium
+
+# Forward extra kwargs to setup() — values are JSON-decoded, fall back to strings
+rootstock add uma uma-s-1p1 --kwarg task=omat
+rootstock add some_env some_ckpt --kwarg charge=-1 --kwarg enabled=true
+```
+
+Options:
+
+- `--device <dev>`: Device for verification (default: `cuda`)
+- `--no-verify`: Skip the verify phase (login-node escape hatch)
+- `--kwarg KEY=VAL`: Repeatable extra kwarg passed to `setup()`. Values are JSON-decoded first; on parse failure, fall back to a string
+- `--root <path>`: Root directory
+- `--no-push`: Skip pushing manifest to backend
+
+#### `rootstock smoke-test`
+
+Re-verify checkpoints already in the manifest. Never downloads. Suitable for nightly cron.
+
+```bash
+# Test all fetched checkpoints
+rootstock smoke-test
+
+# Filter
+rootstock smoke-test --env mace
+rootstock smoke-test --env mace --checkpoint medium
+
+# JSON summary for cron
+rootstock smoke-test --json
+```
+
+Exit code is 0 if all tested checkpoints passed, 1 otherwise.
+
+!!! note "Smoke-test always uses default kwargs"
+    `smoke-test` calls each env's `setup()` with no extra kwargs. A checkpoint that only works with non-default kwargs will appear failing here even though `add` succeeded — make the preferred kwargs the env's default if you need it to pass nightly.
 
 #### `rootstock serve`
 

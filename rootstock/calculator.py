@@ -41,11 +41,13 @@ class RootstockCalculator(Calculator):
             atoms.calc = calc
             print(atoms.get_potential_energy())
 
-        # Checkpoint defaults to environment's default if omitted
+        # Forward extra kwargs to the env's setup() function:
         with RootstockCalculator(
             cluster="della",
             model="uma",
+            checkpoint="uma-s-1p1",
             device="cuda",
+            setup_kwargs={"task": "omol"},
         ) as calc:
             atoms.calc = calc
             print(atoms.get_potential_energy())
@@ -60,10 +62,11 @@ class RootstockCalculator(Calculator):
     def __init__(
         self,
         model: str,
-        checkpoint: str | None = None,
+        checkpoint: str,
         cluster: str | None = None,
         root: str | Path | None = None,
         device: str = "cuda",
+        setup_kwargs: dict | None = None,
         log=None,
         **kwargs,
     ):
@@ -74,17 +77,29 @@ class RootstockCalculator(Calculator):
             model: Environment family name (e.g. "mace", "uma", "tensornet").
                    Maps to {model}_env environment.
             checkpoint: Specific checkpoint/weights to load. Passed to the
-                        environment's setup() as the model argument. If omitted,
-                        the environment's default is used.
+                        environment's setup() as the model argument. Required.
             cluster: Known cluster name ("modal", "della"). Mutually exclusive with root.
             root: Path to rootstock directory. Mutually exclusive with cluster.
             device: PyTorch device ("cuda", "cuda:0", "cpu")
+            setup_kwargs: Extra keyword arguments forwarded to the env's setup()
+                          function. May not contain "model" or "device" — those
+                          are passed at the top level.
             log: Optional file object for logging
             **kwargs: Additional arguments passed to ASE Calculator
         """
         super().__init__(**kwargs)
 
+        if setup_kwargs is None:
+            setup_kwargs = {}
+        reserved = {"model", "device"} & setup_kwargs.keys()
+        if reserved:
+            raise TypeError(
+                f"setup_kwargs cannot contain reserved keys {sorted(reserved)}; "
+                "pass them at the top level instead."
+            )
+
         self.device = device
+        self.setup_kwargs = setup_kwargs
         self.log = log
 
         # Resolve root directory
@@ -99,7 +114,7 @@ class RootstockCalculator(Calculator):
             raise ValueError("Must specify either 'cluster' or 'root'")
 
         self.env_name = f"{model}_env"
-        self.model_arg = checkpoint or ""
+        self.model_arg = checkpoint
 
         # Verify environment is built
         env_python = self.root / "envs" / self.env_name / "bin" / "python"
@@ -129,6 +144,7 @@ class RootstockCalculator(Calculator):
                 socket_name=self._socket_name,
                 root=self.root,
                 log=self.log,
+                setup_kwargs=self.setup_kwargs,
             )
             self._server.start()
 

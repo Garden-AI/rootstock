@@ -217,10 +217,13 @@ def setup(model: str, device: str = "cuda"):
 After creating an environment file, install it and verify the build:
 
 ```bash
-# Install the environment
-rootstock install my_env.py --models default_checkpoint
+# Install the environment (builds the venv)
+rootstock install my_env.py
 
-# Verify it was built successfully
+# Download and verify a checkpoint
+rootstock add my default_checkpoint
+
+# Verify it was built and the checkpoint is registered
 rootstock status
 ```
 
