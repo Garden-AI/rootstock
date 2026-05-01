@@ -35,6 +35,25 @@ def setup(model: str, device: str = "cuda"):
     Returns:
         ASE-compatible NequIPCalculator.
     """
-    from nequip.ase import NequIPCalculator
+    from inspect import signature
 
-    return NequIPCalculator.from_deployed_model(model_path=model, device=device)
+    try:
+        from nequip.integrations.ase import NequIPCalculator
+    except ImportError:
+        from nequip.ase import NequIPCalculator
+
+    if hasattr(NequIPCalculator, "from_deployed_model"):
+        load_model = NequIPCalculator.from_deployed_model
+    elif hasattr(NequIPCalculator, "from_compiled_model"):
+        load_model = NequIPCalculator.from_compiled_model
+    else:
+        raise AttributeError(
+            "NequIPCalculator has neither from_deployed_model nor from_compiled_model"
+        )
+
+    params = signature(load_model).parameters
+    kwargs = {"device": device} if "device" in params else {}
+    for path_arg in ("model_path", "file_name", "path"):
+        if path_arg in params:
+            return load_model(**{path_arg: model}, **kwargs)
+    return load_model(model, **kwargs)
