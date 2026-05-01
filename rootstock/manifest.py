@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -345,11 +346,18 @@ def save_manifest(manifest: Manifest, root: Path) -> None:
     # Ensure root directory exists
     root.mkdir(parents=True, exist_ok=True)
 
-    # Atomic write: write to temp file, then rename
+    # Atomic write: write to temp file, then rename. mkstemp always creates
+    # the file with 0600, which clamps the POSIX ACL mask to --- on shared
+    # installs that rely on inherited default ACLs (e.g., NERSC project dirs).
+    # Reset the mode to honor the process umask so group/other access can
+    # come through the parent's default ACL.
     fd, temp_path = tempfile.mkstemp(dir=root, suffix=".json")
     try:
         with open(fd, "w") as f:
             json.dump(manifest.to_dict(), f, indent=2)
+        umask_value = os.umask(0)
+        os.umask(umask_value)
+        os.chmod(temp_path, 0o666 & ~umask_value)
         Path(temp_path).rename(manifest_path)
     except Exception:
         # Clean up temp file on failure
