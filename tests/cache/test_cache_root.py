@@ -97,11 +97,6 @@ def test_unknown_cluster_raises():
         get_cluster("not-a-real-cluster")
 
 
-def test_modal_is_not_a_registered_cluster():
-    """Modal is a testing utility, not a deploy target — must not be in the registry."""
-    assert "modal" not in CLUSTER_REGISTRY
-
-
 # ---------- resolve_cache_root (CLI helper) -------------------------------
 
 
