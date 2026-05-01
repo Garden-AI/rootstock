@@ -84,18 +84,32 @@ def cmd_status(args) -> int:
                 print(_checkpoint_line(env, ckpt_name, ckpt))
 
     # Show cache sizes. Cache may live under the install root or under a
-    # separate cluster-registered cache_root.
+    # separate cluster-registered cache_root. Some libraries respect
+    # XDG_CACHE_HOME and write under cache/; others hardcode ~/.cache/ or
+    # ~/.matgl/ etc. and write under our redirected home/. Sum both.
     cache_root = resolve_cache_root(root)
-    cache_dir = cache_root / "cache"
-    print(f"\nCache: {cache_dir}")
-    if cache_dir.exists():
-        for subdir in sorted(cache_dir.iterdir()):
-            if subdir.is_dir():
-                total_size = sum(f.stat().st_size for f in subdir.rglob("*") if f.is_file())
-                size_mb = total_size / (1024 * 1024)
-                print(f"  {subdir.name + '/':<20} {size_mb:.1f} MB")
+    print(f"\nCache: {cache_root}")
+
+    locations: list = []
+    for parent in (cache_root / "cache", cache_root / "home" / ".cache"):
+        if parent.exists():
+            locations.extend(p for p in sorted(parent.iterdir()) if p.is_dir())
+    home_dir = cache_root / "home"
+    if home_dir.exists():
+        for sub in sorted(home_dir.iterdir()):
+            if sub.is_dir() and sub.name != ".cache":
+                locations.append(sub)
+
+    if not locations:
+        print("  (empty)")
     else:
-        print("  (no cache directory yet)")
+        total_bytes = 0
+        for loc in locations:
+            size = sum(f.stat().st_size for f in loc.rglob("*") if f.is_file())
+            total_bytes += size
+            rel = loc.relative_to(cache_root)
+            print(f"  {str(rel) + '/':<32} {size / (1024 * 1024):>8.1f} MB")
+        print(f"  {'TOTAL':<32} {total_bytes / (1024 * 1024):>8.1f} MB")
 
     # Show config file location
     print(f"\nConfig file: {DEFAULT_CONFIG_FILE}")
