@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from importlib.metadata import distribution
 from pathlib import Path
 
 from .common import get_root_or_exit
+
+
+def _rootstock_install_target() -> str:
+    """
+    Return the spec to pass to `uv pip install` for the worker venv's rootstock.
+
+    For a regular install, returns "rootstock==<version>" so workers pin to
+    the same published version as the driver. For an editable install
+    (driver running from a source checkout, e.g., a maintainer dev branch),
+    returns the absolute source path so the worker matches the in-tree code
+    rather than whatever happens to be on PyPI under that version number.
+    Detection uses PEP 610 direct_url.json, which uv writes on `pip install -e`.
+    """
+    dist = distribution("rootstock")
+    raw = dist.read_text("direct_url.json")
+    if raw:
+        info = json.loads(raw)
+        if info.get("dir_info", {}).get("editable") and info.get("url", "").startswith("file://"):
+            return info["url"][len("file://"):]
+    return f"rootstock=={dist.version}"
 
 
 def extract_minimum_python_version(requires_python: str) -> str:
@@ -258,11 +280,9 @@ def _install_single_environment(
 
     # Install rootstock
     print("3. Installing rootstock...")
-    # Pin to the running rootstock's version so the env matches the driver,
-    # without depending on where the driver itself was installed from.
-    from importlib.metadata import version as _pkg_version
-
-    rootstock_spec = f"rootstock=={_pkg_version('rootstock')}"
+    # Match the driver: published version for regular installs, source path
+    # for editable installs (maintainer dev branches).
+    rootstock_spec = _rootstock_install_target()
     print(f"  Installing: {rootstock_spec}")
 
     result = subprocess.run(
