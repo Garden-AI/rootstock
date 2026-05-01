@@ -6,7 +6,7 @@ import json
 
 from ..config import DEFAULT_CONFIG_FILE
 from ..manifest import is_verified, load_manifest
-from .common import get_root_or_exit
+from .common import get_root_or_exit, resolve_cache_root
 
 
 def _short_date(iso: str | None) -> str:
@@ -83,9 +83,11 @@ def cmd_status(args) -> int:
             for ckpt_name, ckpt in env.checkpoints.items():
                 print(_checkpoint_line(env, ckpt_name, ckpt))
 
-    # Show cache sizes
-    print("\nCache:")
-    cache_dir = root / "cache"
+    # Show cache sizes. Cache may live under the install root or under a
+    # separate cluster-registered cache_root.
+    cache_root = resolve_cache_root(root)
+    cache_dir = cache_root / "cache"
+    print(f"\nCache: {cache_dir}")
     if cache_dir.exists():
         for subdir in sorted(cache_dir.iterdir()):
             if subdir.is_dir():
@@ -93,7 +95,7 @@ def cmd_status(args) -> int:
                 size_mb = total_size / (1024 * 1024)
                 print(f"  {subdir.name + '/':<20} {size_mb:.1f} MB")
     else:
-        print("  (no cache directory)")
+        print("  (no cache directory yet)")
 
     # Show config file location
     print(f"\nConfig file: {DEFAULT_CONFIG_FILE}")

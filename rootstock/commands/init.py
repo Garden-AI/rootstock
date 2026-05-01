@@ -115,15 +115,23 @@ def cmd_init(args) -> int:
     save_config(config)
     print(f"Configuration saved to {DEFAULT_CONFIG_FILE}")
 
-    # Create directory structure
+    # Create directory structure. Most dirs live under the install root,
+    # but cache/ and home/ live under the cache root — these may be the same
+    # path or different filesystems depending on the cluster.
     if not args.skip_dirs:
         print("\nCreating directory structure...")
+        from ..clusters import get_cluster
+        if cluster:
+            cache_root = get_cluster(cluster).resolved_cache_root
+        else:
+            cache_root = root
+
         dirs_to_create = [
             root / "environments",
             root / "envs",
-            root / "cache",
-            root / "home",
             root / ".python",
+            cache_root / "cache",
+            cache_root / "home",
         ]
 
         for dir_path in dirs_to_create:
