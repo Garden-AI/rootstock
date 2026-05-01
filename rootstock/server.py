@@ -48,6 +48,7 @@ class RootstockServer:
         device: str = "cuda",
         socket_name: str = "rootstock",
         root: Path | None = None,
+        cache_root: Path | None = None,
         log=None,
         timeout: float = 60.0,
         setup_kwargs: dict | None = None,
@@ -77,6 +78,7 @@ class RootstockServer:
         self.model = model
         self.device = device
         self.root = Path(root)
+        self.cache_root = Path(cache_root) if cache_root is not None else None
         self.setup_kwargs = setup_kwargs or {}
 
         self._server_socket: socket.socket | None = None
@@ -117,7 +119,7 @@ class RootstockServer:
         from .environment import EnvironmentManager
 
         # Create environment manager
-        self._env_manager = EnvironmentManager(root=self.root)
+        self._env_manager = EnvironmentManager(root=self.root, cache_root=self.cache_root)
 
         # Generate wrapper script
         self._wrapper_path = self._env_manager.generate_wrapper(

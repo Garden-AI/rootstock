@@ -71,7 +71,7 @@ def cmd_init(args) -> int:
     # Check if input is a cluster name
     if root_input in CLUSTER_REGISTRY:
         cluster = root_input
-        root = Path(CLUSTER_REGISTRY[root_input])
+        root = CLUSTER_REGISTRY[root_input].root
         print(f"  -> Using cluster '{cluster}' root: {root}")
     else:
         root = Path(root_input).expanduser().resolve()

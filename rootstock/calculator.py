@@ -13,7 +13,7 @@ import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 from ase.stress import full_3x3_to_voigt_6_stress
 
-from .clusters import get_root_for_cluster
+from .clusters import get_cluster
 from .server import RootstockServer
 
 
@@ -65,6 +65,7 @@ class RootstockCalculator(Calculator):
         checkpoint: str,
         cluster: str | None = None,
         root: str | Path | None = None,
+        cache_root: str | Path | None = None,
         device: str = "cuda",
         setup_kwargs: dict | None = None,
         log=None,
@@ -78,8 +79,13 @@ class RootstockCalculator(Calculator):
                    Maps to {model}_env environment.
             checkpoint: Specific checkpoint/weights to load. Passed to the
                         environment's setup() as the model argument. Required.
-            cluster: Known cluster name ("modal", "della"). Mutually exclusive with root.
-            root: Path to rootstock directory. Mutually exclusive with cluster.
+            cluster: Known cluster name (e.g., "della", "perlmutter"). Mutually
+                     exclusive with root. The cluster's registered cache_root is
+                     used unless `cache_root` is also passed.
+            root: Path to rootstock install directory. Mutually exclusive with cluster.
+            cache_root: Optional separate root for the model-weight cache and
+                        redirected HOME. Defaults to the cluster's registered
+                        cache_root, or to ``root`` if no cluster is in play.
             device: PyTorch device ("cuda", "cuda:0", "cpu")
             setup_kwargs: Extra keyword arguments forwarded to the env's setup()
                           function. May not contain "model" or "device" — those
@@ -102,14 +108,20 @@ class RootstockCalculator(Calculator):
         self.setup_kwargs = setup_kwargs
         self.log = log
 
-        # Resolve root directory
+        # Resolve install root and cache root.
+        # Resolution: explicit kwarg > cluster registry default > install root.
         if cluster is not None and root is not None:
             raise ValueError("Cannot specify both 'cluster' and 'root'")
 
         if cluster is not None:
-            self.root = get_root_for_cluster(cluster)
+            cluster_info = get_cluster(cluster)
+            self.root = cluster_info.root
+            self.cache_root = (
+                Path(cache_root) if cache_root is not None else cluster_info.resolved_cache_root
+            )
         elif root is not None:
             self.root = Path(root)
+            self.cache_root = Path(cache_root) if cache_root is not None else self.root
         else:
             raise ValueError("Must specify either 'cluster' or 'root'")
 
@@ -143,6 +155,7 @@ class RootstockCalculator(Calculator):
                 device=self.device,
                 socket_name=self._socket_name,
                 root=self.root,
+                cache_root=self.cache_root,
                 log=self.log,
                 setup_kwargs=self.setup_kwargs,
             )

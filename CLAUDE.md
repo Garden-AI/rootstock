@@ -10,21 +10,6 @@ Rootstock is a proof-of-concept for running MLIP (Machine Learning Interatomic P
 
 ## Commands
 
-### Running on Modal
-```bash
-# Initialize volume and build environments (takes ~10-15 min)
-modal run modal_app.py::init_rootstock_volume
-
-# Test pre-built environments
-modal run modal_app.py::test_prebuilt
-
-# Show status
-modal run modal_app.py::inspect_status
-
-# Run benchmarks
-modal run modal_app.py::benchmark_v4
-```
-
 ### Local Development
 ```bash
 uv venv && source .venv/bin/activate
@@ -105,16 +90,22 @@ Main Process                          Worker Process (subprocess)
     └── huggingface/
 ```
 
-The entire `{root}/` directory is self-contained and portable. Python interpreters
-are stored in `.python/` so venv symlinks resolve correctly on any machine where
-the root directory is mounted (Modal Volume, HPC shared filesystem, etc.).
+The install root is self-contained and portable. Python interpreters are stored
+in `.python/` so venv symlinks resolve correctly on any machine where the root
+is mounted (HPC shared filesystem, NFS, Lustre, etc.).
+
+On clusters where the right filesystem for code is different from the right
+filesystem for the model-weight cache (e.g., Perlmutter — code on CFS, cache
+on PSCRATCH), the cluster registry encodes both as `root` and `cache_root`.
+Most clusters use the same path for both.
 
 ### Known Clusters
 
-| Cluster | Root Path |
-|---------|-----------|
-| `modal` | `/vol/rootstock` |
-| `della` | `/scratch/gpfs/SHARED/rootstock` |
+| Cluster | Install Root | Cache Root (if split) |
+|---------|--------------|-----------------------|
+| `della` | `/scratch/gpfs/ROSENGROUP/common/rootstock` | (same as install root) |
+| `sophia` | `/eagle/Garden-Ai/rootstock` | (same as install root) |
+| `perlmutter` | `/global/cfs/cdirs/m4845/rootstock` | `/pscratch/sd/w/wengler/rootstock-cache` |
 
 ## API
 

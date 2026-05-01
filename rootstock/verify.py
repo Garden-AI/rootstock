@@ -57,16 +57,19 @@ def verify_checkpoint(
     checkpoint: str,
     device: str,
     setup_kwargs: dict | None = None,
+    cache_root: Path | None = None,
 ) -> tuple[bool, str | None]:
     """
     Run a single forward pass to verify a checkpoint loads and computes.
 
     Args:
-        root: Rootstock root directory.
+        root: Rootstock install root.
         env_name: Name of pre-built environment (e.g., "mace_env").
         checkpoint: Checkpoint identifier passed to setup() as the model arg.
         device: PyTorch device (e.g., "cuda", "cpu").
         setup_kwargs: Extra keyword arguments forwarded to setup().
+        cache_root: Optional separate root for the model-weight cache and
+                    redirected HOME. Defaults to ``root``.
 
     Returns:
         (success, error_message). On success, error_message is None.
@@ -85,6 +88,7 @@ def verify_checkpoint(
         device=device,
         socket_name=socket_name,
         root=Path(root),
+        cache_root=Path(cache_root) if cache_root is not None else None,
         setup_kwargs=setup_kwargs,
     )
 

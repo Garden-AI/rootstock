@@ -16,7 +16,7 @@ from ..manifest import (
     save_manifest,
 )
 from ..verify import verify_checkpoint
-from .common import get_root_or_exit
+from .common import get_root_or_exit, resolve_cache_root
 from .manifest import update_and_push_manifest
 
 
@@ -42,6 +42,7 @@ def _select(
 
 def cmd_smoke_test(args) -> int:
     root: Path = get_root_or_exit(args)
+    cache_root = resolve_cache_root(root)
     env_filter = args.env
     ckpt_filter = args.checkpoint
     device = args.device
@@ -78,6 +79,7 @@ def cmd_smoke_test(args) -> int:
             checkpoint=ckpt_name,
             device=device,
             setup_kwargs={},  # smoke-test always uses env defaults; see design §7.2
+            cache_root=cache_root,
         )
         elapsed = time.monotonic() - start
 

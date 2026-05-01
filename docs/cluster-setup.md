@@ -26,6 +26,23 @@ Choose a location on a shared filesystem where other users have access:
 # Example: /scratch/shared/rootstock
 ```
 
+### Install root vs. cache root
+
+On most clusters a single shared filesystem hosts both the rootstock install (code, venvs, manifest) and the model-weight cache. Some clusters require these to live on different filesystems — typically because the recommended persistent project filesystem doesn't support `flock`, which the HuggingFace cache requires. NERSC Perlmutter is one such case: code lives on CFS, model weights on PSCRATCH.
+
+The cluster registry (`rootstock/clusters.py`) encodes both paths per cluster:
+
+```python
+"perlmutter": Cluster(
+    root=Path("/global/cfs/cdirs/m4845/rootstock"),
+    cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),
+),
+```
+
+When `cache_root` is omitted from the registry, both paths are the same. Users don't need to set environment variables — `RootstockCalculator(cluster="perlmutter", ...)` resolves both automatically.
+
+If you're adding a new cluster that needs the split, the maintainer creates the cache directory once with read access for everyone in the project (`chmod a+rx` on the directory tree, or appropriate group ACLs).
+
 Then run the initialization command:
 
 ```bash
@@ -99,7 +116,7 @@ If a node has both network access and a GPU, run without `--no-verify` to do eve
     See the [Example Configs](clusters.md) page for environment files that are known to work — you can use these as a starting point for your cluster.
     Some minor tweaks may be required depending on site specific requirements.
 
-## Step 4: Register with the Dashboard (Optional)
+## Step 5: Register with the Dashboard (Optional)
 
 If you configured API credentials during `rootstock init`, the manifest is pushed automatically when you install or update environments.
 

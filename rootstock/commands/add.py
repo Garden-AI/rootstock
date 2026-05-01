@@ -20,7 +20,7 @@ from ..manifest import (
     save_manifest,
 )
 from ..verify import verify_checkpoint
-from .common import get_root_or_exit
+from .common import get_root_or_exit, resolve_cache_root
 from .manifest import update_and_push_manifest
 
 
@@ -59,6 +59,7 @@ def _run_download(
     env_name: str,
     checkpoint: str,
     setup_kwargs: dict,
+    cache_root: Path | None = None,
 ) -> tuple[bool, str | None]:
     """Run ``setup(checkpoint, "cpu", **setup_kwargs)`` to trigger the cache-aware
     download path. Returns ``(ok, error)``."""
@@ -80,7 +81,7 @@ def _run_download(
             f'setup({checkpoint!r}, "cpu", **kwargs)\n'
         )
 
-        env = {**os.environ, **get_model_cache_env(root)}
+        env = {**os.environ, **get_model_cache_env(root, cache_root)}
         result = subprocess.run(
             [str(env_python), "-c", script],
             env=env,
@@ -145,6 +146,7 @@ def _ensure_manifest_entry(
 
 def cmd_add(args) -> int:
     root = get_root_or_exit(args)
+    cache_root = resolve_cache_root(root)
     env_name = args.env if args.env.endswith("_env") else f"{args.env}_env"
     checkpoint = args.checkpoint
     device = args.device
@@ -166,7 +168,7 @@ def cmd_add(args) -> int:
     # ---- Download phase ------------------------------------------------
     if ckpt.fetched_at is None:
         print(f"Downloading {env_name}/{checkpoint} on CPU...")
-        ok, err = _run_download(root, env_name, checkpoint, kwargs)
+        ok, err = _run_download(root, env_name, checkpoint, kwargs, cache_root=cache_root)
         if not ok:
             ckpt.last_error = f"download: {err}"
             save_manifest(manifest, root)
@@ -184,7 +186,9 @@ def cmd_add(args) -> int:
         print("(skipping verify per --no-verify)")
     else:
         print(f"Verifying {env_name}/{checkpoint} on {device}...")
-        ok, err = verify_checkpoint(root, env_name, checkpoint, device, kwargs)
+        ok, err = verify_checkpoint(
+            root, env_name, checkpoint, device, kwargs, cache_root=cache_root
+        )
         if not ok:
             ckpt.verified_at = None
             ckpt.verified_device = None

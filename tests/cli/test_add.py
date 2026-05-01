@@ -187,11 +187,11 @@ def test_add_clears_last_error_on_success(fake_root, monkeypatch):
 def test_add_forwards_kwargs_to_download_and_verify(fake_root, monkeypatch):
     captured = {}
 
-    def fake_download(root, env_name, checkpoint, setup_kwargs):
+    def fake_download(root, env_name, checkpoint, setup_kwargs, **_):
         captured["download_kwargs"] = setup_kwargs
         return True, None
 
-    def fake_verify(root, env_name, checkpoint, device, setup_kwargs):
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **_):
         captured["verify_kwargs"] = setup_kwargs
         return True, None
 

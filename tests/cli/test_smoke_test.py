@@ -82,7 +82,7 @@ def _make_args(root: Path, **overrides):
 def test_smoke_test_skips_unfetched_checkpoints(populated_root, monkeypatch, capsys):
     seen: list[tuple[str, str]] = []
 
-    def fake_verify(root, env_name, checkpoint, device, setup_kwargs):
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **_):
         seen.append((env_name, checkpoint))
         return True, None
 
@@ -102,7 +102,7 @@ def test_smoke_test_skips_unfetched_checkpoints(populated_root, monkeypatch, cap
 def test_smoke_test_always_uses_empty_kwargs(populated_root, monkeypatch):
     captured: list[dict] = []
 
-    def fake_verify(root, env_name, checkpoint, device, setup_kwargs):
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **_):
         captured.append(setup_kwargs)
         return True, None
 
@@ -114,7 +114,7 @@ def test_smoke_test_always_uses_empty_kwargs(populated_root, monkeypatch):
 
 
 def test_smoke_test_marks_pass_and_fail(populated_root, monkeypatch):
-    def fake_verify(root, env_name, checkpoint, device, setup_kwargs):
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **_):
         if (env_name, checkpoint) == ("mace_env", "medium"):
             return False, "RuntimeError: bad"
         return True, None
@@ -141,7 +141,7 @@ def test_smoke_test_filters_by_env(populated_root, monkeypatch):
     seen: list[tuple[str, str]] = []
     monkeypatch.setattr(
         smoke_module, "verify_checkpoint",
-        lambda root, env_name, checkpoint, device, setup_kwargs: (
+        lambda root, env_name, checkpoint, device, setup_kwargs, **_: (
             seen.append((env_name, checkpoint)) or (True, None)
         ),
     )
@@ -154,7 +154,7 @@ def test_smoke_test_filters_by_env_and_checkpoint(populated_root, monkeypatch):
     seen: list[tuple[str, str]] = []
     monkeypatch.setattr(
         smoke_module, "verify_checkpoint",
-        lambda root, env_name, checkpoint, device, setup_kwargs: (
+        lambda root, env_name, checkpoint, device, setup_kwargs, **_: (
             seen.append((env_name, checkpoint)) or (True, None)
         ),
     )

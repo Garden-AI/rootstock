@@ -28,25 +28,35 @@ with RootstockCalculator(
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `cluster` | `str` | Yes* | Cluster name (e.g., `"della"`, `"sophia"`) |
-| `root` | `str` | Yes* | Custom root path instead of a known cluster |
-| `model` | `str` | Yes | MLIP family: `"mace"`, `"chgnet"`, `"uma"`, `"tensornet"` |
-| `checkpoint` | `str` | No | Specific model weights (uses environment default if omitted) |
+| `cluster` | `str` | Yes* | Cluster name (e.g., `"della"`, `"perlmutter"`) |
+| `root` | `str` | Yes* | Custom install-root path instead of a known cluster |
+| `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. Defaults to the cluster's registered `cache_root`, or to `root` if no cluster is in play |
+| `model` | `str` | Yes | MLIP family: `"mace"`, `"chgnet"`, `"uma"`, `"tensornet"`, `"esen"` |
+| `checkpoint` | `str` | Yes | Specific model weights (e.g., `"medium"`, `"uma-s-1p1"`) |
 | `device` | `str` | No | `"cuda"` (default) or `"cpu"` |
+| `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `model` or `device` |
 
 *Either `cluster` or `root` must be provided, but not both.
 
 ### Examples
 
 ```python
-# Using a known cluster with explicit checkpoint
+# Using a known cluster
 RootstockCalculator(cluster="della", model="mace", checkpoint="medium")
 
-# Using a known cluster with default checkpoint
-RootstockCalculator(cluster="della", model="uma")
+# Perlmutter — install root and cache root come from the registry
+RootstockCalculator(cluster="perlmutter", model="uma", checkpoint="uma-s-1p1")
 
-# Using a custom root path
-RootstockCalculator(root="/scratch/gpfs/specific/install/path/rootstock", model="mace")
+# Custom install root (cache_root defaults to the install root)
+RootstockCalculator(root="/scratch/gpfs/specific/install/rootstock", model="mace", checkpoint="medium")
+
+# Explicit split between install root and cache root
+RootstockCalculator(
+    root="/global/cfs/cdirs/myproj/rootstock",
+    cache_root="/pscratch/sd/u/me/rootstock-cache",
+    model="uma",
+    checkpoint="uma-s-1p1",
+)
 ```
 
 ### Context Manager

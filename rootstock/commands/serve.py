@@ -22,8 +22,10 @@ def cmd_serve(args) -> int:
     """
     from ..environment import EnvironmentManager
     from .add import _kwargs_from_args
+    from .common import resolve_cache_root
 
     root = get_root_or_exit(args)
+    cache_root = resolve_cache_root(root)
     env_name = f"{args.model}_env"
     socket_path = args.socket
     checkpoint = args.checkpoint
@@ -36,7 +38,7 @@ def cmd_serve(args) -> int:
         return 2
 
     # Create environment manager and validate environment exists
-    env_mgr = EnvironmentManager(root=root)
+    env_mgr = EnvironmentManager(root=root, cache_root=cache_root)
     try:
         env_mgr.get_env_python(env_name)
     except RuntimeError as e:
