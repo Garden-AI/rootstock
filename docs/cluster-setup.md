@@ -41,9 +41,63 @@ The cluster registry (`rootstock/clusters.py`) encodes both paths per cluster:
 
 When `cache_root` is omitted from the registry, both paths are the same. Users don't need to set environment variables — `RootstockCalculator(cluster="perlmutter", ...)` resolves both automatically.
 
-If you're adding a new cluster that needs the split, the maintainer creates the cache directory once with read access for everyone in the project (`chmod a+rx` on the directory tree, or appropriate group ACLs).
+### Permissions for shared installs
 
-Then run the initialization command:
+(We are trying to further automate this, but for the time being ...)
+
+Shared installs on HPC clusters should be **world-readable**: anyone on the cluster (not just members of the maintainer's project group) should be able to use the environments and model weights. Nothing in a rootstock install is sensitive — it's all derived from public PyPI packages and public model checkpoints. Maintainer secrets (API tokens) live in the maintainer's `~/.config/rootstock/config.toml`, not in the shared root.
+
+The setup needs to satisfy:
+
+- Maintainers (and only maintainers) can write — `rootstock install` / `rootstock add` succeeds for them.
+- Project group members inherit write via the maintainer's group, so a co-maintainer in the same project can take over without re-doing perms.
+- All other cluster users get read + traverse.
+- New files created by `uv pip install` (and by rootstock) inherit the project group, world-read, and group-write, so the above stays true going forward.
+
+The recipe — run **once** as the maintainer, before `rootstock init`. Replace `<group>` with your project group (e.g., `m4845`).
+
+```bash
+# Install root: setgid + group-write for co-maintainers, world read+traverse
+chmod 2775 /path/to/install/root
+chgrp <group> /path/to/install/root
+setfacl -m  g:<group>:rwx  /path/to/install/root
+setfacl -dm g:<group>:rwx  /path/to/install/root   # default ACL — inherited by new files
+
+# Cache root (only if separate filesystem). World-readable, only maintainer writes:
+chmod 2755 /path/to/cache/root
+chgrp <group> /path/to/cache/root
+# Group inherits read+traverse from the mode bits; the setgid bit is just for
+# group-ownership inheritance on new files. No named group ACL needed.
+```
+
+If the install or cache root **already has files in it** when you set this up (e.g., you're retrofitting a deployment that started out project-only), apply the same ACLs recursively so existing files become world-readable too:
+
+```bash
+setfacl -R -m  o::r-x  /path/to/install/root
+setfacl -R -dm o::r-x  /path/to/install/root
+setfacl -R -m  o::r-x  /path/to/cache/root
+setfacl -R -dm o::r-x  /path/to/cache/root
+```
+
+Then **the maintainer's shell** needs `umask 002` so newly written files honor the inherited group-write bits. Add to `~/.bashrc` (or whatever rc the cluster sources for non-interactive shells):
+
+```bash
+umask 002
+```
+
+On clusters with split filesystems (cache root on a different mount than the install root), set:
+
+```bash
+export UV_LINK_MODE=copy
+```
+
+`uv` defaults to hardlinking from its cache into target venvs, which fails across filesystem boundaries and falls back to copy with a noisy warning. Setting `copy` mode silences the warning and is the correct mode for cross-filesystem builds anyway.
+
+After `rootstock init` runs, verify ACLs landed correctly with `getfacl` on a freshly created file. Group should show `rwx` (effective `rw-` or `rwx`) and `mask::rw-` or stronger. If you see `mask::---` or `#effective:---`, the maintainer's umask was too restrictive when the file was created — rerun with `umask 002` and rewrite the file.
+
+### Initial setup
+
+Run the initialization command:
 
 ```bash
 rootstock init
@@ -53,12 +107,11 @@ This will interactively prompt you for:
 
 | Setting | Description |
 |---------|-------------|
-| **root** | The shared directory path (e.g., `/scratch/shared/rootstock`) |
+| **root** | The shared directory path, or a registered cluster name (`perlmutter`, `della`, etc.) |
 | **api_key / api_secret** | Optional credentials for pushing the cluster manifest to the dashboard |
 | **maintainer name / email** | Identifies the maintainer for this installation |
 
 !!! tip "Dashboard Integration"
-    Contact a Rootstock maintainer if you want your cluster to appear on the [Example Configs](clusters.md) page. The API credentials are [Modal Proxy Auth Tokens](https://modal.com/docs/guide/webhook-proxy-auth).
 
 ## Step 3: Install Environments
 
