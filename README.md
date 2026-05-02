@@ -163,27 +163,43 @@ This will interactively prompt you for:
 
 ### 3. Install environments
 
-Still on the login node:
+Still on the login node — `install` only builds the venv:
 
 ```bash
 # Install individual environments
-rootstock install mace_env.py --models small,medium
+rootstock install mace_env.py
 rootstock install chgnet_env.py
-rootstock install uma_env.py --models uma-s-1p1
+rootstock install uma_env.py
 rootstock install tensornet_env.py
 
 # Or point it at a directory with multiple environments
 rootstock install ./environments/
-
-# Verify everything is set up
-rootstock status
 ```
 
-Each `rootstock install` command creates an isolated virtual environment under `{root}/envs/`, installs the MLIP's dependencies, and optionally pre-downloads model weights (via `--models`). This can take several minutes per environment depending on the MLIP.
+Each `rootstock install` command creates an isolated virtual environment under `{root}/envs/` and installs the MLIP's dependencies. This can take several minutes per environment depending on the MLIP.
 
-See the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for environment files that are known to work — you can use these as a starting point for your cluster.
+### 4. Add checkpoints
 
-### 4. Register with the dashboard (optional)
+Use `rootstock add` to download model weights and verify them on the GPU. Download and verify can run on different nodes — useful when your GPU node has no network access:
+
+```bash
+# Login node (CPU, has network): download only
+rootstock add mace medium --no-verify
+rootstock add uma uma-s-1p1 --no-verify
+
+# GPU node: skip download (already fetched), verify on GPU
+rootstock add mace medium
+rootstock add uma uma-s-1p1
+
+# Forward extra kwargs to setup() — values are JSON-decoded, fall back to strings
+rootstock add uma uma-s-1p1 --kwarg task=omat
+```
+
+`rootstock add` is idempotent. Use `rootstock smoke-test` to re-verify all fetched checkpoints (suitable for nightly cron with `--json`).
+
+`rootstock status` shows a per-checkpoint grid of fetched/verified/stale state. See the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for environment files that are known to work.
+
+### 5. Register with the dashboard (optional)
 
 If you configured API credentials during `rootstock init`, the manifest is pushed automatically when you install or update environments. If the push failed (e.g., due to network issues), you can retry:
 

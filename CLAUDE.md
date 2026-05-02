@@ -10,21 +10,6 @@ Rootstock is a proof-of-concept for running MLIP (Machine Learning Interatomic P
 
 ## Commands
 
-### Running on Modal
-```bash
-# Initialize volume and build environments (takes ~10-15 min)
-modal run modal_app.py::init_rootstock_volume
-
-# Test pre-built environments
-modal run modal_app.py::test_prebuilt
-
-# Show status
-modal run modal_app.py::inspect_status
-
-# Run benchmarks
-modal run modal_app.py::benchmark_v4
-```
-
 ### Local Development
 ```bash
 uv venv && source .venv/bin/activate
@@ -33,11 +18,17 @@ uv pip install -e ".[dev]"
 
 ### CLI Commands
 ```bash
-# Build a pre-built environment
-rootstock build <env_name> --root <path> [--models m1,m2] [--force]
+# Build a pre-built environment (venv only — no model weights)
+rootstock install <env_source.py> [--root <path>] [--force]
 
-# Show status
-rootstock status --root <path>
+# Download + verify a checkpoint (idempotent). Use --no-verify on login nodes.
+rootstock add <env> <checkpoint> [--kwarg key=val ...] [--device cuda] [--no-verify]
+
+# Re-verify all fetched checkpoints (suitable for nightly cron)
+rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--json]
+
+# Show status (per-checkpoint verified/stale grid; --json for machine-readable)
+rootstock status [--root <path>] [--json]
 
 # List environments
 rootstock list --root <path>
@@ -99,33 +90,45 @@ Main Process                          Worker Process (subprocess)
     └── huggingface/
 ```
 
-The entire `{root}/` directory is self-contained and portable. Python interpreters
-are stored in `.python/` so venv symlinks resolve correctly on any machine where
-the root directory is mounted (Modal Volume, HPC shared filesystem, etc.).
+The install root is self-contained and portable. Python interpreters are stored
+in `.python/` so venv symlinks resolve correctly on any machine where the root
+is mounted (HPC shared filesystem, NFS, Lustre, etc.).
+
+On clusters where the right filesystem for code is different from the right
+filesystem for the model-weight cache (e.g., Perlmutter — code on CFS, cache
+on PSCRATCH), the cluster registry encodes both as `root` and `cache_root`.
+Most clusters use the same path for both.
 
 ### Known Clusters
 
-| Cluster | Root Path |
-|---------|-----------|
-| `modal` | `/vol/rootstock` |
-| `della` | `/scratch/gpfs/SHARED/rootstock` |
+| Cluster | Install Root | Cache Root (if split) |
+|---------|--------------|-----------------------|
+| `della` | `/scratch/gpfs/ROSENGROUP/common/rootstock` | (same as install root) |
+| `sophia` | `/eagle/Garden-Ai/rootstock` | (same as install root) |
+| `perlmutter` | `/global/cfs/cdirs/m4845/rootstock` | `/pscratch/sd/w/wengler/rootstock-cache` |
 
 ## API
 
 ```python
-# v0.5 API: explicit model and checkpoint parameters
+# v0.8 API: model and checkpoint are required; setup_kwargs is optional
 with RootstockCalculator(
     cluster="della",
     model="mace",              # Environment family -> mace_env
-    checkpoint="medium",       # Specific checkpoint (optional, uses default if omitted)
+    checkpoint="medium",       # Specific checkpoint — required
     device="cuda",
 ) as calc:
     atoms.calc = calc
     energy = atoms.get_potential_energy()
 
-# Checkpoint defaults to environment's default if omitted
-with RootstockCalculator(cluster="della", model="uma") as calc:
-    ...  # Uses uma-s-1p1 by default
+# Forward extra kwargs to the env's setup() function. Cannot contain
+# "model" or "device" — those are passed at the top level.
+with RootstockCalculator(
+    cluster="della",
+    model="uma",
+    checkpoint="uma-s-1p1",
+    setup_kwargs={"task": "omol"},
+) as calc:
+    ...
 ```
 
 ### Available Models
@@ -152,9 +155,13 @@ def setup(model: str, device: str = "cuda"):
     return mace_mp(model=model, device=device, default_dtype="float32")
 EOF
 
-# 2. Build pre-built environment
-rootstock build mace_env --root /path/to/rootstock --models small,medium
+# 2. Build pre-built environment (venv only — no model weights)
+rootstock install environments/mace_env.py --root /path/to/rootstock
 
-# 3. Verify
+# 3. Download and verify checkpoints (idempotent; use --no-verify on login nodes)
+rootstock add mace medium --root /path/to/rootstock
+rootstock add mace small --root /path/to/rootstock
+
+# 4. Verify install state
 rootstock status --root /path/to/rootstock
 ```

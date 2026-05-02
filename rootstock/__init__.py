@@ -10,6 +10,9 @@ from .client import RootstockClient
 from .clusters import (
     CLUSTER_REGISTRY,
     KNOWN_ENVIRONMENTS,
+    Cluster,
+    get_cache_root_for_cluster,
+    get_cluster,
     get_cluster_for_root,
     get_root_for_cluster,
 )
@@ -38,7 +41,10 @@ __all__ = [
     "run_worker",
     "CLUSTER_REGISTRY",
     "KNOWN_ENVIRONMENTS",
+    "Cluster",
+    "get_cluster",
     "get_root_for_cluster",
+    "get_cache_root_for_cluster",
     "get_cluster_for_root",
     "UserConfig",
     "load_config",

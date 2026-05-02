@@ -26,7 +26,78 @@ Choose a location on a shared filesystem where other users have access:
 # Example: /scratch/shared/rootstock
 ```
 
-Then run the initialization command:
+### Install root vs. cache root
+
+On most clusters a single shared filesystem hosts both the rootstock install (code, venvs, manifest) and the model-weight cache. Some clusters require these to live on different filesystems — typically because the recommended persistent project filesystem doesn't support `flock`, which the HuggingFace cache requires. NERSC Perlmutter is one such case: code lives on CFS, model weights on PSCRATCH.
+
+The cluster registry (`rootstock/clusters.py`) encodes both paths per cluster:
+
+```python
+"perlmutter": Cluster(
+    root=Path("/global/cfs/cdirs/m4845/rootstock"),
+    cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),
+),
+```
+
+When `cache_root` is omitted from the registry, both paths are the same. Users don't need to set environment variables — `RootstockCalculator(cluster="perlmutter", ...)` resolves both automatically.
+
+### Permissions for shared installs
+
+(We are trying to further automate this, but for the time being ...)
+
+Shared installs on HPC clusters should be **world-readable**: anyone on the cluster (not just members of the maintainer's project group) should be able to use the environments and model weights. Nothing in a rootstock install is sensitive — it's all derived from public PyPI packages and public model checkpoints. Maintainer secrets (API tokens) live in the maintainer's `~/.config/rootstock/config.toml`, not in the shared root.
+
+The setup needs to satisfy:
+
+- Maintainers (and only maintainers) can write — `rootstock install` / `rootstock add` succeeds for them.
+- Project group members inherit write via the maintainer's group, so a co-maintainer in the same project can take over without re-doing perms.
+- All other cluster users get read + traverse.
+- New files created by `uv pip install` (and by rootstock) inherit the project group, world-read, and group-write, so the above stays true going forward.
+
+The recipe — run **once** as the maintainer, before `rootstock init`. Replace `<group>` with your project group (e.g., `m4845`).
+
+```bash
+# Install root: setgid + group-write for co-maintainers, world read+traverse
+chmod 2775 /path/to/install/root
+chgrp <group> /path/to/install/root
+setfacl -m  g:<group>:rwx  /path/to/install/root
+setfacl -dm g:<group>:rwx  /path/to/install/root   # default ACL — inherited by new files
+
+# Cache root (only if separate filesystem). World-readable, only maintainer writes:
+chmod 2755 /path/to/cache/root
+chgrp <group> /path/to/cache/root
+# Group inherits read+traverse from the mode bits; the setgid bit is just for
+# group-ownership inheritance on new files. No named group ACL needed.
+```
+
+If the install or cache root **already has files in it** when you set this up (e.g., you're retrofitting a deployment that started out project-only), apply the same ACLs recursively so existing files become world-readable too:
+
+```bash
+setfacl -R -m  o::r-x  /path/to/install/root
+setfacl -R -dm o::r-x  /path/to/install/root
+setfacl -R -m  o::r-x  /path/to/cache/root
+setfacl -R -dm o::r-x  /path/to/cache/root
+```
+
+Then **the maintainer's shell** needs `umask 002` so newly written files honor the inherited group-write bits. Add to `~/.bashrc` (or whatever rc the cluster sources for non-interactive shells):
+
+```bash
+umask 002
+```
+
+On clusters with split filesystems (cache root on a different mount than the install root), set:
+
+```bash
+export UV_LINK_MODE=copy
+```
+
+`uv` defaults to hardlinking from its cache into target venvs, which fails across filesystem boundaries and falls back to copy with a noisy warning. Setting `copy` mode silences the warning and is the correct mode for cross-filesystem builds anyway.
+
+After `rootstock init` runs, verify ACLs landed correctly with `getfacl` on a freshly created file. Group should show `rwx` (effective `rw-` or `rwx`) and `mask::rw-` or stronger. If you see `mask::---` or `#effective:---`, the maintainer's umask was too restrictive when the file was created — rerun with `umask 002` and rewrite the file.
+
+### Initial setup
+
+Run the initialization command:
 
 ```bash
 rootstock init
@@ -36,22 +107,21 @@ This will interactively prompt you for:
 
 | Setting | Description |
 |---------|-------------|
-| **root** | The shared directory path (e.g., `/scratch/shared/rootstock`) |
+| **root** | The shared directory path, or a registered cluster name (`perlmutter`, `della`, etc.) |
 | **api_key / api_secret** | Optional credentials for pushing the cluster manifest to the dashboard |
 | **maintainer name / email** | Identifies the maintainer for this installation |
 
 !!! tip "Dashboard Integration"
-    Contact a Rootstock maintainer if you want your cluster to appear on the [Example Configs](clusters.md) page. The API credentials are [Modal Proxy Auth Tokens](https://modal.com/docs/guide/webhook-proxy-auth).
 
 ## Step 3: Install Environments
 
-Still on the login node:
+Still on the login node — `install` only builds the venv, no model weights yet:
 
 ```bash
 # Install individual environments
-rootstock install mace_env.py --models small,medium
+rootstock install mace_env.py
 rootstock install chgnet_env.py
-rootstock install uma_env.py --models uma-s-1p1
+rootstock install uma_env.py
 rootstock install tensornet_env.py
 
 # Or point it at a directory with multiple environments
@@ -61,19 +131,45 @@ rootstock install ./environments/
 rootstock status
 ```
 
-Each `rootstock install` command performs the following:
+Each `rootstock install` command:
 
 1. Creates an isolated virtual environment under `{root}/envs/`
 2. Installs MLIP dependencies
-3. Pre-downloads model weights (when `--models` is specified)
 
 This process can take several minutes per environment, depending on the MLIP and network conditions.
+
+## Step 4: Add Checkpoints
+
+`rootstock add` is a separate, idempotent step that **downloads** weights and (where available) **verifies** them with a forward pass. Splitting download from verify lets you do the right thing on each kind of node:
+
+```bash
+# Login node (CPU, has network): download weights only
+rootstock add mace medium --no-verify
+rootstock add uma uma-s-1p1 --no-verify --kwarg task=omat
+
+# GPU node (no network): skip download (already fetched), verify on GPU
+rootstock add mace medium
+rootstock add uma uma-s-1p1 --kwarg task=omat
+```
+
+If a node has both network access and a GPU, run without `--no-verify` to do everything in one shot.
+
+`rootstock add` is idempotent — re-running it after a successful download will skip the download phase and just re-verify.
+
+`rootstock smoke-test` re-verifies every fetched checkpoint and is suitable for nightly cron:
+
+```bash
+0 4 * * * rootstock smoke-test --json > /var/log/rootstock-smoke.log 2>&1
+```
+
+!!! note "Smoke-test always uses default kwargs"
+    `smoke-test` calls each env's `setup()` with no extra kwargs. A checkpoint that only works with non-default kwargs (e.g., a UMA checkpoint that needs `task=omol`) will appear failing in nightly smoke-test even though `add` succeeded. The remedy is to make the preferred kwargs the env's default in the env file.
 
 !!! note "Finding Environment Files"
     See the [Example Configs](clusters.md) page for environment files that are known to work — you can use these as a starting point for your cluster.
     Some minor tweaks may be required depending on site specific requirements.
 
-## Step 4: Register with the Dashboard (Optional)
+## Step 5: Register with the Dashboard (Optional)
 
 If you configured API credentials during `rootstock init`, the manifest is pushed automatically when you install or update environments.
 
@@ -154,15 +250,22 @@ After setup, the Rootstock root directory will look like this:
 
 ## Updating Environments
 
-To update an environment with new dependencies or model weights:
+To update an environment with new dependencies:
 
 ```bash
-# Rebuild with new models
-rootstock install mace_env.py --models small,medium,large --force
+# Rebuild the venv (drops verification timestamps for that env's checkpoints)
+rootstock install mace_env.py --force
+
+# Re-verify checkpoints after the rebuild
+rootstock add mace small
+rootstock add mace medium
+rootstock add mace large
 
 # Push updated manifest
 rootstock manifest push
 ```
+
+Rebuilding an env invalidates prior verifications (the venv changed; weights in `cache/` are unaffected). `rootstock status` will show those checkpoints as **stale** until you re-run `add` or `smoke-test`.
 
 ## Troubleshooting
 

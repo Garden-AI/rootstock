@@ -22,7 +22,7 @@ Models:
 """
 
 
-def setup(model: str = "uma-s-1p1", device: str = "cuda"):
+def setup(model: str = "uma-s-1p1", device: str = "cuda", task: str = "omat"):
     """
     Load a UMA calculator.
 
@@ -30,6 +30,8 @@ def setup(model: str = "uma-s-1p1", device: str = "cuda"):
         model: Model identifier (e.g., "uma-s-1p1"). Passed directly to
                pretrained_mlip.get_predict_unit().
         device: PyTorch device string (e.g., "cuda", "cuda:0", "cpu")
+        task: Task head for the FAIRChem calculator. Common values: "omat"
+              (materials, the default), "omol" (molecules).
 
     Returns:
         ASE-compatible calculator
@@ -37,4 +39,4 @@ def setup(model: str = "uma-s-1p1", device: str = "cuda"):
     from fairchem.core import FAIRChemCalculator, pretrained_mlip
 
     predictor = pretrained_mlip.get_predict_unit(model, device=device)
-    return FAIRChemCalculator(predictor, task_name="omat")
+    return FAIRChemCalculator(predictor, task_name=task)

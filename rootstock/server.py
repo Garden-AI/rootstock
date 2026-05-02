@@ -48,8 +48,10 @@ class RootstockServer:
         device: str = "cuda",
         socket_name: str = "rootstock",
         root: Path | None = None,
+        cache_root: Path | None = None,
         log=None,
         timeout: float = 60.0,
+        setup_kwargs: dict | None = None,
     ):
         """
         Initialize the server.
@@ -62,6 +64,7 @@ class RootstockServer:
             root: Root directory for environments and cache (required)
             log: Optional file object for protocol logging
             timeout: Socket timeout in seconds
+            setup_kwargs: Extra keyword arguments forwarded to setup()
         """
         if root is None:
             raise ValueError("root is required for pre-built environments")
@@ -75,6 +78,8 @@ class RootstockServer:
         self.model = model
         self.device = device
         self.root = Path(root)
+        self.cache_root = Path(cache_root) if cache_root is not None else None
+        self.setup_kwargs = setup_kwargs or {}
 
         self._server_socket: socket.socket | None = None
         self._client_socket: socket.socket | None = None
@@ -114,7 +119,7 @@ class RootstockServer:
         from .environment import EnvironmentManager
 
         # Create environment manager
-        self._env_manager = EnvironmentManager(root=self.root)
+        self._env_manager = EnvironmentManager(root=self.root, cache_root=self.cache_root)
 
         # Generate wrapper script
         self._wrapper_path = self._env_manager.generate_wrapper(
@@ -122,6 +127,7 @@ class RootstockServer:
             model=self.model,
             device=self.device,
             socket_path=self.socket_path,
+            setup_kwargs=self.setup_kwargs,
         )
 
         # Get spawn command and environment
