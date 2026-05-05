@@ -90,6 +90,7 @@ def verify_checkpoint(
         root=Path(root),
         cache_root=Path(cache_root) if cache_root is not None else None,
         setup_kwargs=setup_kwargs,
+        timeout=600.0,
     )
 
     try:

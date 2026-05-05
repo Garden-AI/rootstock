@@ -132,8 +132,7 @@ with RootstockCalculator(
 
 | Env | Canonical ids |
 |---|---|
-| `mace` | `mace-mp-0-small`, `mace-mp-0-medium`, `mace-mp-0-large` |
-| `maceoff` | `mace-off23-small`, `mace-off23-medium`, `mace-off23-large` |
+| `mace` | `mace-mp-0-{small,medium,large}`, `mace-off23-{small,medium,large}` |
 | `esen` | `esen-md-direct-all-omol`, `esen-sm-conserving-all-omol`, `esen-sm-direct-all-omol` |
 | `orb` | `orb-v2` |
 | `tensornet` | `tensornet-matpes-pbe-2025-2` |

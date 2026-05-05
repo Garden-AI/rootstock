@@ -99,42 +99,34 @@ Return: an ASE-compatible calculator.
 
 ## Examples
 
-### MACE-MP-0
+### MACE (MP-0 and OFF23 in one env)
+
+MACE-MP-0 and MACE-OFF23 ship in the same `mace-torch` package, so they share a single env. The `off:` prefix on the upstream string in `CHECKPOINTS` routes to `mace_off()` instead of `mace_mp()` — a small dispatch in `setup()`. Two distinct page identifiers (`mace-mp-0`, `mace-off23`) on the Almanac, six matrix rows, one venv to maintain.
 
 ```python
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.4.0,<2.10"]
 # ///
-"""MACE env — hosts MACE-MP-0 checkpoints."""
+"""MACE env — hosts MACE-MP-0 and MACE-OFF23 checkpoints."""
 
 CHECKPOINTS = {
-    "mace-mp-0-small":  "small",
-    "mace-mp-0-medium": "medium",
-    "mace-mp-0-large":  "large",
+    "mace-mp-0-small":   "small",
+    "mace-mp-0-medium":  "medium",
+    "mace-mp-0-large":   "large",
+    "mace-off23-small":  "off:small",
+    "mace-off23-medium": "off:medium",
+    "mace-off23-large":  "off:large",
 }
 
 
 def setup(checkpoint: str, device: str = "cuda"):
+    arg = CHECKPOINTS[checkpoint]
+    if arg.startswith("off:"):
+        from mace.calculators import mace_off
+        return mace_off(model=arg[4:], device=device, default_dtype="float32")
     from mace.calculators import mace_mp
-    return mace_mp(model=CHECKPOINTS[checkpoint], device=device, default_dtype="float32")
-```
-
-### MACE-OFF (organic chemistry)
-
-Same env-level dependencies as MACE-MP, different upstream entry point. A canonical-id-prefixed slug (`mace-off23-*`) keeps the rows distinct on the matrix even though the underlying library calls them `"small"` / `"medium"` / `"large"`.
-
-```python
-CHECKPOINTS = {
-    "mace-off23-small":  "small",
-    "mace-off23-medium": "medium",
-    "mace-off23-large":  "large",
-}
-
-
-def setup(checkpoint: str, device: str = "cuda"):
-    from mace.calculators import mace_off
-    return mace_off(model=CHECKPOINTS[checkpoint], device=device, default_dtype="float32")
+    return mace_mp(model=arg, device=device, default_dtype="float32")
 ```
 
 ### UMA (FAIRChem)

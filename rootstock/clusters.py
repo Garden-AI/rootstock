@@ -42,10 +42,6 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
     ),
 }
 
-# Known environment families.
-KNOWN_ENVIRONMENTS = ["mace", "maceoff", "esen", "orb", "tensornet", "uma"]
-
-
 def get_cluster(cluster: str) -> Cluster:
     """Look up a known cluster by name."""
     if cluster not in CLUSTER_REGISTRY:
