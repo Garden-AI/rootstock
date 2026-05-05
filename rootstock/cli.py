@@ -43,6 +43,7 @@ from .commands import (
     cmd_smoke_test,
     cmd_status,
 )
+from . import __version__
 from .commands.common import ROOTSTOCK_ROOT_ENV
 from .config import DEFAULT_CONFIG_FILE
 
@@ -52,6 +53,11 @@ def main():
         prog="rootstock",
         description="Rootstock MLIP environment manager",
         epilog=f"Config file: {DEFAULT_CONFIG_FILE}",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
