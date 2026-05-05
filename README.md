@@ -25,8 +25,7 @@ atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
 
 with RootstockCalculator(
     cluster="della",
-    model="mace",
-    checkpoint="medium",
+    checkpoint="mace-mp-0-medium",
     device="cuda",
 ) as calc:
     atoms.calc = calc
@@ -34,7 +33,7 @@ with RootstockCalculator(
     print(atoms.get_forces())
 ```
 
-Changing `model="mace"` to `model="uma"` or `model="tensornet"` swaps the underlying potential.
+Swap the underlying potential by changing `checkpoint`: e.g. `checkpoint="uma-s-1p1"` or `checkpoint="tensornet-matpes-pbe-2025-2"`.
 
 ## Installation
 
@@ -48,17 +47,17 @@ uv pip install rootstock
 
 ## API
 
-The `model` parameter selects the MLIP family. The optional `checkpoint` parameter selects specific model weights (defaults to each environment's default if omitted).
+`checkpoint` is the canonical id of a specific set of trained weights (e.g. `mace-mp-0-medium`, `uma-s-1p1`). The hosting environment is resolved automatically — Rootstock walks the installed envs and finds the one whose `CHECKPOINTS` table declares the id.
 
 ```python
-# Explicit checkpoint
-RootstockCalculator(cluster="della", model="mace", checkpoint="medium")
+# Pick a checkpoint by canonical id; env is resolved automatically.
+RootstockCalculator(cluster="della", checkpoint="mace-mp-0-medium")
 
-# Default checkpoint (each environment defines a sensible default)
-RootstockCalculator(cluster="della", model="uma")
+# Forward extra kwargs to the env's setup() function:
+RootstockCalculator(cluster="della", checkpoint="uma-s-1p1", setup_kwargs={"task": "omol"})
 
 # Custom root path instead of a known cluster
-RootstockCalculator(root="/scratch/gpfs/specific/install/path/rootstock", model="mace")
+RootstockCalculator(root="/scratch/gpfs/specific/install/path/rootstock", checkpoint="mace-mp-0-medium")
 ```
 
 ## Available Models
@@ -90,7 +89,7 @@ Rootstock includes a native LAMMPS `fix` that auto-spawns a worker subprocess, g
 Add one line to your LAMMPS input script:
 
 ```
-fix mlip all rootstock cluster della model mace checkpoint medium device cuda elements Cu
+fix mlip all rootstock cluster della checkpoint mace-mp-0-medium device cuda elements Cu
 ```
 
 The fix handles worker lifecycle, socket communication, and cleanup automatically. Virial information is passed through, so barostats (`npt`, `nph`) work correctly. Energy is accessible via `f_mlip` in thermo output.
@@ -115,15 +114,14 @@ pip install rootstock
 ### LAMMPS Fix Syntax
 
 ```
-fix <id> <group> rootstock cluster <n> model <model> \
-    checkpoint <ckpt> device <dev> [timeout <sec>] elements <e1> <e2> ...
+fix <id> <group> rootstock cluster <n> checkpoint <ckpt> \
+    device <dev> [timeout <sec>] elements <e1> <e2> ...
 ```
 
 | Keyword | Required | Default | Description |
 |---------|----------|---------|-------------|
 | `cluster` | yes | — | Cluster name (e.g., `della`) |
-| `model` | yes | — | MLIP family: `mace`, `chgnet`, `uma`, `tensornet` |
-| `checkpoint` | no | `default` | Model weights (e.g., `medium`, `uma-s-1p1`) |
+| `checkpoint` | yes | — | Canonical checkpoint id (e.g., `mace-mp-0-medium`, `uma-s-1p1`) |
 | `device` | no | `cuda` | `cuda` or `cpu` |
 | `timeout` | no | `120` | Seconds to wait for worker startup |
 | `elements` | yes | — | Element symbols mapping atom types (must be last) |
@@ -167,10 +165,9 @@ Still on the login node — `install` only builds the venv:
 
 ```bash
 # Install individual environments
-rootstock install mace_env.py
-rootstock install chgnet_env.py
-rootstock install uma_env.py
-rootstock install tensornet_env.py
+rootstock install mace.py
+rootstock install uma.py
+rootstock install tensornet.py
 
 # Or point it at a directory with multiple environments
 rootstock install ./environments/
@@ -184,15 +181,15 @@ Use `rootstock add` to download model weights and verify them on the GPU. Downlo
 
 ```bash
 # Login node (CPU, has network): download only
-rootstock add mace medium --no-verify
-rootstock add uma uma-s-1p1 --no-verify
+rootstock add mace-mp-0-medium --no-verify
+rootstock add uma-s-1p1 --no-verify
 
 # GPU node: skip download (already fetched), verify on GPU
-rootstock add mace medium
-rootstock add uma uma-s-1p1
+rootstock add mace-mp-0-medium
+rootstock add uma-s-1p1
 
 # Forward extra kwargs to setup() — values are JSON-decoded, fall back to strings
-rootstock add uma uma-s-1p1 --kwarg task=omat
+rootstock add uma-s-1p1 --kwarg task=omat
 ```
 
 `rootstock add` is idempotent. Use `rootstock smoke-test` to re-verify all fetched checkpoints (suitable for nightly cron with `--json`).
@@ -215,12 +212,11 @@ After setup, the rootstock root directory will look like this:
 {root}/
 ├── .python/                # uv-managed Python interpreters
 ├── environments/           # Environment source files (*.py with PEP 723 metadata)
-│   ├── mace_env.py
-│   ├── chgnet_env.py
-│   ├── uma_env.py
-│   └── tensornet_env.py
+│   ├── mace.py
+│   ├── uma.py
+│   └── tensornet.py
 ├── envs/                   # Pre-built virtual environments
-│   ├── mace_env/
+│   ├── mace/
 │   │   ├── bin/python
 │   │   ├── lib/python3.11/site-packages/
 │   │   └── env_source.py
@@ -237,7 +233,7 @@ The `home/` directory exists because some ML libraries (FAIRChem, MatGL) ignore 
 
 ## Writing Environment Files
 
-Each MLIP is defined by a small Python file with [PEP 723](https://peps.python.org/pep-0723/) inline metadata specifying its dependencies and a `setup()` function that returns an ASE calculator:
+Each MLIP is defined by a small Python file with [PEP 723](https://peps.python.org/pep-0723/) inline metadata for its dependencies, a `CHECKPOINTS` table mapping canonical checkpoint ids to whatever string the upstream library expects, and a `setup()` function that dispatches via that table and returns an ASE calculator:
 
 ```python
 # /// script
@@ -245,10 +241,19 @@ Each MLIP is defined by a small Python file with [PEP 723](https://peps.python.o
 # dependencies = ["mace-torch>=0.3.14", "ase>=3.22", "torch>=2.0,<2.10"]
 # ///
 
-def setup(model: str, device: str = "cuda"):
+CHECKPOINTS = {
+    "mace-mp-0-small":  "small",
+    "mace-mp-0-medium": "medium",
+    "mace-mp-0-large":  "large",
+}
+
+
+def setup(checkpoint: str, device: str = "cuda"):
     from mace.calculators import mace_mp
-    return mace_mp(model=model, device=device, default_dtype="float32")
+    return mace_mp(model=CHECKPOINTS[checkpoint], device=device, default_dtype="float32")
 ```
+
+`CHECKPOINTS` is the env's local dispatch table. The keys are the canonical ids that show up in `rootstock add <id>` and in `RootstockCalculator(checkpoint=<id>)`; the values are whatever string the upstream library wants. A typo in the canonical id errors immediately ("no installed env declares ...") instead of failing inside `setup()`.
 
 Rootstock uses `uv` to build an isolated virtual environment from these dependencies. The `setup()` function is called once when a worker starts, and the returned calculator is reused for all subsequent calculations in that session.
 

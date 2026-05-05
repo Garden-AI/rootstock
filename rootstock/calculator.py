@@ -14,6 +14,7 @@ from ase.calculators.calculator import Calculator, all_changes
 from ase.stress import full_3x3_to_voigt_6_stress
 
 from .clusters import get_cluster
+from .environment import find_env_for_checkpoint
 from .server import RootstockServer
 
 
@@ -33,9 +34,8 @@ class RootstockCalculator(Calculator):
         atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
 
         with RootstockCalculator(
+            checkpoint="mace-mp-0-medium",
             cluster="della",
-            model="mace",
-            checkpoint="medium",
             device="cuda",
         ) as calc:
             atoms.calc = calc
@@ -43,9 +43,8 @@ class RootstockCalculator(Calculator):
 
         # Forward extra kwargs to the env's setup() function:
         with RootstockCalculator(
-            cluster="della",
-            model="uma",
             checkpoint="uma-s-1p1",
+            cluster="della",
             device="cuda",
             setup_kwargs={"task": "omol"},
         ) as calc:
@@ -53,15 +52,15 @@ class RootstockCalculator(Calculator):
             print(atoms.get_potential_energy())
 
     Note:
-        Environments must be pre-built using `rootstock build` before use.
-        Run: rootstock build mace_env --root /path/to/rootstock
+        Environments must be pre-built with `rootstock install` before use.
+        The hosting env is resolved automatically by walking the installed envs
+        and matching the checkpoint id against each env file's `CHECKPOINTS`.
     """
 
     implemented_properties = ["energy", "free_energy", "forces", "stress"]
 
     def __init__(
         self,
-        model: str,
         checkpoint: str,
         cluster: str | None = None,
         root: str | Path | None = None,
@@ -75,10 +74,9 @@ class RootstockCalculator(Calculator):
         Initialize the Rootstock calculator.
 
         Args:
-            model: Environment family name (e.g. "mace", "uma", "tensornet").
-                   Maps to {model}_env environment.
-            checkpoint: Specific checkpoint/weights to load. Passed to the
-                        environment's setup() as the model argument. Required.
+            checkpoint: Canonical checkpoint id (e.g., "mace-mp-0-medium",
+                        "uma-s-1p1"). Required. The hosting env is resolved
+                        from the installed envs at ``root``.
             cluster: Known cluster name (e.g., "della", "perlmutter"). Mutually
                      exclusive with root. The cluster's registered cache_root is
                      used unless `cache_root` is also passed.
@@ -88,8 +86,8 @@ class RootstockCalculator(Calculator):
                         cache_root, or to ``root`` if no cluster is in play.
             device: PyTorch device ("cuda", "cuda:0", "cpu")
             setup_kwargs: Extra keyword arguments forwarded to the env's setup()
-                          function. May not contain "model" or "device" — those
-                          are passed at the top level.
+                          function. May not contain "checkpoint" or "device" —
+                          those are passed at the top level.
             log: Optional file object for logging
             **kwargs: Additional arguments passed to ASE Calculator
         """
@@ -97,13 +95,14 @@ class RootstockCalculator(Calculator):
 
         if setup_kwargs is None:
             setup_kwargs = {}
-        reserved = {"model", "device"} & setup_kwargs.keys()
+        reserved = {"checkpoint", "device"} & setup_kwargs.keys()
         if reserved:
             raise TypeError(
                 f"setup_kwargs cannot contain reserved keys {sorted(reserved)}; "
                 "pass them at the top level instead."
             )
 
+        self.checkpoint = checkpoint
         self.device = device
         self.setup_kwargs = setup_kwargs
         self.log = log
@@ -125,22 +124,10 @@ class RootstockCalculator(Calculator):
         else:
             raise ValueError("Must specify either 'cluster' or 'root'")
 
-        self.env_name = f"{model}_env"
-        self.model_arg = checkpoint
-
-        # Verify environment is built
-        env_python = self.root / "envs" / self.env_name / "bin" / "python"
-        if not env_python.exists():
-            envs_dir = self.root / "envs"
-            if envs_dir.exists():
-                available = [p.name for p in envs_dir.iterdir() if p.is_dir()]
-            else:
-                available = []
-            raise RuntimeError(
-                f"Environment '{self.env_name}' not built at {self.root}/envs/{self.env_name}/\n"
-                f"Run: rootstock build {self.env_name} --root {self.root}\n"
-                f"Available environments: {available}"
-            )
+        # Resolve env name from the canonical checkpoint id by walking the
+        # installed envs at self.root. Raises CheckpointNotFoundError with a
+        # helpful listing if no env declares this id.
+        self.env_name, _ = find_env_for_checkpoint(self.root, checkpoint)
 
         # Generate unique socket name to avoid conflicts
         self._socket_name = f"rootstock_{uuid.uuid4().hex[:8]}"
@@ -151,7 +138,7 @@ class RootstockCalculator(Calculator):
         if self._server is None:
             self._server = RootstockServer(
                 env_name=self.env_name,
-                model=self.model_arg,
+                checkpoint=self.checkpoint,
                 device=self.device,
                 socket_name=self._socket_name,
                 root=self.root,

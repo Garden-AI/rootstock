@@ -31,7 +31,7 @@ def env_manager(tmp_path: Path) -> EnvironmentManager:
 def test_wrapper_writes_empty_kwargs_sidecar_when_none(env_manager):
     wrapper = env_manager.generate_wrapper(
         env_name="fake_env",
-        model="m",
+        checkpoint="m",
         device="cpu",
         socket_path="/tmp/sock",
     )
@@ -52,7 +52,7 @@ def test_wrapper_writes_empty_kwargs_sidecar_when_none(env_manager):
 def test_wrapper_round_trips_kwargs_through_json_sidecar(env_manager, kwargs):
     wrapper = env_manager.generate_wrapper(
         env_name="fake_env",
-        model="m",
+        checkpoint="m",
         device="cpu",
         socket_path="/tmp/sock",
         setup_kwargs=kwargs,
@@ -64,7 +64,7 @@ def test_wrapper_round_trips_kwargs_through_json_sidecar(env_manager, kwargs):
 def test_wrapper_and_kwargs_files_cleaned_up(env_manager):
     wrapper = env_manager.generate_wrapper(
         env_name="fake_env",
-        model="m",
+        checkpoint="m",
         device="cpu",
         socket_path="/tmp/sock",
         setup_kwargs={"task": "omol"},
@@ -89,16 +89,16 @@ from unittest.mock import patch
 
 # Capture what setup_fn was called with, then short-circuit before the
 # socket connection by raising. We just want to assert kwargs forwarding.
-def fake_setup(model, device, **kwargs):
+def fake_setup(checkpoint, device, **kwargs):
     with open({str(record_path)!r}, "w") as f:
-        json.dump({{"model": model, "device": device, "kwargs": kwargs}}, f)
+        json.dump({{"checkpoint": checkpoint, "device": device, "kwargs": kwargs}}, f)
     raise SystemExit(0)
 
 from rootstock.worker import run_worker
 try:
     run_worker(
         setup_fn=fake_setup,
-        model="checkpoint-x",
+        checkpoint="mace-mp-0-medium",
         device="cpu",
         socket_path="/tmp/does_not_matter",
         setup_kwargs={{"task": "omol", "charge": -1}},
@@ -111,7 +111,7 @@ except SystemExit:
     assert rc.returncode == 0
     record = json.loads(record_path.read_text())
     assert record == {
-        "model": "checkpoint-x",
+        "checkpoint": "mace-mp-0-medium",
         "device": "cpu",
         "kwargs": {"task": "omol", "charge": -1},
     }

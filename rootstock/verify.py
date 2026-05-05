@@ -64,8 +64,8 @@ def verify_checkpoint(
 
     Args:
         root: Rootstock install root.
-        env_name: Name of pre-built environment (e.g., "mace_env").
-        checkpoint: Checkpoint identifier passed to setup() as the model arg.
+        env_name: Name of pre-built environment (e.g., "mace").
+        checkpoint: Canonical checkpoint id passed to setup().
         device: PyTorch device (e.g., "cuda", "cpu").
         setup_kwargs: Extra keyword arguments forwarded to setup().
         cache_root: Optional separate root for the model-weight cache and
@@ -84,7 +84,7 @@ def verify_checkpoint(
 
     server = RootstockServer(
         env_name=env_name,
-        model=checkpoint,
+        checkpoint=checkpoint,
         device=device,
         socket_name=socket_name,
         root=Path(root),

@@ -119,10 +119,9 @@ Still on the login node — `install` only builds the venv, no model weights yet
 
 ```bash
 # Install individual environments
-rootstock install mace_env.py
-rootstock install chgnet_env.py
-rootstock install uma_env.py
-rootstock install tensornet_env.py
+rootstock install mace.py
+rootstock install uma.py
+rootstock install tensornet.py
 
 # Or point it at a directory with multiple environments
 rootstock install ./environments/
@@ -144,12 +143,12 @@ This process can take several minutes per environment, depending on the MLIP and
 
 ```bash
 # Login node (CPU, has network): download weights only
-rootstock add mace medium --no-verify
-rootstock add uma uma-s-1p1 --no-verify --kwarg task=omat
+rootstock add mace-mp-0-medium --no-verify
+rootstock add uma-s-1p1 --no-verify --kwarg task=omat
 
 # GPU node (no network): skip download (already fetched), verify on GPU
-rootstock add mace medium
-rootstock add uma uma-s-1p1 --kwarg task=omat
+rootstock add mace-mp-0-medium
+rootstock add uma-s-1p1 --kwarg task=omat
 ```
 
 If a node has both network access and a GPU, run without `--no-verify` to do everything in one shot.

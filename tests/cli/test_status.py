@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from rootstock.commands.status import _checkpoint_line, cmd_status
 from rootstock.config import UserConfig
 from rootstock.manifest import (
@@ -76,14 +74,16 @@ def test_status_json_includes_verified_current(tmp_path: Path, capsys):
     """--json should add a computed verified_current bool per checkpoint."""
     cfg = UserConfig(name="t", email="t@t.t")
     manifest = create_manifest(tmp_path, "test", cfg)
-    manifest.environments["mace_env"] = _env_with_checkpoints(
+    manifest.environments["mace"] = _env_with_checkpoints(
         "2026-01-01T00:00:00Z",
-        medium=CheckpointInfo(
-            fetched_at="2026-01-02T00:00:00Z",
-            verified_at="2026-01-03T00:00:00Z",
-            verified_device="cuda",
-        ),
-        small=CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
+        **{
+            "mace-mp-0-medium": CheckpointInfo(
+                fetched_at="2026-01-02T00:00:00Z",
+                verified_at="2026-01-03T00:00:00Z",
+                verified_device="cuda",
+            ),
+            "mace-mp-0-small": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
+        },
     )
     save_manifest(manifest, tmp_path)
 
@@ -98,9 +98,9 @@ def test_status_json_includes_verified_current(tmp_path: Path, capsys):
     assert rc == 0
 
     parsed = json.loads(capsys.readouterr().out)
-    ckpts = parsed["manifest"]["environments"]["mace_env"]["checkpoints"]
-    assert ckpts["medium"]["verified_current"] is True
-    assert ckpts["small"]["verified_current"] is False
+    ckpts = parsed["manifest"]["environments"]["mace"]["checkpoints"]
+    assert ckpts["mace-mp-0-medium"]["verified_current"] is True
+    assert ckpts["mace-mp-0-small"]["verified_current"] is False
 
 
 def test_status_json_no_manifest(tmp_path: Path, capsys):

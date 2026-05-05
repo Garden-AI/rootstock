@@ -86,13 +86,14 @@ def test_install_command_passes_helper_spec_as_final_arg(tmp_path, monkeypatch, 
 
     env_dir = tmp_path / "environments"
     env_dir.mkdir()
-    env_source = env_dir / "noop_env.py"
+    env_source = env_dir / "noop.py"
     env_source.write_text(
         "# /// script\n"
         '# requires-python = ">=3.10"\n'
         "# dependencies = []\n"
         "# ///\n"
-        'def setup(model: str, device: str = "cuda"):\n'
+        "CHECKPOINTS = {}\n"
+        'def setup(checkpoint: str, device: str = "cuda"):\n'
         "    return None\n"
     )
 

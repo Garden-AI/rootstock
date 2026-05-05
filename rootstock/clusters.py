@@ -42,8 +42,8 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
     ),
 }
 
-# Known environment families (used for validation)
-KNOWN_ENVIRONMENTS = ["mace", "chgnet", "orb", "alignn", "uma", "tensornet", "esen"]
+# Known environment families.
+KNOWN_ENVIRONMENTS = ["mace", "maceoff", "esen", "orb", "tensornet", "uma"]
 
 
 def get_cluster(cluster: str) -> Cluster:

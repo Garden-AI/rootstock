@@ -11,19 +11,23 @@ Commands:
     rootstock new-env <name> [-o <path>] [--force]
         Create a new environment file from template:
             rootstock new-env mace
-            rootstock new-env mace -o ./environments/mace_env.py
+            rootstock new-env mace -o ./environments/mace.py
 
-    rootstock install <source> [--root <path>] [--models m1,m2] [--force]
+    rootstock install <source> [--root <path>] [--force]
         Install from file (validates, registers, builds):
-            rootstock install ./mace_env.py --root /vol/rootstock
+            rootstock install ./mace.py --root /vol/rootstock
         Install all environments from a directory:
             rootstock install ./environments/ --root /vol/rootstock
         Rebuild existing environment by name:
-            rootstock install mace_env --root /vol/rootstock --force
+            rootstock install mace --root /vol/rootstock --force
+
+    rootstock add <checkpoint-id> [--root <path>] [--device <dev>] [--kwarg KEY=VAL ...]
+        Resolve the env that hosts <checkpoint-id> from the installed envs,
+        then download and verify the weights.
 
     rootstock status [--root <path>]
     rootstock list [--root <path>]
-    rootstock serve <model> [--root <path>] --socket <path> --checkpoint <name> [--device <dev>]
+    rootstock serve <checkpoint-id> [--root <path>] --socket <path> [--device <dev>]
     rootstock resolve --cluster <name> [--json]
 """
 
@@ -31,6 +35,7 @@ import argparse
 import os
 import sys
 
+from . import __version__
 from .commands import (
     cmd_add,
     cmd_init,
@@ -43,7 +48,6 @@ from .commands import (
     cmd_smoke_test,
     cmd_status,
 )
-from . import __version__
 from .commands.common import ROOTSTOCK_ROOT_ENV
 from .config import DEFAULT_CONFIG_FILE
 
@@ -87,12 +91,12 @@ def main():
     )
     new_env_parser.add_argument(
         "name",
-        help="Environment name (e.g., 'mace' or 'mace_env')",
+        help="Environment name (e.g., 'mace')",
     )
     new_env_parser.add_argument(
         "-o",
         "--output",
-        help="Output file path (default: ./<name>_env.py)",
+        help="Output file path (default: ./<name>.py)",
     )
     new_env_parser.add_argument(
         "--force",
@@ -114,7 +118,7 @@ def main():
     )
     install_parser.add_argument(
         "source",
-        help="File path, directory, or env name (e.g., ./mace_env.py, ./environments/, mace_env)",
+        help="File path, directory, or env name (e.g., ./mace.py, ./environments/, mace)",
     )
     install_parser.add_argument(
         "--root",
@@ -141,16 +145,17 @@ def main():
     # add command
     add_parser = subparsers.add_parser(
         "add",
-        help="Download and verify a checkpoint for an installed environment",
+        help="Download and verify a checkpoint by canonical id",
         description=(
-            "Idempotent download-or-verify. Skips download if already fetched. "
+            "Idempotent download-or-verify. Resolves the hosting env from the "
+            "installed envs by matching the canonical checkpoint id against each "
+            "env's CHECKPOINTS dict. Skips download if already fetched. "
             "Use --no-verify on login nodes without GPUs."
         ),
     )
-    add_parser.add_argument("env", help="Environment name (e.g., 'mace', 'mace_env')")
     add_parser.add_argument(
         "checkpoint",
-        help="Checkpoint identifier (e.g., 'medium', 'uma-s-1p1')",
+        help="Canonical checkpoint id (e.g., 'mace-mp-0-medium', 'uma-s-1p1')",
     )
     add_parser.add_argument(
         "--kwarg",
@@ -254,14 +259,16 @@ def main():
         help="Start a worker for an external i-PI server",
         description="Start a rootstock worker that connects to a Unix socket.",
     )
-    serve_parser.add_argument("model", help="Model family (e.g., mace, uma, tensornet)")
+    serve_parser.add_argument(
+        "checkpoint",
+        help="Canonical checkpoint id (e.g., 'mace-mp-0-medium', 'uma-s-1p1')",
+    )
     serve_parser.add_argument(
         "--root",
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
     )
     serve_parser.add_argument("--socket", required=True, help="Unix socket path to connect to")
-    serve_parser.add_argument("--checkpoint", required=True, help="Checkpoint/weights name")
     serve_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
     serve_parser.add_argument(
         "--kwarg",

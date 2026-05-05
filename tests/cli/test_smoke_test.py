@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -22,17 +21,17 @@ from rootstock.manifest import (
 
 @pytest.fixture
 def populated_root(tmp_path: Path, monkeypatch) -> Path:
-    """A root with two envs: mace_env (small fetched, medium fetched, large NOT fetched)
-    and uma_env (one fetched checkpoint). Built dirs exist so verify can be called."""
+    """A root with two envs: mace (small + medium fetched, large NOT fetched)
+    and uma (one fetched checkpoint). Built dirs exist so verify can be called."""
     root = tmp_path
-    for env in ("mace_env", "uma_env"):
+    for env in ("mace", "uma"):
         (root / "envs" / env / "bin").mkdir(parents=True)
         (root / "envs" / env / "bin" / "python").touch()
 
     cfg = UserConfig(name="t", email="t@t.t")
     manifest = create_manifest(root, "test", cfg)
 
-    manifest.environments["mace_env"] = EnvironmentInfo(
+    manifest.environments["mace"] = EnvironmentInfo(
         status="ready",
         built_at="2026-01-01T00:00:00Z",
         source_hash="sha256:abc",
@@ -40,12 +39,12 @@ def populated_root(tmp_path: Path, monkeypatch) -> Path:
         python_requires=">=3.10",
         dependencies={},
         checkpoints={
-            "small": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
-            "medium": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
-            "large": CheckpointInfo(),  # not fetched yet — should be skipped
+            "mace-mp-0-small": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
+            "mace-mp-0-medium": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
+            "mace-mp-0-large": CheckpointInfo(),  # not fetched yet — should be skipped
         },
     )
-    manifest.environments["uma_env"] = EnvironmentInfo(
+    manifest.environments["uma"] = EnvironmentInfo(
         status="ready",
         built_at="2026-01-01T00:00:00Z",
         source_hash="sha256:def",
@@ -91,11 +90,11 @@ def test_smoke_test_skips_unfetched_checkpoints(populated_root, monkeypatch, cap
     rc = cmd_smoke_test(_make_args(populated_root))
     assert rc == 0
 
-    # mace_env/large was not fetched, so it should not have been tested.
+    # mace/mace-mp-0-large was not fetched, so it should not have been tested.
     assert sorted(seen) == [
-        ("mace_env", "medium"),
-        ("mace_env", "small"),
-        ("uma_env", "uma-s-1p1"),
+        ("mace", "mace-mp-0-medium"),
+        ("mace", "mace-mp-0-small"),
+        ("uma", "uma-s-1p1"),
     ]
 
 
@@ -115,7 +114,7 @@ def test_smoke_test_always_uses_empty_kwargs(populated_root, monkeypatch):
 
 def test_smoke_test_marks_pass_and_fail(populated_root, monkeypatch):
     def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **_):
-        if (env_name, checkpoint) == ("mace_env", "medium"):
+        if (env_name, checkpoint) == ("mace", "mace-mp-0-medium"):
             return False, "RuntimeError: bad"
         return True, None
 
@@ -124,8 +123,8 @@ def test_smoke_test_marks_pass_and_fail(populated_root, monkeypatch):
     assert rc == 1  # at least one failure -> exit 1
 
     m = load_manifest(populated_root)
-    medium = m.environments["mace_env"].checkpoints["medium"]
-    small = m.environments["mace_env"].checkpoints["small"]
+    medium = m.environments["mace"].checkpoints["mace-mp-0-medium"]
+    small = m.environments["mace"].checkpoints["mace-mp-0-small"]
     assert medium.verified_at is None
     assert "smoke-test:" in medium.last_error
     assert small.verified_at is not None
@@ -147,7 +146,7 @@ def test_smoke_test_filters_by_env(populated_root, monkeypatch):
     )
 
     cmd_smoke_test(_make_args(populated_root, env="uma"))
-    assert seen == [("uma_env", "uma-s-1p1")]
+    assert seen == [("uma", "uma-s-1p1")]
 
 
 def test_smoke_test_filters_by_env_and_checkpoint(populated_root, monkeypatch):
@@ -159,12 +158,12 @@ def test_smoke_test_filters_by_env_and_checkpoint(populated_root, monkeypatch):
         ),
     )
 
-    cmd_smoke_test(_make_args(populated_root, env="mace", checkpoint="small"))
-    assert seen == [("mace_env", "small")]
+    cmd_smoke_test(_make_args(populated_root, env="mace", checkpoint="mace-mp-0-small"))
+    assert seen == [("mace", "mace-mp-0-small")]
 
 
 def test_smoke_test_checkpoint_without_env_errors(populated_root, capsys):
-    rc = cmd_smoke_test(_make_args(populated_root, checkpoint="small"))
+    rc = cmd_smoke_test(_make_args(populated_root, checkpoint="mace-mp-0-small"))
     assert rc == 2
 
 

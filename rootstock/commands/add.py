@@ -9,7 +9,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ..environment import get_model_cache_env
+from ..environment import (
+    CheckpointNotFoundError,
+    find_env_for_checkpoint,
+    get_model_cache_env,
+)
 from ..manifest import (
     CheckpointInfo,
     EnvironmentInfo,
@@ -147,7 +151,6 @@ def _ensure_manifest_entry(
 def cmd_add(args) -> int:
     root = get_root_or_exit(args)
     cache_root = resolve_cache_root(root)
-    env_name = args.env if args.env.endswith("_env") else f"{args.env}_env"
     checkpoint = args.checkpoint
     device = args.device
     no_verify = args.no_verify
@@ -158,6 +161,12 @@ def cmd_add(args) -> int:
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
+
+    try:
+        env_name, _ = find_env_for_checkpoint(root, checkpoint)
+    except CheckpointNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     try:
         manifest, env, ckpt = _ensure_manifest_entry(root, None, env_name, checkpoint)

@@ -8,7 +8,7 @@ Produces:
 Usage:
   python reference_pressure.py
 
-Requires rootstock to be installed and the mace_env environment built.
+Requires rootstock to be installed and the mace environment built.
 """
 
 import numpy as np
@@ -27,8 +27,7 @@ def main():
     # Calculate stress with rootstock
     with RootstockCalculator(
         cluster="della",
-        model="mace",
-        checkpoint="medium",
+        checkpoint="mace-mp-0-medium",
         device="cpu",
     ) as calc:
         atoms.calc = calc

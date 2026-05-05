@@ -14,8 +14,7 @@ atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
 
 with RootstockCalculator(
     cluster="della",
-    model="mace",
-    checkpoint="medium",
+    checkpoint="mace-mp-0-medium",
     device="cuda",
 ) as calc:
     atoms.calc = calc
@@ -28,13 +27,12 @@ with RootstockCalculator(
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `checkpoint` | `str` | Yes | Canonical checkpoint id (e.g., `"mace-mp-0-medium"`, `"uma-s-1p1"`). The hosting env is resolved automatically by walking the installed envs and matching against each env's `CHECKPOINTS` table |
 | `cluster` | `str` | Yes* | Cluster name (e.g., `"della"`, `"perlmutter"`) |
 | `root` | `str` | Yes* | Custom install-root path instead of a known cluster |
 | `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. Defaults to the cluster's registered `cache_root`, or to `root` if no cluster is in play |
-| `model` | `str` | Yes | MLIP family: `"mace"`, `"chgnet"`, `"uma"`, `"tensornet"`, `"esen"` |
-| `checkpoint` | `str` | Yes | Specific model weights (e.g., `"medium"`, `"uma-s-1p1"`) |
 | `device` | `str` | No | `"cuda"` (default) or `"cpu"` |
-| `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `model` or `device` |
+| `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `checkpoint` or `device` |
 
 *Either `cluster` or `root` must be provided, but not both.
 
@@ -42,20 +40,20 @@ with RootstockCalculator(
 
 ```python
 # Using a known cluster
-RootstockCalculator(cluster="della", model="mace", checkpoint="medium")
+RootstockCalculator(cluster="della", checkpoint="mace-mp-0-medium")
 
 # Perlmutter — install root and cache root come from the registry
-RootstockCalculator(cluster="perlmutter", model="uma", checkpoint="uma-s-1p1")
+RootstockCalculator(cluster="perlmutter", checkpoint="uma-s-1p1")
 
 # Custom install root (cache_root defaults to the install root)
-RootstockCalculator(root="/scratch/gpfs/specific/install/rootstock", model="mace", checkpoint="medium")
+RootstockCalculator(root="/scratch/gpfs/specific/install/rootstock", checkpoint="mace-mp-0-medium")
 
 # Explicit split between install root and cache root
 RootstockCalculator(
     root="/global/cfs/cdirs/myproj/rootstock",
     cache_root="/pscratch/sd/u/me/rootstock-cache",
-    model="uma",
     checkpoint="uma-s-1p1",
+    setup_kwargs={"task": "omol"},
 )
 ```
 
@@ -78,14 +76,18 @@ with RootstockCalculator(...) as calc:
 
 Available models vary by cluster and change as new environments are added. See the [Example Configs](clusters.md) page for current deployments on each cluster.
 
-### Model Reference
+### Checkpoint Reference
 
-| Model | Environment | Default Checkpoint | Other Checkpoints |
-|-------|-------------|-------------------|-------------------|
-| `mace` | mace_env | `medium` | `small`, `large` |
-| `chgnet` | chgnet_env | (pretrained) | — |
-| `uma` | uma_env | `uma-s-1p1` | — |
-| `tensornet` | tensornet_env | `TensorNet-MatPES-PBE-v2025.1-PES` | Other MatGL models |
+Canonical checkpoint ids deployed by the bundled env files in `sample_model_configurations/nvidia_configs/`:
+
+| Env | Canonical checkpoint ids |
+|---|---|
+| `mace` | `mace-mp-0-small`, `mace-mp-0-medium`, `mace-mp-0-large` |
+| `maceoff` | `mace-off23-small`, `mace-off23-medium`, `mace-off23-large` |
+| `esen` | `esen-md-direct-all-omol`, `esen-sm-conserving-all-omol`, `esen-sm-direct-all-omol` |
+| `orb` | `orb-v2` |
+| `tensornet` | `tensornet-matpes-pbe-2025-2` |
+| `uma` | `uma-s-1p1` |
 
 ### Checking Available Models
 
@@ -164,7 +166,7 @@ Create a new environment template file with the required PEP 723 structure.
 rootstock new-env mace
 
 # Specify output path
-rootstock new-env mace -o ./environments/mace_env.py
+rootstock new-env mace -o ./environments/mace.py
 
 # Overwrite existing file
 rootstock new-env mace --force
@@ -176,16 +178,16 @@ Build environment(s) from a file or directory. Builds the venv only — no model
 
 ```bash
 # Install from a single file
-rootstock install ./mace_env.py
+rootstock install ./mace.py
 
 # Install all environments from a directory
 rootstock install ./environments/
 
 # Rebuild an existing environment
-rootstock install mace_env --force
+rootstock install mace --force
 
 # Install without pushing manifest to backend
-rootstock install mace_env.py --no-push
+rootstock install mace.py --no-push
 ```
 
 Options:
@@ -196,22 +198,22 @@ Options:
 - `--no-push`: Skip pushing manifest to backend
 
 !!! note "`--models` was removed in v0.8.0"
-    Pre-downloading weights at install time is now a separate step. Use `rootstock add <env> <checkpoint>` instead. Passing `--models` to `install` will exit with a migration error.
+    Pre-downloading weights at install time is now a separate step. Use `rootstock add <checkpoint-id>` instead. Passing `--models` to `install` will exit with a migration error.
 
 #### `rootstock add`
 
-Download and verify a checkpoint for a built environment. Idempotent — safe to re-run.
+Download and verify a checkpoint by canonical id. The hosting env is resolved by walking the installed envs and matching the id against each env's `CHECKPOINTS` table. Idempotent — safe to re-run.
 
 ```bash
 # Login node (CPU, has network): download only
-rootstock add mace medium --no-verify
+rootstock add mace-mp-0-medium --no-verify
 
 # GPU node (no network): skip download (already fetched), verify on GPU
-rootstock add mace medium
+rootstock add mace-mp-0-medium
 
 # Forward extra kwargs to setup() — values are JSON-decoded, fall back to strings
-rootstock add uma uma-s-1p1 --kwarg task=omat
-rootstock add some_env some_ckpt --kwarg charge=-1 --kwarg enabled=true
+rootstock add uma-s-1p1 --kwarg task=omat
+rootstock add esen-md-direct-all-omol --kwarg charge=-1 --kwarg enabled=true
 ```
 
 Options:
@@ -232,7 +234,7 @@ rootstock smoke-test
 
 # Filter
 rootstock smoke-test --env mace
-rootstock smoke-test --env mace --checkpoint medium
+rootstock smoke-test --env mace --checkpoint mace-mp-0-medium
 
 # JSON summary for cron
 rootstock smoke-test --json
@@ -248,9 +250,8 @@ Exit code is 0 if all tested checkpoints passed, 1 otherwise.
 Start a worker process for an external i-PI server (advanced usage).
 
 ```bash
-rootstock serve mace \
+rootstock serve mace-mp-0-medium \
   --socket /tmp/ipi_socket \
-  --checkpoint medium \
   --device cuda
 ```
 
