@@ -2,36 +2,39 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-from importlib.metadata import distribution
 from pathlib import Path
 
 from .common import get_root_or_exit
 
+ROOTSTOCK_GITHUB_URL = "https://github.com/Garden-AI/rootstock.git"
 
-def _rootstock_install_target() -> str:
-    """
-    Return the spec to pass to `uv pip install` for the worker venv's rootstock.
 
-    For a regular install, returns "rootstock==<version>" so workers pin to
-    the same published version as the driver. For an editable install
-    (driver running from a source checkout, e.g., a maintainer dev branch),
-    returns the absolute source path so the worker matches the in-tree code
-    rather than whatever happens to be on PyPI under that version number.
-    Detection uses PEP 610 direct_url.json, which uv writes on `pip install -e`.
+def _rootstock_install_spec() -> str:
+    """Pin the worker env to the running rootstock build.
+
+    Tagged release ('0.7.2'):       rootstock==0.7.2 (from PyPI)
+    Dev build ('...dev0+abc1234'):  rootstock@git+<url>@abc1234 (from GitHub)
     """
-    dist = distribution("rootstock")
-    raw = dist.read_text("direct_url.json")
-    if raw:
-        info = json.loads(raw)
-        if info.get("dir_info", {}).get("editable") and info.get("url", "").startswith("file://"):
-            return info["url"][len("file://"):]
-    return f"rootstock=={dist.version}"
+    from rootstock import __version__
+
+    if "dev" not in __version__:
+        return f"rootstock=={__version__}"
+
+    if "+" not in __version__:
+        raise RuntimeError(
+            f"Cannot determine rootstock commit from version {__version__!r}. "
+            "Worker env needs a tagged release or a dev build with git "
+            "context. Commit your changes (and ensure git history is "
+            "available) before running `rootstock install`."
+        )
+
+    commit_hash = __version__.split("+")[-1]
+    return f"rootstock@git+{ROOTSTOCK_GITHUB_URL}@{commit_hash}"
 
 
 def extract_minimum_python_version(requires_python: str) -> str:
@@ -280,9 +283,7 @@ def _install_single_environment(
 
     # Install rootstock
     print("3. Installing rootstock...")
-    # Match the driver: published version for regular installs, source path
-    # for editable installs (maintainer dev branches).
-    rootstock_spec = _rootstock_install_target()
+    rootstock_spec = _rootstock_install_spec()
     print(f"  Installing: {rootstock_spec}")
 
     result = subprocess.run(
