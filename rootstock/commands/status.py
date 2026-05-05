@@ -76,7 +76,7 @@ def cmd_status(args) -> int:
             if env is None:
                 continue
             if not env.checkpoints:
-                print("    (no checkpoints — run 'rootstock add <env> <ckpt>')")
+                print("    (no checkpoints — run 'rootstock add <checkpoint-id>')")
                 continue
             print(f"    Built: {env.built_at}")
             print(f"    Checkpoints ({len(env.checkpoints)}):")

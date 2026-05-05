@@ -21,7 +21,7 @@ Your script (on cluster node)          Worker subprocess
 This design eliminates environment conflicts when experimenting with different MLIPs or using multiple MLIPs in a single workflow:
 
 - **No environment conflicts**: Each MLIP runs in isolation with its exact required dependencies
-- **One-line model swapping**: Change `model="mace"` to `model="uma"` without reinstalling anything
+- **One-line model swapping**: Change `checkpoint="mace-mp-0-medium"` to `checkpoint="uma-s-1p1"` without reinstalling anything
 - **Multi-model workflows**: Use multiple MLIPs in the same script (sequentially)
 - **Clean user environments**: Users only install the lightweight `rootstock` package
 
@@ -43,12 +43,11 @@ After setup, the Rootstock root directory looks like this:
 {root}/
 ├── .python/                # uv-managed Python interpreters
 ├── environments/           # Environment source files (*.py with PEP 723 metadata)
-│   ├── mace_env.py
-│   ├── chgnet_env.py
-│   ├── uma_env.py
-│   └── tensornet_env.py
+│   ├── mace.py
+│   ├── uma.py
+│   └── tensornet.py
 ├── envs/                   # Pre-built virtual environments
-│   ├── mace_env/
+│   ├── mace/
 │   │   ├── bin/python
 │   │   ├── lib/python3.11/site-packages/
 │   │   └── env_source.py

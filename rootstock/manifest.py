@@ -22,7 +22,7 @@ from pathlib import Path
 
 from .config import UserConfig
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass
@@ -147,15 +147,13 @@ class Manifest:
 
     @classmethod
     def from_dict(cls, data: dict) -> Manifest:
-        # TODO: remove this v1 rejection once known clusters are migrated
-        # (see scripts/migrate_manifest_v1_to_v2.py). Tracked in follow-up.
         version = data.get("schema_version")
         if version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"manifest is schema_version={version!r}, expected {SCHEMA_VERSION}.\n"
-                f"Run scripts/migrate_manifest_v1_to_v2.py against this manifest "
-                f"before continuing.\n"
-                f"This script will be removed in a follow-up release."
+                f"Older manifests are not auto-migrated. Reinstall environments with "
+                f"`rootstock install <env-file>` and re-add checkpoints with "
+                f"`rootstock add <checkpoint-id>`."
             )
 
         environments = {}

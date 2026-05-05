@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rootstock is a proof-of-concept for running MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments, communicating via the i-PI protocol over Unix sockets.
 
-**Current version: v0.5** - Pre-built environments with UMA and TensorNet support.
+**Current version: v0.8** - Manifest schema v3; canonical-checkpoint-id API.
 
 ## Commands
 
@@ -21,8 +21,8 @@ uv pip install -e ".[dev]"
 # Build a pre-built environment (venv only — no model weights)
 rootstock install <env_source.py> [--root <path>] [--force]
 
-# Download + verify a checkpoint (idempotent). Use --no-verify on login nodes.
-rootstock add <env> <checkpoint> [--kwarg key=val ...] [--device cuda] [--no-verify]
+# Download + verify a checkpoint by canonical id (idempotent). Use --no-verify on login nodes.
+rootstock add <checkpoint-id> [--kwarg key=val ...] [--device cuda] [--no-verify]
 
 # Re-verify all fetched checkpoints (suitable for nightly cron)
 rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--json]
@@ -46,7 +46,7 @@ ruff format rootstock/
 Main Process                          Worker Process (subprocess)
 ┌─────────────────────────┐          ┌─────────────────────────────┐
 │ RootstockCalculator     │          │ Pre-built venv Python       │
-│ (ASE-compatible)        │          │ (mace_env/bin/python)       │
+│ (ASE-compatible)        │          │ (envs/mace/bin/python)      │
 │                         │          │                             │
 │ server.py (i-PI server) │◄────────►│ worker.py (i-PI client)     │
 │ - sends positions       │   Unix   │ - receives positions        │
@@ -54,7 +54,7 @@ Main Process                          Worker Process (subprocess)
 └─────────────────────────┘          └─────────────────────────────┘
 ```
 
-**Key design**: v0.4 uses pre-built virtual environments instead of dynamic `uv run`. This provides:
+**Key design**: pre-built virtual environments instead of dynamic `uv run`. This provides:
 - Fast startup (no pip install at runtime)
 - Works on any filesystem (no lock files or hardlinks needed)
 - Reproducible environments
@@ -74,17 +74,16 @@ Main Process                          Worker Process (subprocess)
 {root}/
 ├── .python/                # uv-managed Python interpreters (portable)
 │   └── cpython-3.10.19-linux-x86_64-gnu/
-├── environments/           # Environment SOURCE files (*.py with PEP 723)
-│   ├── mace_env.py
-│   ├── chgnet_env.py
-│   ├── uma_env.py
-│   └── tensornet_env.py
+├── environments/           # Environment SOURCE files (*.py with PEP 723 + CHECKPOINTS)
+│   ├── mace.py
+│   ├── uma.py
+│   └── tensornet.py
 ├── envs/                   # Pre-built virtual environments
-│   ├── mace_env/
+│   ├── mace/
 │   │   ├── bin/python      # Symlinks to .python/
 │   │   ├── lib/python3.11/site-packages/
 │   │   └── env_source.py   # Copy of source for imports
-│   └── chgnet_env/
+│   └── uma/
 └── cache/                  # XDG_CACHE_HOME for model weights
     ├── mace/
     └── huggingface/
@@ -110,57 +109,63 @@ Most clusters use the same path for both.
 ## API
 
 ```python
-# v0.8 API: model and checkpoint are required; setup_kwargs is optional
+# v0.8: single canonical checkpoint id; env is resolved automatically.
 with RootstockCalculator(
     cluster="della",
-    model="mace",              # Environment family -> mace_env
-    checkpoint="medium",       # Specific checkpoint — required
+    checkpoint="mace-mp-0-medium",
     device="cuda",
 ) as calc:
     atoms.calc = calc
     energy = atoms.get_potential_energy()
 
 # Forward extra kwargs to the env's setup() function. Cannot contain
-# "model" or "device" — those are passed at the top level.
+# "checkpoint" or "device" — those are passed at the top level.
 with RootstockCalculator(
     cluster="della",
-    model="uma",
     checkpoint="uma-s-1p1",
     setup_kwargs={"task": "omol"},
 ) as calc:
     ...
 ```
 
-### Available Models
+### Canonical checkpoint ids (bundled envs)
 
-| Model | Environment | Default Checkpoint | Other Checkpoints |
-|-------|-------------|-------------------|-------------------|
-| `mace` | mace_env | `medium` | `small`, `large` |
-| `chgnet` | chgnet_env | (pretrained) | — |
-| `uma` | uma_env | `uma-s-1p1` | — |
-| `tensornet` | tensornet_env | `TensorNet-MatPES-PBE-v2025.1-PES` | Other MatGL models |
+| Env | Canonical ids |
+|---|---|
+| `mace` | `mace-mp-0-{small,medium,large}`, `mace-off23-{small,medium,large}` |
+| `esen` | `esen-md-direct-all-omol`, `esen-sm-conserving-all-omol`, `esen-sm-direct-all-omol` |
+| `orb` | `orb-v2` |
+| `tensornet` | `tensornet-matpes-pbe-2025-2` |
+| `uma` | `uma-s-1p1` |
 
 ## Build Process
 
 ```bash
 # 1. Create environment source file
-cat > environments/mace_env.py << 'EOF'
+cat > environments/mace.py << 'EOF'
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.0"]
 # ///
 
-def setup(model: str, device: str = "cuda"):
+CHECKPOINTS = {
+    "mace-mp-0-small":  "small",
+    "mace-mp-0-medium": "medium",
+    "mace-mp-0-large":  "large",
+}
+
+
+def setup(checkpoint: str, device: str = "cuda"):
     from mace.calculators import mace_mp
-    return mace_mp(model=model, device=device, default_dtype="float32")
+    return mace_mp(model=CHECKPOINTS[checkpoint], device=device, default_dtype="float32")
 EOF
 
 # 2. Build pre-built environment (venv only — no model weights)
-rootstock install environments/mace_env.py --root /path/to/rootstock
+rootstock install environments/mace.py --root /path/to/rootstock
 
-# 3. Download and verify checkpoints (idempotent; use --no-verify on login nodes)
-rootstock add mace medium --root /path/to/rootstock
-rootstock add mace small --root /path/to/rootstock
+# 3. Download and verify checkpoints by canonical id (idempotent; use --no-verify on login nodes)
+rootstock add mace-mp-0-medium --root /path/to/rootstock
+rootstock add mace-mp-0-small --root /path/to/rootstock
 
 # 4. Verify install state
 rootstock status --root /path/to/rootstock

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from rootstock.commands import add as add_module
 from rootstock.commands.add import cmd_add, parse_kwarg
-from rootstock.manifest import Manifest, load_manifest
-
+from rootstock.manifest import load_manifest
 
 # ---------- parse_kwarg ----------------------------------------------------
 
@@ -46,13 +44,29 @@ def test_parse_kwarg_rejects_empty_key():
 # ---------- cmd_add (idempotency, error reporting) -------------------------
 
 
+_MACE_ENV_SOURCE = '''\
+"""MACE env."""
+
+CHECKPOINTS = {
+    "mace-mp-0-small":  "small",
+    "mace-mp-0-medium": "medium",
+    "mace-mp-0-large":  "large",
+}
+
+
+def setup(checkpoint, device="cuda"):
+    return None
+'''
+
+
 @pytest.fixture
 def fake_root(tmp_path: Path, monkeypatch) -> Path:
-    """Build a minimal rootstock root with a fake env so cmd_add can run."""
+    """Build a minimal rootstock root with a fake mace env so cmd_add can run."""
     root = tmp_path
-    env_python = root / "envs" / "mace_env" / "bin" / "python"
-    env_python.parent.mkdir(parents=True)
-    env_python.touch()
+    env_dir = root / "envs" / "mace"
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").touch()
+    (env_dir / "env_source.py").write_text(_MACE_ENV_SOURCE)
 
     # Initialize a manifest so we don't trigger config-loading paths.
     from rootstock.config import UserConfig
@@ -74,8 +88,7 @@ def _make_args(root: Path, **overrides):
         pass
 
     args = _Args()
-    args.env = overrides.get("env", "mace")
-    args.checkpoint = overrides.get("checkpoint", "medium")
+    args.checkpoint = overrides.get("checkpoint", "mace-mp-0-medium")
     args.kwarg = overrides.get("kwarg")
     args.device = overrides.get("device", "cuda")
     args.no_verify = overrides.get("no_verify", False)
@@ -91,7 +104,7 @@ def test_add_no_verify_sets_fetched_at(fake_root, monkeypatch):
     assert rc == 0
 
     m = load_manifest(fake_root)
-    ckpt = m.environments["mace_env"].checkpoints["medium"]
+    ckpt = m.environments["mace"].checkpoints["mace-mp-0-medium"]
     assert ckpt.fetched_at is not None
     assert ckpt.verified_at is None
     assert ckpt.last_error is None
@@ -121,7 +134,7 @@ def test_add_then_add_is_idempotent(fake_root, monkeypatch):
     assert len(verify_calls) == 1
 
     m = load_manifest(fake_root)
-    ckpt = m.environments["mace_env"].checkpoints["medium"]
+    ckpt = m.environments["mace"].checkpoints["mace-mp-0-medium"]
     assert ckpt.fetched_at is not None
     assert ckpt.verified_at is not None
     assert ckpt.verified_device == "cuda"
@@ -137,7 +150,7 @@ def test_add_records_download_failure_and_returns_1(fake_root, monkeypatch):
     assert rc == 1
 
     m = load_manifest(fake_root)
-    ckpt = m.environments["mace_env"].checkpoints["medium"]
+    ckpt = m.environments["mace"].checkpoints["mace-mp-0-medium"]
     assert ckpt.fetched_at is None
     assert "ConnectionError" in ckpt.last_error
     assert ckpt.last_error.startswith("download:")
@@ -154,7 +167,7 @@ def test_add_records_verify_failure_and_returns_1(fake_root, monkeypatch):
     assert rc == 1
 
     m = load_manifest(fake_root)
-    ckpt = m.environments["mace_env"].checkpoints["medium"]
+    ckpt = m.environments["mace"].checkpoints["mace-mp-0-medium"]
     assert ckpt.fetched_at is not None  # download succeeded, was preserved
     assert ckpt.verified_at is None
     assert ckpt.verified_device is None
@@ -173,7 +186,7 @@ def test_add_clears_last_error_on_success(fake_root, monkeypatch):
     cmd_add(_make_args(fake_root, no_verify=False))
 
     m = load_manifest(fake_root)
-    assert m.environments["mace_env"].checkpoints["medium"].last_error is not None
+    assert m.environments["mace"].checkpoints["mace-mp-0-medium"].last_error is not None
 
     # Second attempt: verify succeeds. last_error should clear.
     monkeypatch.setattr(add_module, "verify_checkpoint", lambda *a, **kw: (True, None))
@@ -181,7 +194,7 @@ def test_add_clears_last_error_on_success(fake_root, monkeypatch):
     assert rc == 0
 
     m = load_manifest(fake_root)
-    assert m.environments["mace_env"].checkpoints["medium"].last_error is None
+    assert m.environments["mace"].checkpoints["mace-mp-0-medium"].last_error is None
 
 
 def test_add_forwards_kwargs_to_download_and_verify(fake_root, monkeypatch):
@@ -209,24 +222,18 @@ def test_add_invalid_kwarg_returns_2(fake_root):
     assert rc == 2
 
 
-def test_add_errors_when_env_not_built(tmp_path, monkeypatch):
-    # Root has no envs/<x>_env/bin/python anywhere.
+def test_add_errors_on_unknown_checkpoint(fake_root):
+    """An id no installed env declares should fail with an informative error."""
+    rc = cmd_add(_make_args(fake_root, checkpoint="not-a-real-id", no_verify=True))
+    assert rc == 1
+
+
+def test_add_errors_when_no_envs_installed(tmp_path):
+    """No installed envs anywhere: the error message points at install."""
     from rootstock.config import UserConfig
     from rootstock.manifest import create_manifest, save_manifest
 
     save_manifest(create_manifest(tmp_path, "test", UserConfig(name="t", email="t@t.t")), tmp_path)
 
-    rc = cmd_add(_make_args(tmp_path, env="nonexistent", no_verify=True))
+    rc = cmd_add(_make_args(tmp_path, checkpoint="mace-mp-0-medium", no_verify=True))
     assert rc == 1
-
-
-def test_add_strips_env_suffix(fake_root, monkeypatch):
-    """Both 'mace' and 'mace_env' should resolve to the same env."""
-    monkeypatch.setattr(add_module, "_run_download", lambda *a, **kw: (True, None))
-
-    rc = cmd_add(_make_args(fake_root, env="mace_env", no_verify=True))
-    assert rc == 0
-
-    m = load_manifest(fake_root)
-    assert "mace_env" in m.environments
-    assert "medium" in m.environments["mace_env"].checkpoints

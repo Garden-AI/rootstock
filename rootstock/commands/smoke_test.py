@@ -26,7 +26,7 @@ def _select(
     """Pick which (env, checkpoint) pairs to test."""
     selected: list[tuple[str, str, EnvironmentInfo, CheckpointInfo]] = []
     for env_name, env in manifest.environments.items():
-        if env_filter is not None and env_name != env_filter and env_name != f"{env_filter}_env":
+        if env_filter is not None and env_name != env_filter:
             continue
         if env.status != "ready":
             continue

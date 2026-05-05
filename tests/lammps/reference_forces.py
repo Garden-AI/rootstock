@@ -8,7 +8,7 @@ Produces:
 Usage:
   python reference_forces.py
 
-Requires rootstock to be installed and the mace_env environment built.
+Requires rootstock to be installed and the mace environment built.
 """
 
 import numpy as np
@@ -27,8 +27,7 @@ def main():
     # Calculate forces with rootstock
     with RootstockCalculator(
         cluster="della",
-        model="mace",
-        checkpoint="medium",
+        checkpoint="mace-mp-0-medium",
         device="cuda",
     ) as calc:
         atoms.calc = calc

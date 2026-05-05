@@ -9,11 +9,16 @@ This module handles:
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
 import tempfile
 from pathlib import Path
+
+
+class CheckpointNotFoundError(LookupError):
+    """Raised when a canonical checkpoint id is not declared by any installed env."""
 
 
 def get_model_cache_env(root: Path, cache_root: Path | None = None) -> dict[str, str]:
@@ -61,7 +66,7 @@ with open("{kwargs_path}") as f:
 
 run_worker(
     setup_fn=setup,
-    model="{model}",
+    checkpoint="{checkpoint}",
     device="{device}",
     socket_path="{socket_path}",
     setup_kwargs=setup_kwargs,
@@ -124,7 +129,7 @@ class EnvironmentManager:
     def generate_wrapper(
         self,
         env_name: str,
-        model: str,
+        checkpoint: str,
         device: str,
         socket_path: str,
         setup_kwargs: dict | None = None,
@@ -134,7 +139,7 @@ class EnvironmentManager:
 
         Args:
             env_name: Name of the pre-built environment
-            model: Model identifier to pass to setup()
+            checkpoint: Canonical checkpoint id to pass to setup()
             device: Device string to pass to setup()
             socket_path: Unix socket path for IPC
             setup_kwargs: Extra keyword arguments forwarded to setup() via JSON sidecar
@@ -154,7 +159,7 @@ class EnvironmentManager:
         # Generate wrapper content
         wrapper_content = WRAPPER_TEMPLATE.format(
             env_dir=str(env_dir),
-            model=model,
+            checkpoint=checkpoint,
             device=device,
             socket_path=socket_path,
             kwargs_path=str(kwargs_path),
@@ -236,6 +241,101 @@ def list_environments(root: Path | str) -> list[tuple[str, Path]]:
         result.append((name, path))
 
     return result
+
+
+def parse_checkpoints_dict(env_source_path: Path) -> dict[str, str]:
+    """
+    Extract the module-level ``CHECKPOINTS: dict[str, str]`` literal from an env file.
+
+    The dict maps canonical checkpoint ids → upstream library strings. Both keys
+    and values must be string literals; anything else is an authoring error and
+    raises ValueError.
+    """
+    tree = ast.parse(env_source_path.read_text(), filename=str(env_source_path))
+    for node in tree.body:
+        targets = []
+        value = None
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+            value = node.value
+        else:
+            continue
+        if not (
+            len(targets) == 1
+            and isinstance(targets[0], ast.Name)
+            and targets[0].id == "CHECKPOINTS"
+        ):
+            continue
+        if not isinstance(value, ast.Dict):
+            raise ValueError(
+                f"{env_source_path}: CHECKPOINTS must be a dict literal."
+            )
+        result: dict[str, str] = {}
+        for k_node, v_node in zip(value.keys, value.values):
+            if not (isinstance(k_node, ast.Constant) and isinstance(k_node.value, str)):
+                raise ValueError(
+                    f"{env_source_path}: CHECKPOINTS keys must be string literals."
+                )
+            if not (isinstance(v_node, ast.Constant) and isinstance(v_node.value, str)):
+                raise ValueError(
+                    f"{env_source_path}: CHECKPOINTS values must be string literals."
+                )
+            result[k_node.value] = v_node.value
+        return result
+    raise ValueError(
+        f"{env_source_path}: missing module-level CHECKPOINTS dict. "
+        f"Each env file must declare a `CHECKPOINTS: dict[str, str]` mapping "
+        f"canonical checkpoint ids to upstream library strings."
+    )
+
+
+def find_env_for_checkpoint(
+    root: Path | str, checkpoint_id: str
+) -> tuple[str, dict[str, str]]:
+    """
+    Walk ``{root}/envs/*/env_source.py`` and return ``(env_name, CHECKPOINTS)``
+    for the env that declares ``checkpoint_id``.
+
+    Raises ``CheckpointNotFoundError`` with a message listing every canonical
+    id declared by any installed env, plus a hint to ``rootstock install`` if
+    nothing matches.
+    """
+    root = Path(root)
+    envs_dir = root / "envs"
+    declared: dict[str, list[str]] = {}  # env_name -> [ids]
+    if envs_dir.exists():
+        for env_dir in sorted(envs_dir.iterdir()):
+            source = env_dir / "env_source.py"
+            if not source.exists():
+                continue
+            try:
+                ckpts = parse_checkpoints_dict(source)
+            except ValueError:
+                continue
+            declared[env_dir.name] = list(ckpts)
+            if checkpoint_id in ckpts:
+                return env_dir.name, ckpts
+
+    if declared:
+        listing = "\n".join(
+            f"  {env}: {', '.join(ids) if ids else '(none)'}"
+            for env, ids in declared.items()
+        )
+        msg = (
+            f"No installed env declares checkpoint '{checkpoint_id}'.\n"
+            f"Declared canonical ids by env:\n{listing}\n"
+            f"If '{checkpoint_id}' belongs to an env you haven't installed yet, "
+            f"run `rootstock install <env-file> --root {root}`."
+        )
+    else:
+        msg = (
+            f"No envs are installed at {root}. "
+            f"Run `rootstock install <env-file> --root {root}` first."
+        )
+    raise CheckpointNotFoundError(msg)
 
 
 def list_built_environments(root: Path | str) -> list[tuple[str, Path]]:

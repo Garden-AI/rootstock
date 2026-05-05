@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
@@ -18,7 +17,6 @@ from rootstock.clusters import (
 )
 from rootstock.commands.common import resolve_cache_root
 from rootstock.environment import EnvironmentManager, get_model_cache_env
-
 
 # ---------- get_model_cache_env: pure function ----------------------------
 
@@ -140,14 +138,34 @@ def test_environment_manager_default_cache_root_uses_install_root(tmp_path: Path
 # ---------- RootstockCalculator wiring ------------------------------------
 
 
+_MACE_ENV_SOURCE = '''\
+"""MACE env."""
+
+CHECKPOINTS = {
+    "mace-mp-0-medium": "medium",
+}
+
+
+def setup(checkpoint, device="cuda"):
+    return None
+'''
+
+
+def _make_mace_env(install: Path) -> None:
+    env_dir = install / "envs" / "mace"
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").touch()
+    (env_dir / "env_source.py").write_text(_MACE_ENV_SOURCE)
+
+
 @pytest.fixture
 def fake_pm_root(tmp_path: Path, monkeypatch) -> Path:
     """Pretend Perlmutter's CFS root and PSCRATCH cache live under tmp_path,
     so the calculator's existence-check passes without touching real /global/cfs."""
     install = tmp_path / "install"
     cache = tmp_path / "cache"
-    (install / "envs" / "mace_env" / "bin").mkdir(parents=True)
-    (install / "envs" / "mace_env" / "bin" / "python").touch()
+    install.mkdir()
+    _make_mace_env(install)
     cache.mkdir()
 
     monkeypatch.setitem(
@@ -160,7 +178,7 @@ def fake_pm_root(tmp_path: Path, monkeypatch) -> Path:
 
 def test_calculator_resolves_cache_root_from_cluster(fake_pm_root):
     install, cache = fake_pm_root
-    calc = RootstockCalculator(model="mace", checkpoint="medium", cluster="_test_split")
+    calc = RootstockCalculator(checkpoint="mace-mp-0-medium", cluster="_test_split")
     assert calc.root == install
     assert calc.cache_root == cache
 
@@ -170,31 +188,29 @@ def test_calculator_explicit_cache_root_overrides_cluster_default(fake_pm_root):
     override = install.parent / "override_cache"
     override.mkdir()
     calc = RootstockCalculator(
-        model="mace", checkpoint="medium", cluster="_test_split", cache_root=override,
+        checkpoint="mace-mp-0-medium", cluster="_test_split", cache_root=override,
     )
     assert calc.cache_root == override
 
 
 def test_calculator_with_root_only_defaults_cache_root_to_root(tmp_path: Path):
-    env_python = tmp_path / "envs" / "mace_env" / "bin" / "python"
-    env_python.parent.mkdir(parents=True)
-    env_python.touch()
+    _make_mace_env(tmp_path)
 
-    calc = RootstockCalculator(model="mace", checkpoint="medium", root=tmp_path)
+    calc = RootstockCalculator(checkpoint="mace-mp-0-medium", root=tmp_path)
     assert calc.cache_root == tmp_path
 
 
 def test_calculator_with_root_and_explicit_cache_root(tmp_path: Path):
-    env_python = tmp_path / "install" / "envs" / "mace_env" / "bin" / "python"
-    env_python.parent.mkdir(parents=True)
-    env_python.touch()
+    install = tmp_path / "install"
+    install.mkdir()
+    _make_mace_env(install)
     cache = tmp_path / "cache"
     cache.mkdir()
 
     calc = RootstockCalculator(
-        model="mace", checkpoint="medium", root=tmp_path / "install", cache_root=cache,
+        checkpoint="mace-mp-0-medium", root=install, cache_root=cache,
     )
-    assert calc.root == tmp_path / "install"
+    assert calc.root == install
     assert calc.cache_root == cache
 
 

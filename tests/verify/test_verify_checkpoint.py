@@ -22,7 +22,7 @@ class _StubServer:
     Records start/stop calls so we can confirm cleanup.
     """
 
-    instances: list["_StubServer"] = []
+    instances: list[_StubServer] = []
 
     def __init__(self, *, energy, forces, virial, raise_on_start=None, raise_on_calc=None, **_):
         self._energy = energy
@@ -75,27 +75,27 @@ def _ok_virial():
 
 def test_verify_happy_path(stub_server):
     stub_server(energy=-10.5, forces=_ok_forces(), virial=_ok_virial())
-    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is True
     assert err is None
 
 
 def test_verify_stops_server_even_on_success(stub_server):
     Stub = stub_server(energy=-10.5, forces=_ok_forces(), virial=_ok_virial())
-    verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert all(s.stopped for s in Stub.instances)
 
 
 def test_verify_rejects_nan_energy(stub_server):
     stub_server(energy=float("nan"), forces=_ok_forces(), virial=_ok_virial())
-    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is False
     assert "energy" in err
 
 
 def test_verify_rejects_inf_energy(stub_server):
     stub_server(energy=float("inf"), forces=_ok_forces(), virial=_ok_virial())
-    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is False
     assert "energy" in err
 
@@ -104,7 +104,7 @@ def test_verify_rejects_wrong_force_shape(stub_server):
     bad = np.zeros((4, 3))  # 4 atoms reported for a 3-atom system
     bad[0, 0] = 1.0
     stub_server(energy=-1.0, forces=bad, virial=_ok_virial())
-    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is False
     assert "shape" in err
 
@@ -113,7 +113,7 @@ def test_verify_rejects_nonfinite_forces(stub_server):
     bad = _ok_forces().copy()
     bad[1, 1] = float("nan")
     stub_server(energy=-1.0, forces=bad, virial=_ok_virial())
-    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is False
     assert "forces" in err
 
@@ -121,7 +121,7 @@ def test_verify_rejects_nonfinite_forces(stub_server):
 def test_verify_rejects_all_zero_forces(stub_server):
     """The silent-failure guard — model returned zeros for everything."""
     stub_server(energy=-1.0, forces=np.zeros((3, 3)), virial=_ok_virial())
-    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is False
     assert "zero" in err.lower()
 
@@ -130,7 +130,7 @@ def test_verify_rejects_nonfinite_virial(stub_server):
     bad = _ok_virial().copy()
     bad[0, 0] = float("inf")
     stub_server(energy=-1.0, forces=_ok_forces(), virial=bad)
-    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is False
     assert "virial" in err
 
@@ -140,7 +140,7 @@ def test_verify_catches_server_start_failure(stub_server):
         energy=0, forces=_ok_forces(), virial=_ok_virial(),
         raise_on_start=RuntimeError("worker died"),
     )
-    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is False
     assert "RuntimeError" in err
     assert "worker died" in err
@@ -151,7 +151,7 @@ def test_verify_catches_calculate_failure(stub_server):
         energy=0, forces=_ok_forces(), virial=_ok_virial(),
         raise_on_calc=ValueError("CUDA out of memory"),
     )
-    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace_env", "medium", "cuda")
+    ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is False
     assert "ValueError" in err
 

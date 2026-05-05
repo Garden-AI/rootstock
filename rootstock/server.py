@@ -33,8 +33,8 @@ class RootstockServer:
 
     Example:
         with RootstockServer(
-            env_name="mace_env",
-            model="medium",
+            env_name="mace",
+            checkpoint="mace-mp-0-medium",
             device="cuda",
             root=Path("/vol/rootstock"),
         ) as server:
@@ -44,7 +44,7 @@ class RootstockServer:
     def __init__(
         self,
         env_name: str,
-        model: str,
+        checkpoint: str,
         device: str = "cuda",
         socket_name: str = "rootstock",
         root: Path | None = None,
@@ -57,8 +57,8 @@ class RootstockServer:
         Initialize the server.
 
         Args:
-            env_name: Name of pre-built environment (e.g., "mace_env")
-            model: Model identifier to pass to setup()
+            env_name: Name of pre-built environment (e.g., "mace")
+            checkpoint: Canonical checkpoint id passed to the env's setup()
             device: Device string to pass to setup()
             socket_name: Name for the Unix socket (will be /tmp/ipi_<name>)
             root: Root directory for environments and cache (required)
@@ -75,7 +75,7 @@ class RootstockServer:
         self.timeout = timeout
 
         self.env_name = env_name
-        self.model = model
+        self.checkpoint = checkpoint
         self.device = device
         self.root = Path(root)
         self.cache_root = Path(cache_root) if cache_root is not None else None
@@ -124,7 +124,7 @@ class RootstockServer:
         # Generate wrapper script
         self._wrapper_path = self._env_manager.generate_wrapper(
             env_name=self.env_name,
-            model=self.model,
+            checkpoint=self.checkpoint,
             device=self.device,
             socket_path=self.socket_path,
             setup_kwargs=self.setup_kwargs,

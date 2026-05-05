@@ -1,4 +1,4 @@
-"""Tests for the v2 manifest schema."""
+"""Tests for the v3 manifest schema."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def _make_manifest(envs: dict[str, EnvironmentInfo] | None = None) -> Manifest:
 
 
 def test_schema_version_constant():
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION == 3
 
 
 def test_checkpoint_info_round_trip():
@@ -62,32 +62,34 @@ def test_checkpoint_info_defaults_to_none():
 
 
 def test_environment_info_with_dict_checkpoints_round_trip():
-    env = _make_env(medium=CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"))
+    env = _make_env(**{
+        "mace-mp-0-medium": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
+    })
     restored = EnvironmentInfo.from_dict(env.to_dict())
-    assert "medium" in restored.checkpoints
-    assert restored.checkpoints["medium"].fetched_at == "2026-01-02T00:00:00Z"
+    assert "mace-mp-0-medium" in restored.checkpoints
+    assert restored.checkpoints["mace-mp-0-medium"].fetched_at == "2026-01-02T00:00:00Z"
 
 
 def test_manifest_round_trip_preserves_checkpoint_metadata():
     m = _make_manifest({
-        "mace_env": _make_env(
-            medium=CheckpointInfo(
+        "mace": _make_env(**{
+            "mace-mp-0-medium": CheckpointInfo(
                 fetched_at="2026-01-02T00:00:00Z",
                 verified_at="2026-01-03T00:00:00Z",
                 verified_device="cuda",
             ),
-            small=CheckpointInfo(),
-        )
+            "mace-mp-0-small": CheckpointInfo(),
+        })
     })
     restored = Manifest.from_dict(m.to_dict())
-    ckpts = restored.environments["mace_env"].checkpoints
-    assert ckpts["medium"].verified_device == "cuda"
-    assert ckpts["small"].fetched_at is None
+    ckpts = restored.environments["mace"].checkpoints
+    assert ckpts["mace-mp-0-medium"].verified_device == "cuda"
+    assert ckpts["mace-mp-0-small"].fetched_at is None
 
 
-def test_from_dict_rejects_v1_string():
-    v1 = {
-        "schema_version": "1",
+def test_from_dict_rejects_v2():
+    v2 = {
+        "schema_version": 2,
         "cluster": "x",
         "root": "/",
         "maintainer": {"name": "a", "email": "b"},
@@ -96,12 +98,12 @@ def test_from_dict_rejects_v1_string():
         "last_updated": "0",
     }
     with pytest.raises(RuntimeError, match="schema_version"):
-        Manifest.from_dict(v1)
+        Manifest.from_dict(v2)
 
 
-def test_from_dict_rejects_v1_int():
-    v1 = {
-        "schema_version": 1,
+def test_from_dict_rejects_string_version():
+    bogus = {
+        "schema_version": "3",
         "cluster": "x",
         "root": "/",
         "maintainer": {"name": "a", "email": "b"},
@@ -110,7 +112,7 @@ def test_from_dict_rejects_v1_int():
         "last_updated": "0",
     }
     with pytest.raises(RuntimeError, match="schema_version"):
-        Manifest.from_dict(v1)
+        Manifest.from_dict(bogus)
 
 
 def test_from_dict_rejects_missing_schema_version():

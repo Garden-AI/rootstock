@@ -98,6 +98,7 @@ def _install_single_environment(
 
     Returns 0 on success, 1 on failure.
     """
+    from ..environment import parse_checkpoints_dict
     from ..pep723 import parse_pep723_metadata, validate_environment_file
     from .manifest import update_and_push_manifest
 
@@ -113,6 +114,12 @@ def _install_single_environment(
         is_valid, error = validate_environment_file(source_path)
         if not is_valid:
             print(f"Error: {error}", file=sys.stderr)
+            return 1
+
+        try:
+            parse_checkpoints_dict(source_path)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
             return 1
 
         # If the source file is already the registered file (the natural flow
@@ -329,7 +336,7 @@ def cmd_install(args) -> int:
     if getattr(args, "models", None):
         print(
             "Error: --models has been removed. Use 'rootstock add' instead:\n"
-            "  rootstock add <env> <checkpoint>",
+            "  rootstock add <checkpoint-id>",
             file=sys.stderr,
         )
         return 2

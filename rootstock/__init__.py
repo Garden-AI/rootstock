@@ -11,7 +11,6 @@ from .calculator import RootstockCalculator
 from .client import RootstockClient
 from .clusters import (
     CLUSTER_REGISTRY,
-    KNOWN_ENVIRONMENTS,
     Cluster,
     get_cache_root_for_cluster,
     get_cluster,
@@ -42,7 +41,6 @@ __all__ = [
     "validate_environment_file",
     "run_worker",
     "CLUSTER_REGISTRY",
-    "KNOWN_ENVIRONMENTS",
     "Cluster",
     "get_cluster",
     "get_root_for_cluster",
