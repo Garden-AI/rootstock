@@ -37,7 +37,7 @@ def setup(checkpoint: str, device: str = "cuda"):
     Returns:
         ASE-compatible NequIPCalculator (Allegro uses the NequIP ASE interface).
     """
-    from inspect import signature
+    from nequip.ase import NequIPCalculator
 
     try:
         from nequip.integrations.ase import NequIPCalculator

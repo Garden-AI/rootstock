@@ -13,7 +13,6 @@ The worker is spawned via a generated wrapper script that calls run_worker().
 
 import json
 from collections.abc import Callable
-from inspect import Parameter, signature
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -270,20 +269,8 @@ def run_worker(
             flush=True,
         )
 
-    # Load calculator via the setup function. An omitted checkpoint is represented
-    # as an empty string by the ASE/LAMMPS frontends; in that case, let the
-    # environment's setup() function use its own model default.
-    if model:
-        calculator = setup_fn(model, device)
-    else:
-        sig = signature(setup_fn)
-        model_param = sig.parameters.get("model")
-        if model_param is not None and model_param.default is Parameter.empty:
-            raise ValueError(
-                "No checkpoint was provided, but this environment requires one. "
-                "Pass checkpoint=<name-or-path>."
-            )
-        calculator = setup_fn(device=device)
+    # Load calculator via the setup function
+    calculator = setup_fn(model, device)
 
     if log:
         print(f"[Worker] Calculator loaded: {type(calculator).__name__}", file=log, flush=True)
