@@ -17,13 +17,18 @@ Models:
     - "MatterSim-v1.0.0-1M": 1M parameter model (smallest)
 """
 
+CHECKPOINTS = {
+    "mattersim-v1-0-0-5m": "MatterSim-v1.0.0-5M",
+    "mattersim-v1-0-0-1m": "MatterSim-v1.0.0-1M",
+}
 
-def setup(model: str = "MatterSim-v1.0.0-5M", device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load a MatterSim calculator.
 
     Args:
-        model: MatterSim checkpoint name.
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -31,4 +36,4 @@ def setup(model: str = "MatterSim-v1.0.0-5M", device: str = "cuda"):
     """
     from mattersim.forcefield import MatterSimCalculator
 
-    return MatterSimCalculator(load_path=model, device=device)
+    return MatterSimCalculator(load_path=CHECKPOINTS[checkpoint], device=device)

@@ -25,8 +25,7 @@ atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
 
 with RootstockCalculator(
     cluster="della",
-    model="mace",
-    checkpoint="medium",
+    checkpoint="mace-mp-0-medium",
     device="cuda",
 ) as calc:
     atoms.calc = calc
@@ -34,7 +33,7 @@ with RootstockCalculator(
     print(atoms.get_forces())
 ```
 
-Changing `model="mace"` to `model="uma"` or `model="tensornet"` swaps the underlying potential.
+Swap the underlying potential by changing `checkpoint`: e.g. `checkpoint="uma-s-1p1"` or `checkpoint="tensornet-matpes-pbe-2025-2"`.
 
 ## Next Steps
 

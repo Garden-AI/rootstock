@@ -33,8 +33,8 @@ class RootstockServer:
 
     Example:
         with RootstockServer(
-            env_name="mace_env",
-            model="medium",
+            env_name="mace",
+            checkpoint="mace-mp-0-medium",
             device="cuda",
             root=Path("/vol/rootstock"),
         ) as server:
@@ -44,24 +44,27 @@ class RootstockServer:
     def __init__(
         self,
         env_name: str,
-        model: str,
+        checkpoint: str,
         device: str = "cuda",
         socket_name: str = "rootstock",
         root: Path | None = None,
+        cache_root: Path | None = None,
         log=None,
         timeout: float = 60.0,
+        setup_kwargs: dict | None = None,
     ):
         """
         Initialize the server.
 
         Args:
-            env_name: Name of pre-built environment (e.g., "mace_env")
-            model: Model identifier to pass to setup()
+            env_name: Name of pre-built environment (e.g., "mace")
+            checkpoint: Canonical checkpoint id passed to the env's setup()
             device: Device string to pass to setup()
             socket_name: Name for the Unix socket (will be /tmp/ipi_<name>)
             root: Root directory for environments and cache (required)
             log: Optional file object for protocol logging
             timeout: Socket timeout in seconds
+            setup_kwargs: Extra keyword arguments forwarded to setup()
         """
         if root is None:
             raise ValueError("root is required for pre-built environments")
@@ -72,9 +75,11 @@ class RootstockServer:
         self.timeout = timeout
 
         self.env_name = env_name
-        self.model = model
+        self.checkpoint = checkpoint
         self.device = device
         self.root = Path(root)
+        self.cache_root = Path(cache_root) if cache_root is not None else None
+        self.setup_kwargs = setup_kwargs or {}
 
         self._server_socket: socket.socket | None = None
         self._client_socket: socket.socket | None = None
@@ -114,14 +119,15 @@ class RootstockServer:
         from .environment import EnvironmentManager
 
         # Create environment manager
-        self._env_manager = EnvironmentManager(root=self.root)
+        self._env_manager = EnvironmentManager(root=self.root, cache_root=self.cache_root)
 
         # Generate wrapper script
         self._wrapper_path = self._env_manager.generate_wrapper(
             env_name=self.env_name,
-            model=self.model,
+            checkpoint=self.checkpoint,
             device=self.device,
             socket_path=self.socket_path,
+            setup_kwargs=self.setup_kwargs,
         )
 
         # Get spawn command and environment

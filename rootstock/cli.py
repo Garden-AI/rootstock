@@ -11,19 +11,23 @@ Commands:
     rootstock new-env <name> [-o <path>] [--force]
         Create a new environment file from template:
             rootstock new-env mace
-            rootstock new-env mace -o ./environments/mace_env.py
+            rootstock new-env mace -o ./environments/mace.py
 
-    rootstock install <source> [--root <path>] [--models m1,m2] [--force]
+    rootstock install <source> [--root <path>] [--force]
         Install from file (validates, registers, builds):
-            rootstock install ./mace_env.py --root /vol/rootstock
+            rootstock install ./mace.py --root /vol/rootstock
         Install all environments from a directory:
             rootstock install ./environments/ --root /vol/rootstock
         Rebuild existing environment by name:
-            rootstock install mace_env --root /vol/rootstock --force
+            rootstock install mace --root /vol/rootstock --force
+
+    rootstock add <checkpoint-id> [--root <path>] [--device <dev>] [--kwarg KEY=VAL ...]
+        Resolve the env that hosts <checkpoint-id> from the installed envs,
+        then download and verify the weights.
 
     rootstock status [--root <path>]
     rootstock list [--root <path>]
-    rootstock serve <model> [--root <path>] --socket <path> --checkpoint <name> [--device <dev>]
+    rootstock serve <checkpoint-id> [--root <path>] --socket <path> [--device <dev>]
     rootstock resolve --cluster <name> [--json]
 """
 
@@ -31,7 +35,9 @@ import argparse
 import os
 import sys
 
+from . import __version__
 from .commands import (
+    cmd_add,
     cmd_init,
     cmd_install,
     cmd_list,
@@ -39,6 +45,7 @@ from .commands import (
     cmd_new_env,
     cmd_resolve,
     cmd_serve,
+    cmd_smoke_test,
     cmd_status,
 )
 from .commands.common import ROOTSTOCK_ROOT_ENV
@@ -50,6 +57,11 @@ def main():
         prog="rootstock",
         description="Rootstock MLIP environment manager",
         epilog=f"Config file: {DEFAULT_CONFIG_FILE}",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -79,12 +91,12 @@ def main():
     )
     new_env_parser.add_argument(
         "name",
-        help="Environment name (e.g., 'mace' or 'mace_env')",
+        help="Environment name (e.g., 'mace')",
     )
     new_env_parser.add_argument(
         "-o",
         "--output",
-        help="Output file path (default: ./<name>_env.py)",
+        help="Output file path (default: ./<name>.py)",
     )
     new_env_parser.add_argument(
         "--force",
@@ -106,14 +118,19 @@ def main():
     )
     install_parser.add_argument(
         "source",
-        help="File path, directory, or env name (e.g., ./mace_env.py, ./environments/, mace_env)",
+        help="File path, directory, or env name (e.g., ./mace.py, ./environments/, mace)",
     )
     install_parser.add_argument(
         "--root",
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
     )
-    install_parser.add_argument("--models", help="Comma-separated list of models to pre-download")
+    # --models is intentionally still parsed so we can emit a clear migration
+    # message in cmd_install. Removed in v0.8.0; use `rootstock add` instead.
+    install_parser.add_argument(
+        "--models",
+        help=argparse.SUPPRESS,
+    )
     install_parser.add_argument(
         "--force", action="store_true", help="Update registration and/or rebuild if exists"
     )
@@ -125,6 +142,76 @@ def main():
     )
     install_parser.set_defaults(func=cmd_install)
 
+    # add command
+    add_parser = subparsers.add_parser(
+        "add",
+        help="Download and verify a checkpoint by canonical id",
+        description=(
+            "Idempotent download-or-verify. Resolves the hosting env from the "
+            "installed envs by matching the canonical checkpoint id against each "
+            "env's CHECKPOINTS dict. Skips download if already fetched. "
+            "Use --no-verify on login nodes without GPUs."
+        ),
+    )
+    add_parser.add_argument(
+        "checkpoint",
+        help="Canonical checkpoint id (e.g., 'mace-mp-0-medium', 'uma-s-1p1')",
+    )
+    add_parser.add_argument(
+        "--kwarg",
+        action="append",
+        metavar="KEY=VAL",
+        help=(
+            "Extra kwarg passed to setup() (repeatable). Value is JSON-decoded "
+            "first, then falls back to a string. E.g., --kwarg task=omat --kwarg charge=-1"
+        ),
+    )
+    add_parser.add_argument("--device", default="cuda", help="Device for verify (default: cuda)")
+    add_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip the verify phase (download only). Login-node escape hatch.",
+    )
+    add_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    add_parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Don't push manifest to backend",
+    )
+    add_parser.set_defaults(func=cmd_add)
+
+    # smoke-test command
+    smoke_parser = subparsers.add_parser(
+        "smoke-test",
+        help="Re-verify checkpoints already registered in the manifest",
+        description=(
+            "Re-verify checkpoints by running a forward pass on each. Never downloads. "
+            "Always uses setup_kwargs={} — checkpoints requiring non-default kwargs "
+            "may show as failing here even if they work in practice."
+        ),
+    )
+    smoke_parser.add_argument("--env", help="Filter to a single environment")
+    smoke_parser.add_argument(
+        "--checkpoint", help="Filter to a single checkpoint (requires --env)"
+    )
+    smoke_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
+    smoke_parser.add_argument("--json", action="store_true", help="Emit a JSON summary")
+    smoke_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    smoke_parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Don't push manifest to backend",
+    )
+    smoke_parser.set_defaults(func=cmd_smoke_test)
+
     # status command
     status_parser = subparsers.add_parser(
         "status",
@@ -135,6 +222,11 @@ def main():
         "--root",
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    status_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output the manifest as JSON (with computed verified_current per checkpoint)",
     )
     status_parser.set_defaults(func=cmd_status)
 
@@ -167,15 +259,26 @@ def main():
         help="Start a worker for an external i-PI server",
         description="Start a rootstock worker that connects to a Unix socket.",
     )
-    serve_parser.add_argument("model", help="Model family (e.g., mace, uma, tensornet)")
+    serve_parser.add_argument(
+        "checkpoint",
+        help="Canonical checkpoint id (e.g., 'mace-mp-0-medium', 'uma-s-1p1')",
+    )
     serve_parser.add_argument(
         "--root",
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
     )
     serve_parser.add_argument("--socket", required=True, help="Unix socket path to connect to")
-    serve_parser.add_argument("--checkpoint", required=True, help="Checkpoint/weights name")
     serve_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
+    serve_parser.add_argument(
+        "--kwarg",
+        action="append",
+        metavar="KEY=VAL",
+        help=(
+            "Extra kwarg passed to setup() (repeatable). Same JSON-then-string "
+            "parsing as 'rootstock add'."
+        ),
+    )
     serve_parser.set_defaults(func=cmd_serve)
 
     # manifest command

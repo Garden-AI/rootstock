@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -20,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import UserConfig
+
+SCHEMA_VERSION = 3
 
 
 @dataclass
@@ -38,6 +41,33 @@ class Maintainer:
 
 
 @dataclass
+class CheckpointInfo:
+    """Metadata for a single checkpoint registered with an environment."""
+
+    fetched_at: str | None = None       # ISO 8601, set when download succeeds
+    verified_at: str | None = None      # ISO 8601, set when smoke test passes
+    verified_device: str | None = None  # "cuda", "cpu", etc.
+    last_error: str | None = None       # most recent error from add or smoke-test
+
+    def to_dict(self) -> dict:
+        return {
+            "fetched_at": self.fetched_at,
+            "verified_at": self.verified_at,
+            "verified_device": self.verified_device,
+            "last_error": self.last_error,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> CheckpointInfo:
+        return cls(
+            fetched_at=data.get("fetched_at"),
+            verified_at=data.get("verified_at"),
+            verified_device=data.get("verified_device"),
+            last_error=data.get("last_error"),
+        )
+
+
+@dataclass
 class EnvironmentInfo:
     """Metadata for a single built environment."""
 
@@ -47,7 +77,7 @@ class EnvironmentInfo:
     source: str  # Full source code of the environment file
     python_requires: str  # ">=3.10"
     dependencies: dict[str, str]  # {"mace-torch": "0.3.6"}
-    checkpoints: list[str] = field(default_factory=list)
+    checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
     error_message: str | None = None
 
     def to_dict(self) -> dict:
@@ -58,7 +88,7 @@ class EnvironmentInfo:
             "source": self.source,
             "python_requires": self.python_requires,
             "dependencies": self.dependencies,
-            "checkpoints": self.checkpoints,
+            "checkpoints": {name: ckpt.to_dict() for name, ckpt in self.checkpoints.items()},
         }
         if self.error_message:
             d["error_message"] = self.error_message
@@ -66,6 +96,11 @@ class EnvironmentInfo:
 
     @classmethod
     def from_dict(cls, data: dict) -> EnvironmentInfo:
+        checkpoints_data = data.get("checkpoints", {})
+        checkpoints = {
+            name: CheckpointInfo.from_dict(ckpt_data)
+            for name, ckpt_data in checkpoints_data.items()
+        }
         return cls(
             status=data["status"],
             built_at=data["built_at"],
@@ -73,16 +108,23 @@ class EnvironmentInfo:
             source=data.get("source", ""),
             python_requires=data["python_requires"],
             dependencies=data["dependencies"],
-            checkpoints=data.get("checkpoints", []),
+            checkpoints=checkpoints,
             error_message=data.get("error_message"),
         )
+
+
+def is_verified(env: EnvironmentInfo, ckpt: CheckpointInfo) -> bool:
+    """Return True if checkpoint was verified after the env was last built."""
+    if ckpt.verified_at is None:
+        return False
+    return ckpt.verified_at > env.built_at  # ISO 8601 sorts lexically
 
 
 @dataclass
 class Manifest:
     """Root manifest for a rootstock installation."""
 
-    schema_version: str
+    schema_version: int
     cluster: str
     root: str
     maintainer: Maintainer
@@ -105,12 +147,21 @@ class Manifest:
 
     @classmethod
     def from_dict(cls, data: dict) -> Manifest:
+        version = data.get("schema_version")
+        if version != SCHEMA_VERSION:
+            raise RuntimeError(
+                f"manifest is schema_version={version!r}, expected {SCHEMA_VERSION}.\n"
+                f"Older manifests are not auto-migrated. Reinstall environments with "
+                f"`rootstock install <env-file>` and re-add checkpoints with "
+                f"`rootstock add <checkpoint-id>`."
+            )
+
         environments = {}
         for name, env_data in data.get("environments", {}).items():
             environments[name] = EnvironmentInfo.from_dict(env_data)
 
         return cls(
-            schema_version=data["schema_version"],
+            schema_version=version,
             cluster=data["cluster"],
             root=data["root"],
             maintainer=Maintainer.from_dict(data["maintainer"]),
@@ -293,11 +344,18 @@ def save_manifest(manifest: Manifest, root: Path) -> None:
     # Ensure root directory exists
     root.mkdir(parents=True, exist_ok=True)
 
-    # Atomic write: write to temp file, then rename
+    # Atomic write: write to temp file, then rename. mkstemp always creates
+    # the file with 0600, which clamps the POSIX ACL mask to --- on shared
+    # installs that rely on inherited default ACLs (e.g., NERSC project dirs).
+    # Reset the mode to honor the process umask so group/other access can
+    # come through the parent's default ACL.
     fd, temp_path = tempfile.mkstemp(dir=root, suffix=".json")
     try:
         with open(fd, "w") as f:
             json.dump(manifest.to_dict(), f, indent=2)
+        umask_value = os.umask(0)
+        os.umask(umask_value)
+        os.chmod(temp_path, 0o666 & ~umask_value)
         Path(temp_path).rename(manifest_path)
     except Exception:
         # Clean up temp file on failure
@@ -327,7 +385,7 @@ def create_manifest(
     from . import __version__
 
     return Manifest(
-        schema_version="1",
+        schema_version=SCHEMA_VERSION,
         cluster=cluster,
         root=str(root),
         maintainer=Maintainer(

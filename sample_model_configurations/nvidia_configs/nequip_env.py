@@ -23,13 +23,17 @@ Note: NequIP is system-specific (not universal). The checkpoint must match
 the element set of your system.
 """
 
+CHECKPOINTS = {
+    "nequip-deployed-model": "deployed_nequip.pth",
+}
 
-def setup(model: str, device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load a NequIP calculator from a deployed model file.
 
     Args:
-        model: Path to deployed NequIP .pth model (output of `nequip-deploy build`).
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -53,6 +57,7 @@ def setup(model: str, device: str = "cuda"):
 
     params = signature(load_model).parameters
     kwargs = {"device": device} if "device" in params else {}
+    model = CHECKPOINTS[checkpoint]
     for path_arg in ("model_path", "file_name", "path"):
         if path_arg in params:
             return load_model(**{path_arg: model}, **kwargs)

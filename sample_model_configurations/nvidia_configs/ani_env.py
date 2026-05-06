@@ -19,13 +19,19 @@ Models:
     - "ANI1x": ANI-1x (H, C, N, O only)
 """
 
+CHECKPOINTS = {
+    "ani-2x": "ANI2x",
+    "ani-1ccx": "ANI1ccx",
+    "ani-1x": "ANI1x",
+}
 
-def setup(model: str = "ANI2x", device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load an ANI calculator.
 
     Args:
-        model: Model name — "ANI2x", "ANI1ccx", or "ANI1x".
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -38,7 +44,6 @@ def setup(model: str = "ANI2x", device: str = "cuda"):
         "ANI1ccx": torchani.models.ANI1ccx,
         "ANI1x": torchani.models.ANI1x,
     }
-    if model not in model_map:
-        raise ValueError(f"Unknown ANI model {model!r}. Choose from: {list(model_map)}")
+    model = CHECKPOINTS[checkpoint]
 
     return model_map[model](periodic_table_index=True).to(device).ase()

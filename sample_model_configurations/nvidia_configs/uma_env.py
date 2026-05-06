@@ -26,14 +26,18 @@ Task:
     task_name to "oc20", "omol", "odac", or "omc" respectively.
 """
 
+CHECKPOINTS = {
+    "uma-s-1p1": "uma-s-1p1",
+    "uma-m-1p1": "uma-m-1p1",
+}
 
-def setup(model: str = "uma-s-1p1", device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load a UMA calculator.
 
     Args:
-        model: Model identifier (e.g., "uma-s-1p1" or "uma-m-1p1"). Passed directly to
-               pretrained_mlip.get_predict_unit().
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cuda:0", "cpu")
 
     Returns:
@@ -41,5 +45,5 @@ def setup(model: str = "uma-s-1p1", device: str = "cuda"):
     """
     from fairchem.core import FAIRChemCalculator, pretrained_mlip
 
-    predictor = pretrained_mlip.get_predict_unit(model, device=device)
+    predictor = pretrained_mlip.get_predict_unit(CHECKPOINTS[checkpoint], device=device)
     return FAIRChemCalculator(predictor, task_name="omat")

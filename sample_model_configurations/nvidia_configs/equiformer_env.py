@@ -26,13 +26,19 @@ Models:
     - "EquiformerV2-83M-S2EF-OC20-2M"
 """
 
+CHECKPOINTS = {
+    "equiformer-v2-153m-s2ef-oc20-all-md": "EquiformerV2-153M-S2EF-OC20-All+MD",
+    "equiformer-v2-31m-s2ef-oc20-all-md": "EquiformerV2-31M-S2EF-OC20-All+MD",
+    "equiformer-v2-83m-s2ef-oc20-2m": "EquiformerV2-83M-S2EF-OC20-2M",
+}
 
-def setup(model: str = "EquiformerV2-153M-S2EF-OC20-All+MD", device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load an EquiformerV2 OC20 calculator.
 
     Args:
-        model: EquiformerV2 checkpoint name from the FAIRChem 1.x registry.
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -43,5 +49,5 @@ def setup(model: str = "EquiformerV2-153M-S2EF-OC20-All+MD", device: str = "cuda
     from fairchem.core.models.model_registry import model_name_to_local_file
 
     cache_dir = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
-    local_path = model_name_to_local_file(model, local_cache=cache_dir)
+    local_path = model_name_to_local_file(CHECKPOINTS[checkpoint], local_cache=cache_dir)
     return OCPCalculator(checkpoint_path=local_path, cpu=(device == "cpu"))

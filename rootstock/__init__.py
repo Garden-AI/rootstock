@@ -5,11 +5,15 @@ This package provides ASE-compatible calculators that run MLIPs in isolated
 subprocess environments, communicating via the i-PI protocol.
 """
 
+from importlib.metadata import version as _pkg_version
+
 from .calculator import RootstockCalculator
 from .client import RootstockClient
 from .clusters import (
     CLUSTER_REGISTRY,
-    KNOWN_ENVIRONMENTS,
+    Cluster,
+    get_cache_root_for_cluster,
+    get_cluster,
     get_cluster_for_root,
     get_root_for_cluster,
 )
@@ -37,8 +41,10 @@ __all__ = [
     "validate_environment_file",
     "run_worker",
     "CLUSTER_REGISTRY",
-    "KNOWN_ENVIRONMENTS",
+    "Cluster",
+    "get_cluster",
     "get_root_for_cluster",
+    "get_cache_root_for_cluster",
     "get_cluster_for_root",
     "UserConfig",
     "load_config",
@@ -47,4 +53,4 @@ __all__ = [
     "load_manifest",
     "save_manifest",
 ]
-__version__ = "0.5.0"
+__version__ = _pkg_version("rootstock")

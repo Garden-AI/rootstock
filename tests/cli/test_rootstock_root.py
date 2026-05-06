@@ -1,8 +1,6 @@
 import os
 import subprocess
 
-import pytest
-
 
 def test_cli_uses_env_var():
     root = "/tmp/fake-root"

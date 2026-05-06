@@ -19,13 +19,19 @@ Models:
     - "large":  ~28M params, most accurate
 """
 
+CHECKPOINTS = {
+    "mace-off23-small": "small",
+    "mace-off23-medium": "medium",
+    "mace-off23-large": "large",
+}
 
-def setup(model: str = "medium", device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load a MACE-OFF23 calculator.
 
     Args:
-        model: Size string ("small", "medium", "large") or path to a .pt file.
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -33,4 +39,4 @@ def setup(model: str = "medium", device: str = "cuda"):
     """
     from mace.calculators import mace_off
 
-    return mace_off(model=model, device=device, default_dtype="float32")
+    return mace_off(model=CHECKPOINTS[checkpoint], device=device, default_dtype="float32")

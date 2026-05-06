@@ -27,13 +27,20 @@ Models:
     - "eSCN-L4-M2-Lay12-S2EF-OC20-2M"
 """
 
+CHECKPOINTS = {
+    "escn-l6-m2-lay12-s2ef-oc20-all-md": "eSCN-L6-M2-Lay12-S2EF-OC20-All+MD",
+    "escn-l6-m3-lay20-s2ef-oc20-all-md": "eSCN-L6-M3-Lay20-S2EF-OC20-All+MD",
+    "escn-l6-m2-lay12-s2ef-oc20-2m": "eSCN-L6-M2-Lay12-S2EF-OC20-2M",
+    "escn-l4-m2-lay12-s2ef-oc20-2m": "eSCN-L4-M2-Lay12-S2EF-OC20-2M",
+}
 
-def setup(model: str = "eSCN-L6-M2-Lay12-S2EF-OC20-All+MD", device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load an eSCN OC20 calculator.
 
     Args:
-        model: eSCN checkpoint name from the FAIRChem 1.x registry.
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -44,5 +51,5 @@ def setup(model: str = "eSCN-L6-M2-Lay12-S2EF-OC20-All+MD", device: str = "cuda"
     from fairchem.core.models.model_registry import model_name_to_local_file
 
     cache_dir = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
-    local_path = model_name_to_local_file(model, local_cache=cache_dir)
+    local_path = model_name_to_local_file(CHECKPOINTS[checkpoint], local_cache=cache_dir)
     return OCPCalculator(checkpoint_path=local_path, cpu=(device == "cpu"))

@@ -21,13 +21,17 @@ and must be deployed via `nequip-deploy` before use.
 Usage: pass a path to a deployed Allegro/NequIP model as `model`.
 """
 
+CHECKPOINTS = {
+    "allegro-deployed-model": "deployed_allegro.pth",
+}
 
-def setup(model: str, device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load an Allegro calculator from a deployed model file.
 
     Args:
-        model: Path to deployed Allegro .pth model (output of `nequip-deploy build`).
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -51,6 +55,7 @@ def setup(model: str, device: str = "cuda"):
 
     params = signature(load_model).parameters
     kwargs = {"device": device} if "device" in params else {}
+    model = CHECKPOINTS[checkpoint]
     for path_arg in ("model_path", "file_name", "path"):
         if path_arg in params:
             return load_model(**{path_arg: model}, **kwargs)

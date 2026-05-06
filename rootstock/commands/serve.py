@@ -20,16 +20,34 @@ def cmd_serve(args) -> int:
         0: Clean shutdown
         1: Error
     """
-    from ..environment import EnvironmentManager
+    from ..environment import (
+        CheckpointNotFoundError,
+        EnvironmentManager,
+        find_env_for_checkpoint,
+    )
+    from .add import _kwargs_from_args
+    from .common import resolve_cache_root
 
     root = get_root_or_exit(args)
-    env_name = f"{args.model}_env"
+    cache_root = resolve_cache_root(root)
     socket_path = args.socket
     checkpoint = args.checkpoint
     device = args.device
 
+    try:
+        setup_kwargs = _kwargs_from_args(getattr(args, "kwarg", None))
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        env_name, _ = find_env_for_checkpoint(root, checkpoint)
+    except CheckpointNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     # Create environment manager and validate environment exists
-    env_mgr = EnvironmentManager(root=root)
+    env_mgr = EnvironmentManager(root=root, cache_root=cache_root)
     try:
         env_mgr.get_env_python(env_name)
     except RuntimeError as e:
@@ -39,9 +57,10 @@ def cmd_serve(args) -> int:
     # Generate wrapper script
     wrapper_path = env_mgr.generate_wrapper(
         env_name=env_name,
-        model=checkpoint,
+        checkpoint=checkpoint,
         device=device,
         socket_path=socket_path,
+        setup_kwargs=setup_kwargs,
     )
 
     # Get spawn command and environment
@@ -49,7 +68,7 @@ def cmd_serve(args) -> int:
     env = env_mgr.get_environment_variables()
 
     print("Starting rootstock worker:")
-    print(f"  Model: {args.model} (env: {env_name})")
+    print(f"  Env: {env_name}")
     print(f"  Checkpoint: {checkpoint}")
     print(f"  Device: {device}")
     print(f"  Socket: {socket_path}")

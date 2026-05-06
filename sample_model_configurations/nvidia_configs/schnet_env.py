@@ -27,13 +27,20 @@ Models:
     - "SchNet-S2EF-OC20-200k"
 """
 
+CHECKPOINTS = {
+    "schnet-s2ef-oc20-all": "SchNet-S2EF-OC20-All",
+    "schnet-s2ef-oc20-20m": "SchNet-S2EF-OC20-20M",
+    "schnet-s2ef-oc20-2m": "SchNet-S2EF-OC20-2M",
+    "schnet-s2ef-oc20-200k": "SchNet-S2EF-OC20-200k",
+}
 
-def setup(model: str = "SchNet-S2EF-OC20-All", device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load a SchNet OC20 calculator.
 
     Args:
-        model: SchNet checkpoint name from the FAIRChem 1.x registry.
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -44,5 +51,5 @@ def setup(model: str = "SchNet-S2EF-OC20-All", device: str = "cuda"):
     from fairchem.core.models.model_registry import model_name_to_local_file
 
     cache_dir = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
-    local_path = model_name_to_local_file(model, local_cache=cache_dir)
+    local_path = model_name_to_local_file(CHECKPOINTS[checkpoint], local_cache=cache_dir)
     return OCPCalculator(checkpoint_path=local_path, cpu=(device == "cpu"))

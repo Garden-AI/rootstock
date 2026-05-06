@@ -35,14 +35,19 @@ Models:
     - "materialyze/TensorNetDGL-PES-MatPES-PBE-2025.2": DGL-backend variant
 """
 
+CHECKPOINTS = {
+    "tensornet-matpes-pbe-2025-2": "materialyze/TensorNet-PES-MatPES-PBE-2025.2",
+    "tensornet-matpes-r2scan-2025-2": "materialyze/TensorNet-PES-MatPES-r2SCAN-2025.2",
+    "tensornet-dgl-matpes-pbe-2025-2": "materialyze/TensorNetDGL-PES-MatPES-PBE-2025.2",
+}
 
-def setup(model: str = "materialyze/TensorNet-PES-MatPES-PBE-2025.2", device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load a TensorNet/MatGL calculator.
 
     Args:
-        model: HuggingFace model ID (e.g., "materialyze/TensorNet-PES-MatPES-PBE-2025.2").
-               Passed directly to matgl.load_model().
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (currently MatGL handles device internally)
 
     Returns:
@@ -84,6 +89,6 @@ def setup(model: str = "materialyze/TensorNet-PES-MatPES-PBE-2025.2", device: st
 
     # matgl 1.0.0 load_model only checks the GitHub manifest; HF models must
     # be downloaded explicitly and passed as a local path.
-    local_path = snapshot_download(repo_id=model)
+    local_path = snapshot_download(repo_id=CHECKPOINTS[checkpoint])
     pot = matgl.load_model(local_path)
     return PESCalculator(potential=pot)

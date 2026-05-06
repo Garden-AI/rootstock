@@ -11,6 +11,31 @@ from pathlib import Path
 
 from .common import get_root_or_exit
 
+ROOTSTOCK_GITHUB_URL = "https://github.com/Garden-AI/rootstock.git"
+
+
+def _rootstock_install_spec() -> str:
+    """Pin the worker env to the running rootstock build.
+
+    Tagged release ('0.7.2'):       rootstock==0.7.2 (from PyPI)
+    Dev build ('...dev0+abc1234'):  rootstock@git+<url>@abc1234 (from GitHub)
+    """
+    from rootstock import __version__
+
+    if "dev" not in __version__:
+        return f"rootstock=={__version__}"
+
+    if "+" not in __version__:
+        raise RuntimeError(
+            f"Cannot determine rootstock commit from version {__version__!r}. "
+            "Worker env needs a tagged release or a dev build with git "
+            "context. Commit your changes (and ensure git history is "
+            "available) before running `rootstock install`."
+        )
+
+    commit_hash = __version__.split("+")[-1]
+    return f"rootstock@git+{ROOTSTOCK_GITHUB_URL}@{commit_hash}"
+
 
 def extract_minimum_python_version(requires_python: str) -> str:
     """
@@ -65,7 +90,6 @@ def _install_single_environment(
     root: Path,
     source: str,
     force: bool,
-    models: str | None,
     verbose: bool,
     no_push: bool = False,
 ) -> int:
@@ -74,7 +98,7 @@ def _install_single_environment(
 
     Returns 0 on success, 1 on failure.
     """
-    from ..environment import get_model_cache_env
+    from ..environment import parse_checkpoints_dict
     from ..pep723 import parse_pep723_metadata, validate_environment_file
     from .manifest import update_and_push_manifest
 
@@ -92,8 +116,21 @@ def _install_single_environment(
             print(f"Error: {error}", file=sys.stderr)
             return 1
 
-        # Check if already registered
-        if env_source.exists() and not force:
+        try:
+            parse_checkpoints_dict(source_path)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+        # If the source file is already the registered file (the natural flow
+        # on a shared install: drop file into <root>/environments/ then run
+        # install), skip the copy and the "already registered" guard.
+        already_at_canonical = (
+            env_source.exists()
+            and source_path.resolve() == env_source.resolve()
+        )
+
+        if env_source.exists() and not force and not already_at_canonical:
             print(
                 f"Error: Environment '{env_name}' already registered at {env_source}",
                 file=sys.stderr,
@@ -101,11 +138,12 @@ def _install_single_environment(
             print("Use --force to update and rebuild", file=sys.stderr)
             return 1
 
-        # Create environments directory and copy file
+        # Create environments directory and copy file (unless already there)
         env_dir = root / "environments"
         env_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, env_source)
-        print(f"Registered: {source_path} -> {env_source}")
+        if not already_at_canonical:
+            shutil.copy2(source_path, env_source)
+            print(f"Registered: {source_path} -> {env_source}")
 
     else:
         # NAME MODE: use existing registered environment
@@ -252,11 +290,7 @@ def _install_single_environment(
 
     # Install rootstock
     print("3. Installing rootstock...")
-    # Pin to the running rootstock's version so the env matches the driver,
-    # without depending on where the driver itself was installed from.
-    from importlib.metadata import version as _pkg_version
-
-    rootstock_spec = f"rootstock=={_pkg_version('rootstock')}"
+    rootstock_spec = _rootstock_install_spec()
     print(f"  Installing: {rootstock_spec}")
 
     result = subprocess.run(
@@ -275,34 +309,6 @@ def _install_single_environment(
     # Copy environment source file
     print("4. Copying environment source...")
     shutil.copy(env_source, env_target / "env_source.py")
-
-    # Pre-download models if requested
-    if models:
-        model_list = [m.strip() for m in models.split(",")]
-        print(f"5. Pre-downloading models: {model_list}")
-
-        cache_env = get_model_cache_env(root)
-        env = {**os.environ, **cache_env}
-
-        for model in model_list:
-            print(f"   Downloading: {model}")
-            script = f'''
-import sys
-sys.path.insert(0, "{env_target}")
-from env_source import setup
-calc = setup("{model}", "cpu")
-print(f"Downloaded model: {model}")
-'''
-            result = subprocess.run(
-                [str(env_python), "-c", script],
-                env=env,
-                capture_output=not verbose,
-                text=True,
-            )
-            if result.returncode != 0:
-                print(f"   Warning: Failed to download {model}", file=sys.stderr)
-                if verbose:
-                    print(result.stderr, file=sys.stderr)
 
     print(f"\nBuilt environment: {env_target}")
 
@@ -326,6 +332,14 @@ def cmd_install(args) -> int:
         1: One or more installs failed
     """
     from ..environment import check_uv_available
+
+    if getattr(args, "models", None):
+        print(
+            "Error: --models has been removed. Use 'rootstock add' instead:\n"
+            "  rootstock add <checkpoint-id>",
+            file=sys.stderr,
+        )
+        return 2
 
     root = get_root_or_exit(args)
     source = args.source
@@ -364,7 +378,6 @@ def cmd_install(args) -> int:
                 root=root,
                 source=str(env_file),
                 force=args.force,
-                models=args.models,
                 verbose=args.verbose,
                 no_push=args.no_push,
             )
@@ -393,7 +406,6 @@ def cmd_install(args) -> int:
         root=root,
         source=source,
         force=args.force,
-        models=args.models,
         verbose=args.verbose,
         no_push=args.no_push,
     )

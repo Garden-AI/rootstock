@@ -19,13 +19,19 @@ Models:
     See orb_models.pretrained for the full checkpoint list.
 """
 
+CHECKPOINTS = {
+    "orb-v2": "orb-v2",
+    "orb-v3-conservative-inf-omat": "orb-v3-conservative-inf-omat",
+    "orb-v3-direct-inf-omat": "orb-v3-direct-inf-omat",
+}
 
-def setup(model: str = "orb-v2", device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load an Orb calculator.
 
     Args:
-        model: Checkpoint name passed to orb_models.pretrained.orb_pretrained().
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -37,7 +43,7 @@ def setup(model: str = "orb-v2", device: str = "cuda"):
 
     # orb-models exposes one function per checkpoint, e.g. pretrained.orb_v2().
     # Map "orb-v2" -> "orb_v2", "orb-v3-conservative-inf-omat" -> "orb_v3_conservative_inf_omat".
-    fn_name = model.replace("-", "_")
+    fn_name = CHECKPOINTS[checkpoint].replace("-", "_")
     load_fn = getattr(pretrained, fn_name)
     orbff = load_fn(device=torch.device(device))
     return ORBCalculator(orbff, device=torch.device(device))

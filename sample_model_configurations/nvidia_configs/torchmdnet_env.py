@@ -27,13 +27,17 @@ Note: TorchMD-Net's primary use case is organic/biomolecular MD. For
 inorganic universal potentials, prefer TensorNet or M3GNet.
 """
 
+CHECKPOINTS = {
+    "torchmdnet-et-oc20": "tensorfield/ET-OC20",
+}
 
-def setup(model: str, device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load a TorchMD-Net calculator.
 
     Args:
-        model: Path to a .ckpt checkpoint or HuggingFace model ID.
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -42,5 +46,5 @@ def setup(model: str, device: str = "cuda"):
     import torch
     from torchmdnet.calculators import External
 
-    calc = External(model, device=device)
+    calc = External(CHECKPOINTS[checkpoint], device=device)
     return calc

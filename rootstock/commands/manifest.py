@@ -143,7 +143,7 @@ def _refresh_manifest_environments(manifest: Manifest, root: Path) -> Manifest:
 
         # Get checkpoints (from existing manifest if available)
         existing_env = manifest.environments.get(env_name)
-        checkpoints = existing_env.checkpoints if existing_env else []
+        checkpoints = existing_env.checkpoints if existing_env else {}
 
         manifest.environments[env_name] = EnvironmentInfo(
             status="ready",
@@ -202,7 +202,7 @@ def cmd_manifest_show(args) -> int:
             print(f"      Source hash:  {env.source_hash[:20]}...")
             print(f"      Dependencies: {len(env.dependencies)} packages")
             if env.checkpoints:
-                print(f"      Checkpoints:  {', '.join(env.checkpoints)}")
+                print(f"      Checkpoints:  {', '.join(env.checkpoints.keys())}")
 
     return 0
 

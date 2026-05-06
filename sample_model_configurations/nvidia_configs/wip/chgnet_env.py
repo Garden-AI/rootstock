@@ -13,14 +13,17 @@ This environment provides access to CHGNet, a pretrained universal neural
 network potential for charge-informed atomistic modeling.
 """
 
+CHECKPOINTS = {
+    "chgnet-default": "chgnet-default",
+}
 
-def setup(model: str | None = None, device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load a CHGNet calculator.
 
     Args:
-        model: Optional path to a fine-tuned model. If None, uses the
-               default pre-trained CHGNet model.
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cuda:0", "cpu")
 
     Returns:
@@ -28,6 +31,4 @@ def setup(model: str | None = None, device: str = "cuda"):
     """
     from chgnet.model import CHGNetCalculator
 
-    if model:
-        return CHGNetCalculator(model_path=model, use_device=device)
     return CHGNetCalculator(use_device=device)

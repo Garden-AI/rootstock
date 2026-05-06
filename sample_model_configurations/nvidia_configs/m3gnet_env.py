@@ -24,13 +24,17 @@ For universal inorganic PES, use:
 This file loads CHGNet as the practical substitute for M3GNet-PES.
 """
 
+CHECKPOINTS = {
+    "m3gnet-mp-2021-2-8-pes": "chgnet-default",
+}
 
-def setup(model: str | None = None, device: str = "cuda"):
+
+def setup(checkpoint: str, device: str = "cuda"):
     """
     Load CHGNet as a substitute for M3GNet-PES.
 
     Args:
-        model: Optional path to a fine-tuned model. If None, uses CHGNet default.
+        checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cpu").
 
     Returns:
@@ -38,6 +42,4 @@ def setup(model: str | None = None, device: str = "cuda"):
     """
     from chgnet.model import CHGNetCalculator
 
-    if model:
-        return CHGNetCalculator(model_path=model, use_device=device)
     return CHGNetCalculator(use_device=device)

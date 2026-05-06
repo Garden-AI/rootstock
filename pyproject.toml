@@ -1,6 +1,6 @@
 [project]
 name = "rootstock"
-version = "0.7.3"
+dynamic = ["version"]
 description = "MLIP calculators with isolated Python environments"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,8 +30,21 @@ mace = [
 rootstock = "rootstock.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "uv-dynamic-versioning"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+fallback-version = "0.0.0"
+pattern = "default"
+
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { git = { commit = true, tags = true } },
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["rootstock"]

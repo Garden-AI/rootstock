@@ -9,51 +9,67 @@ This module handles:
 
 from __future__ import annotations
 
+import ast
+import json
 import os
 import shutil
 import tempfile
 from pathlib import Path
 
 
-def get_model_cache_env(root: Path) -> dict[str, str]:
-    """
-    Get environment variables to redirect model downloads to shared cache.
+class CheckpointNotFoundError(LookupError):
+    """Raised when a canonical checkpoint id is not declared by any installed env."""
 
-    We set HOME to redirect libraries that use ~/ for caching (FAIRChem, MatGL).
-    We also set XDG_CACHE_HOME for libraries that respect it (MACE).
+
+def get_model_cache_env(root: Path, cache_root: Path | None = None) -> dict[str, str]:
+    """
+    Get environment variables to redirect model downloads to a shared cache.
+
+    HOME is redirected for libraries that hardcode `~/` for caching (e.g.,
+    FAIRChem). XDG_CACHE_HOME and HF_HOME catch the well-behaved libraries.
+
+    On most clusters the install root and the cache root coincide. On clusters
+    where they live on different filesystems (e.g., Perlmutter — code on CFS,
+    cache on PSCRATCH), pass a separate `cache_root`.
 
     Args:
-        root: Rootstock root directory.
+        root: Rootstock install root.
+        cache_root: Optional separate root for the model-weight cache and
+                    redirected HOME. Defaults to ``root``.
 
     Returns:
         Dict of environment variables for model caching.
     """
-    cache_dir = root / "cache"
-    home_dir = root / "home"
+    base = cache_root if cache_root is not None else root
+    cache_dir = base / "cache"
+    home_dir = base / "home"
     return {
-        # Redirect HOME so libraries using ~/ find the shared cache
         "HOME": str(home_dir),
-        # XDG base directory - catches MACE and other well-behaved libraries
         "XDG_CACHE_HOME": str(cache_dir),
-        # HuggingFace explicit (some tools check these before XDG)
         "HF_HOME": str(cache_dir / "huggingface"),
         "HF_HUB_CACHE": str(cache_dir / "huggingface" / "hub"),
     }
 
 
-# Simplified wrapper template for pre-built environments
-# No PEP 723 metadata needed since dependencies are already installed
+# Simplified wrapper template for pre-built environments.
+# No PEP 723 metadata needed since dependencies are already installed.
+# setup_kwargs travel via a JSON sidecar file rather than being baked into
+# the source — keeps us out of the repr()/escaping business for arbitrary values.
 WRAPPER_TEMPLATE = """
-import sys
+import sys, json
 sys.path.insert(0, "{env_dir}")
 from env_source import setup
 from rootstock.worker import run_worker
 
+with open("{kwargs_path}") as f:
+    setup_kwargs = json.load(f)
+
 run_worker(
     setup_fn=setup,
-    model="{model}",
+    checkpoint="{checkpoint}",
     device="{device}",
     socket_path="{socket_path}",
+    setup_kwargs=setup_kwargs,
 )
 """
 
@@ -67,14 +83,17 @@ class EnvironmentManager:
     the venv as env_source.py during build.
     """
 
-    def __init__(self, root: Path | str):
+    def __init__(self, root: Path | str, cache_root: Path | str | None = None):
         """
         Initialize the environment manager.
 
         Args:
-            root: Root directory for environments and cache.
+            root: Install root directory (envs, environments, manifest).
+            cache_root: Optional separate root for the model-weight cache and
+                        redirected HOME. Defaults to ``root``.
         """
         self.root = Path(root)
+        self.cache_root = Path(cache_root) if cache_root is not None else None
         self._temp_files: list[Path] = []
 
     def get_env_python(self, env_name: str) -> Path:
@@ -110,30 +129,40 @@ class EnvironmentManager:
     def generate_wrapper(
         self,
         env_name: str,
-        model: str,
+        checkpoint: str,
         device: str,
         socket_path: str,
+        setup_kwargs: dict | None = None,
     ) -> Path:
         """
         Generate a wrapper script for the given environment.
 
         Args:
             env_name: Name of the pre-built environment
-            model: Model identifier to pass to setup()
+            checkpoint: Canonical checkpoint id to pass to setup()
             device: Device string to pass to setup()
             socket_path: Unix socket path for IPC
+            setup_kwargs: Extra keyword arguments forwarded to setup() via JSON sidecar
 
         Returns:
             Path to the generated wrapper script (temp file).
         """
         env_dir = self.root / "envs" / env_name
 
+        # Write setup_kwargs to a JSON sidecar that the wrapper reads at startup.
+        kwargs_fd, kwargs_path = tempfile.mkstemp(suffix=".json", prefix="rootstock_kwargs_")
+        with open(kwargs_fd, "w") as f:
+            json.dump(setup_kwargs or {}, f)
+        kwargs_path = Path(kwargs_path)
+        self._temp_files.append(kwargs_path)
+
         # Generate wrapper content
         wrapper_content = WRAPPER_TEMPLATE.format(
             env_dir=str(env_dir),
-            model=model,
+            checkpoint=checkpoint,
             device=device,
             socket_path=socket_path,
+            kwargs_path=str(kwargs_path),
         )
 
         # Write to temp file
@@ -169,7 +198,7 @@ class EnvironmentManager:
             Dict of environment variables for model caching.
         """
         env = os.environ.copy()
-        env.update(get_model_cache_env(self.root))
+        env.update(get_model_cache_env(self.root, self.cache_root))
         return env
 
     def cleanup(self):
@@ -212,6 +241,101 @@ def list_environments(root: Path | str) -> list[tuple[str, Path]]:
         result.append((name, path))
 
     return result
+
+
+def parse_checkpoints_dict(env_source_path: Path) -> dict[str, str]:
+    """
+    Extract the module-level ``CHECKPOINTS: dict[str, str]`` literal from an env file.
+
+    The dict maps canonical checkpoint ids → upstream library strings. Both keys
+    and values must be string literals; anything else is an authoring error and
+    raises ValueError.
+    """
+    tree = ast.parse(env_source_path.read_text(), filename=str(env_source_path))
+    for node in tree.body:
+        targets = []
+        value = None
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+            value = node.value
+        else:
+            continue
+        if not (
+            len(targets) == 1
+            and isinstance(targets[0], ast.Name)
+            and targets[0].id == "CHECKPOINTS"
+        ):
+            continue
+        if not isinstance(value, ast.Dict):
+            raise ValueError(
+                f"{env_source_path}: CHECKPOINTS must be a dict literal."
+            )
+        result: dict[str, str] = {}
+        for k_node, v_node in zip(value.keys, value.values):
+            if not (isinstance(k_node, ast.Constant) and isinstance(k_node.value, str)):
+                raise ValueError(
+                    f"{env_source_path}: CHECKPOINTS keys must be string literals."
+                )
+            if not (isinstance(v_node, ast.Constant) and isinstance(v_node.value, str)):
+                raise ValueError(
+                    f"{env_source_path}: CHECKPOINTS values must be string literals."
+                )
+            result[k_node.value] = v_node.value
+        return result
+    raise ValueError(
+        f"{env_source_path}: missing module-level CHECKPOINTS dict. "
+        f"Each env file must declare a `CHECKPOINTS: dict[str, str]` mapping "
+        f"canonical checkpoint ids to upstream library strings."
+    )
+
+
+def find_env_for_checkpoint(
+    root: Path | str, checkpoint_id: str
+) -> tuple[str, dict[str, str]]:
+    """
+    Walk ``{root}/envs/*/env_source.py`` and return ``(env_name, CHECKPOINTS)``
+    for the env that declares ``checkpoint_id``.
+
+    Raises ``CheckpointNotFoundError`` with a message listing every canonical
+    id declared by any installed env, plus a hint to ``rootstock install`` if
+    nothing matches.
+    """
+    root = Path(root)
+    envs_dir = root / "envs"
+    declared: dict[str, list[str]] = {}  # env_name -> [ids]
+    if envs_dir.exists():
+        for env_dir in sorted(envs_dir.iterdir()):
+            source = env_dir / "env_source.py"
+            if not source.exists():
+                continue
+            try:
+                ckpts = parse_checkpoints_dict(source)
+            except ValueError:
+                continue
+            declared[env_dir.name] = list(ckpts)
+            if checkpoint_id in ckpts:
+                return env_dir.name, ckpts
+
+    if declared:
+        listing = "\n".join(
+            f"  {env}: {', '.join(ids) if ids else '(none)'}"
+            for env, ids in declared.items()
+        )
+        msg = (
+            f"No installed env declares checkpoint '{checkpoint_id}'.\n"
+            f"Declared canonical ids by env:\n{listing}\n"
+            f"If '{checkpoint_id}' belongs to an env you haven't installed yet, "
+            f"run `rootstock install <env-file> --root {root}`."
+        )
+    else:
+        msg = (
+            f"No envs are installed at {root}. "
+            f"Run `rootstock install <env-file> --root {root}` first."
+        )
+    raise CheckpointNotFoundError(msg)
 
 
 def list_built_environments(root: Path | str) -> list[tuple[str, Path]]:
