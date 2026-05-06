@@ -238,11 +238,10 @@ class MLIPWorker:
 
 
 def run_worker(
-    setup_fn: Callable[..., "Calculator"],
-    checkpoint: str,
+    setup_fn: Callable[[str, str], "Calculator"],
+    model: str,
     device: str,
     socket_path: str,
-    setup_kwargs: dict | None = None,
     log=None,
 ):
     """
@@ -253,21 +252,14 @@ def run_worker(
     is then reused for all subsequent calculations.
 
     Args:
-        setup_fn: Function that takes (checkpoint, device, **setup_kwargs)
-                  and returns an ASE calculator
-        checkpoint: Canonical checkpoint id passed to setup_fn
+        setup_fn: Function that takes (model, device) and returns an ASE calculator
+        model: Model identifier to pass to setup_fn
         device: Device string to pass to setup_fn
         socket_path: Full Unix socket path to connect to
-        setup_kwargs: Extra keyword arguments forwarded to setup_fn
         log: Optional logging file object
     """
-    setup_kwargs = setup_kwargs or {}
     if log:
-        print(
-            f"[Worker] Calling setup({checkpoint!r}, {device!r}, **{setup_kwargs!r})",
-            file=log,
-            flush=True,
-        )
+        print(f"[Worker] Calling setup({model!r}, {device!r})", file=log, flush=True)
 
     # Load calculator via the setup function
     calculator = setup_fn(model, device)
