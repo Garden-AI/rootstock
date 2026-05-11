@@ -181,31 +181,6 @@ Then install the actual runtime deps separately: `torch`, `ase`, `pymatgen`, `mo
 
 ---
 
-## ANI (torchani) calculators
-
-**Signature:** `ValueError: periodic_table_index must be True for ASE interface` or
-forces array is wrong shape / all-zero.
-**Cause:** torchani 2.7+ requires `periodic_table_index=True` when calling `.ase()`.
-**Fix:** Always call `model(periodic_table_index=True).to(device).ase()`.
-
----
-
-## orb-models checkpoint loading
-
-**Signature:** `AttributeError: module 'orb_models.forcefield.pretrained' has no attribute 'orb_pretrained'`
-or similar when trying to call a single `pretrained.load(name)` function.
-**Cause:** orb-models exposes one function *per checkpoint* (e.g. `pretrained.orb_v2()`,
-`pretrained.orb_v3_conservative_inf_omat()`), not a single loader.
-**Fix:** Convert the checkpoint name to the function name by replacing hyphens with underscores,
-then use `getattr`:
-```python
-fn_name = model.replace("-", "_")
-load_fn = getattr(pretrained, fn_name)
-orbff = load_fn(device=torch.device(device))
-```
-
----
-
 ## matgl backend split (DGL vs PyG)
 
 **Signature:** `ValueError: Invalid backend` when calling `matgl.set_backend("dgl")`.
