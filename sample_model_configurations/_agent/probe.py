@@ -44,7 +44,10 @@ def build_system(kind: str):
     if kind == "crystal":
         from ase.build import bulk
 
-        return bulk("Cu", "fcc", a=3.6) * (2, 2, 2)
+        atoms = bulk("Cu", "fcc", a=3.6) * (2, 2, 2)
+        atoms.positions[0, 0] += 0.05
+        atoms.positions[1, 1] -= 0.03
+        return atoms
 
     if kind == "slab_co":
         from ase.build import add_adsorbate, fcc111, molecule

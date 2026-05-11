@@ -6,12 +6,7 @@
 #     "torch>=2.0",
 # ]
 # ///
-"""
-CHGNet environment for Rootstock.
-
-This environment provides access to CHGNet, a pretrained universal neural
-network potential for charge-informed atomistic modeling.
-"""
+"""CHGNet env — hosts pretrained charge-informed universal potentials."""
 
 CHECKPOINTS = {
     "chgnet-default": "chgnet-default",
@@ -29,6 +24,8 @@ def setup(checkpoint: str, device: str = "cuda"):
     Returns:
         ASE-compatible calculator
     """
-    from chgnet.model import CHGNetCalculator
+    from chgnet.model import CHGNet, CHGNetCalculator
 
-    return CHGNetCalculator(use_device=device)
+    model_name = CHECKPOINTS[checkpoint]
+    model = CHGNet.load() if model_name == "chgnet-default" else CHGNet.load(model_name)
+    return CHGNetCalculator(model=model, use_device=device)

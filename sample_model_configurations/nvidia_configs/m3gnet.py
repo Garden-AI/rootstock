@@ -17,9 +17,9 @@ via any modern Python package:
   - materialyze HuggingFace has only M3GNet-Eform (formation energy, not PES)
 
 For universal inorganic PES, use:
-  - tensornet_env.py: TensorNet-MatPES (same authors, newer, better)
-  - chgnet_env.py: CHGNet (charge-informed, strong on magnetic materials)
-  - orb_env.py: Orb v3 (universal, supports periodic systems)
+  - tensornet.py: TensorNet-MatPES (same authors, newer, better)
+  - chgnet.py: CHGNet (charge-informed, strong on magnetic materials)
+  - orb.py: Orb v3 (universal, supports periodic systems)
 
 This file loads CHGNet as the practical substitute for M3GNet-PES.
 """

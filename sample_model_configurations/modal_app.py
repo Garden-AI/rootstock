@@ -8,7 +8,7 @@ structured `STAGE: ...` markers so we can iterate fast and diagnose hangs
 without guessing.
 
 It is *not* a validator for finished configs and does not run rootstock
-itself. The artifact we ship is the `nvidia_configs/<name>_env.py` file;
+itself. The artifact we ship is the `nvidia_configs/<name>.py` file;
 this app is the workshop where we tinker until that file is right.
 
 Usage:
@@ -136,7 +136,7 @@ def _run_probe_subprocess(checkpoint: str, system: str, device: str = "cuda") ->
 
 
 @probe_image(
-    "esen_env.py",
+    "esen.py",
     ["torch>=2.4.0", "fairchem-core>=2.0.0", "ase>=3.22", "torch-geometric"],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
@@ -151,10 +151,10 @@ def probe_esen(checkpoint: str = "esen-md-direct-all-omol", system: str = "molec
 
 
 @probe_image(
-    "m3gnet_env.py",
+    "m3gnet.py",
     ["chgnet>=0.4.0", "ase>=3.22", "torch>=2.0"],
 )
-def probe_m3gnet(checkpoint: str = "", system: str = "crystal"):
+def probe_m3gnet(checkpoint: str = "m3gnet-mp-2021-2-8-pes", system: str = "crystal"):
     """M3GNet-PES unavailable in modern matgl; loads CHGNet as substitute."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -165,11 +165,11 @@ def probe_m3gnet(checkpoint: str = "", system: str = "crystal"):
 
 
 @probe_image(
-    "chgnet_env.py",
+    "chgnet.py",
     ["chgnet>=0.3.0", "ase>=3.22", "torch>=2.0"],
 )
-def probe_chgnet(checkpoint: str = "", system: str = "crystal"):
-    """Probe CHGNet. Empty checkpoint loads the default pretrained model."""
+def probe_chgnet(checkpoint: str = "chgnet-default", system: str = "crystal"):
+    """Probe CHGNet. Default checkpoint loads the pretrained model."""
     return _run_probe_subprocess(checkpoint, system)
 
 
@@ -179,7 +179,7 @@ def probe_chgnet(checkpoint: str = "", system: str = "crystal"):
 
 
 @probe_image(
-    "tensornet_env.py",
+    "tensornet.py",
     [
         "torch>=2.4.0",
         "ase>=3.22",
@@ -201,9 +201,7 @@ def probe_chgnet(checkpoint: str = "", system: str = "crystal"):
     no_deps=["matgl @ git+https://github.com/materialsvirtuallab/matgl.git"],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_tensornet(
-    checkpoint: str = "materialyze/TensorNet-PES-MatPES-PBE-2025.2", system: str = "crystal"
-):
+def probe_tensornet(checkpoint: str = "tensornet-matpes-pbe-2025-2", system: str = "crystal"):
     """Probe a TensorNet/MatGL checkpoint. Default: MatPES PBE on Cu bulk."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -214,10 +212,10 @@ def probe_tensornet(
 
 
 @probe_image(
-    "mace_off23_env.py",
+    "mace_off23.py",
     ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.4.0,<2.10"],
 )
-def probe_mace_off23(checkpoint: str = "medium", system: str = "molecule"):
+def probe_mace_off23(checkpoint: str = "mace-off23-medium", system: str = "molecule"):
     """Probe a MACE-OFF23 checkpoint. Default: medium model on H2O."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -228,10 +226,10 @@ def probe_mace_off23(checkpoint: str = "medium", system: str = "molecule"):
 
 
 @probe_image(
-    "mace_env.py",
+    "mace.py",
     ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.4.0,<2.10"],
 )
-def probe_mace(checkpoint: str = "medium", system: str = "crystal"):
+def probe_mace(checkpoint: str = "mace-mp-0-medium", system: str = "crystal"):
     """Probe a MACE-MP-0 checkpoint. Use --checkpoint large for MACE-Large."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -242,10 +240,10 @@ def probe_mace(checkpoint: str = "medium", system: str = "crystal"):
 
 
 @probe_image(
-    "ani_env.py",
+    "ani.py",
     ["torchani>=2.2", "ase>=3.22", "torch>=2.0"],
 )
-def probe_ani(checkpoint: str = "ANI2x", system: str = "molecule"):
+def probe_ani(checkpoint: str = "ani-2x", system: str = "molecule"):
     """Probe an ANI model. Default: ANI-2x on H2O."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -256,7 +254,7 @@ def probe_ani(checkpoint: str = "ANI2x", system: str = "molecule"):
 
 
 @probe_image(
-    "orb_env.py",
+    "orb.py",
     ["orb-models>=0.4.0", "ase>=3.22", "torch>=2.0"],
 )
 def probe_orb(checkpoint: str = "orb-v2", system: str = "crystal"):
@@ -270,10 +268,10 @@ def probe_orb(checkpoint: str = "orb-v2", system: str = "crystal"):
 
 
 @probe_image(
-    "mattersim_env.py",
+    "mattersim.py",
     ["mattersim>=1.1.0", "ase>=3.22", "torch>=2.0"],
 )
-def probe_mattersim(checkpoint: str = "MatterSim-v1.0.0-5M", system: str = "crystal"):
+def probe_mattersim(checkpoint: str = "mattersim-v1-0-0-5m", system: str = "crystal"):
     """Probe a MatterSim checkpoint. Default: v1 5M on Cu bulk."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -284,7 +282,7 @@ def probe_mattersim(checkpoint: str = "MatterSim-v1.0.0-5M", system: str = "crys
 
 
 @probe_image(
-    "nequip_env.py",
+    "nequip.py",
     ["nequip>=0.6.0", "ase>=3.22", "torch>=2.0", "torch-geometric"],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
@@ -296,7 +294,7 @@ def probe_nequip(checkpoint: str, system: str = "crystal"):
 # -----------------------------------------------------------------------------
 # Allegro — scalable E(3)-equivariant GNN (NequIP family)
 # Note: No public checkpoint; probe_allegro is not included here.
-# allegro_env.py exists for use in rootstock environments where a deployed
+# allegro.py exists for use in rootstock environments where a deployed
 # Allegro model file is provided. Install with:
 #   uv pip install --no-deps "allegro @ git+https://github.com/mir-group/allegro.git"
 # -----------------------------------------------------------------------------
@@ -308,7 +306,7 @@ def probe_nequip(checkpoint: str, system: str = "crystal"):
 
 
 @probe_image(
-    "torchmdnet_env.py",
+    "torchmdnet.py",
     [
         "ase>=3.22",
         "torch>=2.0",
@@ -331,7 +329,7 @@ def probe_torchmdnet(checkpoint: str, system: str = "molecule"):
 
 
 @probe_image(
-    "gemnet_env.py",
+    "gemnet.py",
     [
         "torch>=2.4.0",
         "fairchem-core>=1.0.0,<2.0.0",
@@ -343,7 +341,7 @@ def probe_torchmdnet(checkpoint: str, system: str = "molecule"):
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_gemnet(checkpoint: str = "GemNet-OC-Large-S2EF-OC20-All+MD", system: str = "slab_co"):
+def probe_gemnet(checkpoint: str = "gemnet-oc-large-s2ef-oc20-all-md", system: str = "slab_co"):
     """Probe a GemNet OC20 checkpoint. Default: GemNet-OC on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -354,7 +352,7 @@ def probe_gemnet(checkpoint: str = "GemNet-OC-Large-S2EF-OC20-All+MD", system: s
 
 
 @probe_image(
-    "equiformer_env.py",
+    "equiformer.py",
     [
         "torch>=2.4.0",
         "fairchem-core>=1.0.0,<2.0.0",
@@ -366,9 +364,7 @@ def probe_gemnet(checkpoint: str = "GemNet-OC-Large-S2EF-OC20-All+MD", system: s
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_equiformer(
-    checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD", system: str = "slab_co"
-):
+def probe_equiformer(checkpoint: str = "equiformer-v2-153m-s2ef-oc20-all-md", system: str = "slab_co"):
     """Probe an EquiformerV2 OC20 checkpoint on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -379,7 +375,7 @@ def probe_equiformer(
 
 
 @probe_image(
-    "dimenet_env.py",
+    "dimenet.py",
     [
         "torch>=2.4.0",
         "fairchem-core>=1.0.0,<2.0.0",
@@ -391,7 +387,7 @@ def probe_equiformer(
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_dimenet(checkpoint: str = "DimeNet++-S2EF-OC20-All", system: str = "slab_co"):
+def probe_dimenet(checkpoint: str = "dimenet-plus-plus-s2ef-oc20-all", system: str = "slab_co"):
     """Probe a DimeNet++ OC20 checkpoint on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -402,7 +398,7 @@ def probe_dimenet(checkpoint: str = "DimeNet++-S2EF-OC20-All", system: str = "sl
 
 
 @probe_image(
-    "scn_env.py",
+    "scn.py",
     [
         "torch>=2.4.0",
         "fairchem-core>=1.0.0,<2.0.0",
@@ -414,7 +410,7 @@ def probe_dimenet(checkpoint: str = "DimeNet++-S2EF-OC20-All", system: str = "sl
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_scn(checkpoint: str = "SCN-S2EF-OC20-All+MD", system: str = "slab_co"):
+def probe_scn(checkpoint: str = "scn-s2ef-oc20-all-md", system: str = "slab_co"):
     """Probe an SCN OC20 checkpoint on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -425,7 +421,7 @@ def probe_scn(checkpoint: str = "SCN-S2EF-OC20-All+MD", system: str = "slab_co")
 
 
 @probe_image(
-    "escn_env.py",
+    "escn.py",
     [
         "torch>=2.4.0",
         "fairchem-core>=1.0.0,<2.0.0",
@@ -437,7 +433,7 @@ def probe_scn(checkpoint: str = "SCN-S2EF-OC20-All+MD", system: str = "slab_co")
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_escn(checkpoint: str = "eSCN-L6-M2-Lay12-S2EF-OC20-All+MD", system: str = "slab_co"):
+def probe_escn(checkpoint: str = "escn-l6-m2-lay12-s2ef-oc20-all-md", system: str = "slab_co"):
     """Probe an eSCN OC20 checkpoint on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -448,7 +444,7 @@ def probe_escn(checkpoint: str = "eSCN-L6-M2-Lay12-S2EF-OC20-All+MD", system: st
 
 
 @probe_image(
-    "painn_env.py",
+    "painn.py",
     [
         "torch>=2.4.0",
         "fairchem-core>=1.0.0,<2.0.0",
@@ -460,7 +456,7 @@ def probe_escn(checkpoint: str = "eSCN-L6-M2-Lay12-S2EF-OC20-All+MD", system: st
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_painn(checkpoint: str = "PaiNN-S2EF-OC20-All", system: str = "slab_co"):
+def probe_painn(checkpoint: str = "painn-s2ef-oc20-all", system: str = "slab_co"):
     """Probe a PaiNN OC20 checkpoint on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -471,7 +467,7 @@ def probe_painn(checkpoint: str = "PaiNN-S2EF-OC20-All", system: str = "slab_co"
 
 
 @probe_image(
-    "schnet_env.py",
+    "schnet.py",
     [
         "torch>=2.4.0",
         "fairchem-core>=1.0.0,<2.0.0",
@@ -483,7 +479,7 @@ def probe_painn(checkpoint: str = "PaiNN-S2EF-OC20-All", system: str = "slab_co"
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_schnet(checkpoint: str = "SchNet-S2EF-OC20-All", system: str = "slab_co"):
+def probe_schnet(checkpoint: str = "schnet-s2ef-oc20-all", system: str = "slab_co"):
     """Probe a SchNet OC20 checkpoint on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -494,7 +490,7 @@ def probe_schnet(checkpoint: str = "SchNet-S2EF-OC20-All", system: str = "slab_c
 
 
 @probe_image(
-    "uma_env.py",
+    "uma.py",
     ["torch>=2.4.0", "fairchem-core>=2.0.0", "ase>=3.22", "torch-geometric"],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
@@ -504,7 +500,7 @@ def probe_uma_small(checkpoint: str = "uma-s-1p1", system: str = "crystal"):
 
 
 @probe_image(
-    "uma_env.py",
+    "uma.py",
     ["torch>=2.4.0", "fairchem-core>=2.0.0", "ase>=3.22", "torch-geometric"],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )

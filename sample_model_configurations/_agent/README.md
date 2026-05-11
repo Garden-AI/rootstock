@@ -1,6 +1,6 @@
 # `_agent/` — workshop tooling
 
-Scaffolding around the *creation* of `<mlip>_env.py` configs. Hardware-agnostic
+Scaffolding around the *creation* of `<mlip>.py` configs. Hardware-agnostic
 — sits at the workshop root because the same probe/taxonomy applies whether
 the target is NVIDIA, AMD, or CPU-only.
 
@@ -46,7 +46,7 @@ not an element string. Passing a string "CO" to `add_adsorbate` hits
 
 ## What doesn't live here
 
-- `<mlip>_env.py` configs — those are the public artifact; they live in
+- `<mlip>.py` configs — those are the public artifact; they live in
   `nvidia_configs/` (or future `*_configs/` subfolders).
 - The Modal app itself — `modal_app.py` is a sibling of this folder.
 - Rootstock CLI / server / worker code — that's `rootstock/` at the repo
