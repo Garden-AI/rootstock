@@ -54,13 +54,16 @@ def setup(checkpoint: str, device: str = "cuda"):
         ASE-compatible calculator
     """
     import torch
+
     torch.set_default_device(device)
 
     # matgl 1.0.0 imports ExpCellFilter from ase.constraints, but it moved to
     # ase.filters in ASE 3.23. Patch it in before matgl imports.
     import ase.constraints
+
     if not hasattr(ase.constraints, "ExpCellFilter"):
         from ase.filters import ExpCellFilter
+
         ase.constraints.ExpCellFilter = ExpCellFilter
 
     # DGL 2.x imports torchdata.datapipes at init, but torchdata>=0.7 removed

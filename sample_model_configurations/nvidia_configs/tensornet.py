@@ -32,13 +32,16 @@ CHECKPOINTS = {
 
 def setup(checkpoint: str, device: str = "cuda"):
     import torch
+
     torch.set_default_device(device)
 
     # matgl 1.0.0 imports ExpCellFilter from ase.constraints, but it moved to
     # ase.filters in ASE 3.23. Patch it in before matgl imports.
     import ase.constraints
+
     if not hasattr(ase.constraints, "ExpCellFilter"):
         from ase.filters import ExpCellFilter
+
         ase.constraints.ExpCellFilter = ExpCellFilter
 
     # DGL 2.x graphbolt imports torchdata submodules removed in torchdata>=0.7.
@@ -46,6 +49,7 @@ def setup(checkpoint: str, device: str = "cuda"):
     # __init__ will use our empty stub and skip the real graphbolt initialisation.
     # matgl only uses DGL for graph construction — graphbolt is never called.
     import sys, types
+
     for _name in [
         "dgl.graphbolt",
         "dgl.graphbolt.base",

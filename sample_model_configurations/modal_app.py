@@ -31,9 +31,7 @@ app = modal.App("rootstock-mlip-workshop")
 
 # One volume for *all* model caches. Few large files (weights), so cold-read
 # tax is negligible — this is the right place for persistence.
-model_cache = modal.Volume.from_name(
-    "rootstock-model-cache", create_if_missing=True
-)
+model_cache = modal.Volume.from_name("rootstock-model-cache", create_if_missing=True)
 CACHE_MOUNT = "/cache"
 
 # Cache redirection mirrors what rootstock does on HPC (see top-level README's
@@ -82,9 +80,8 @@ def probe_image(
         img = img.run_commands(
             f"/.uv/uv pip install --system --no-deps {' '.join(repr(p) for p in no_deps)}"
         )
-    img = (
-        img.add_local_file(str(CONFIGS / config_file), IMG_CONFIG)
-           .add_local_file(str(AGENT / "probe.py"), IMG_PROBE)
+    img = img.add_local_file(str(CONFIGS / config_file), IMG_CONFIG).add_local_file(
+        str(AGENT / "probe.py"), IMG_PROBE
     )
     return app.function(
         image=img,
@@ -114,7 +111,16 @@ def _run_probe_subprocess(checkpoint: str, system: str, device: str = "cuda") ->
         os.makedirs(path, exist_ok=True)
     sub_env = {**os.environ, **CACHE_ENV}
 
-    cmd = [sys.executable, IMG_PROBE, "--config", IMG_CONFIG, "--system", system, "--device", device]
+    cmd = [
+        sys.executable,
+        IMG_PROBE,
+        "--config",
+        IMG_CONFIG,
+        "--system",
+        system,
+        "--device",
+        device,
+    ]
     if checkpoint:
         cmd += ["--checkpoint", checkpoint]
     print(f"PROBE_CMD: {' '.join(cmd)}", flush=True)
@@ -127,6 +133,7 @@ def _run_probe_subprocess(checkpoint: str, system: str, device: str = "cuda") ->
 # -----------------------------------------------------------------------------
 # eSEN — FAIRChem single-task (OMol25, OC25, ODAC25)
 # -----------------------------------------------------------------------------
+
 
 @probe_image(
     "esen_env.py",
@@ -142,6 +149,7 @@ def probe_esen(checkpoint: str = "esen-md-direct-all-omol", system: str = "molec
 # M3GNet — MatGL universal potential (Materials Project / materialyze HF)
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "m3gnet_env.py",
     ["chgnet>=0.4.0", "ase>=3.22", "torch>=2.0"],
@@ -154,6 +162,7 @@ def probe_m3gnet(checkpoint: str = "", system: str = "crystal"):
 # -----------------------------------------------------------------------------
 # CHGNet — charge-informed universal potential
 # -----------------------------------------------------------------------------
+
 
 @probe_image(
     "chgnet_env.py",
@@ -168,21 +177,33 @@ def probe_chgnet(checkpoint: str = "", system: str = "crystal"):
 # TensorNet — MatGL universal potential (MatPES)
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "tensornet_env.py",
     [
-        "torch>=2.4.0", "ase>=3.22",
-        "torch>=2.4.0", "ase>=3.22", "huggingface_hub",
-        "pymatgen", "monty", "ruamel.yaml", "scipy",
-        "torch-geometric", "torch-scatter", "torch-sparse",
-        "torch-cluster", "torch-spline-conv",
+        "torch>=2.4.0",
+        "ase>=3.22",
+        "torch>=2.4.0",
+        "ase>=3.22",
+        "huggingface_hub",
+        "pymatgen",
+        "monty",
+        "ruamel.yaml",
+        "scipy",
+        "torch-geometric",
+        "torch-scatter",
+        "torch-sparse",
+        "torch-cluster",
+        "torch-spline-conv",
     ],
     python_version="3.11",
     apt_packages=["git"],
     no_deps=["matgl @ git+https://github.com/materialsvirtuallab/matgl.git"],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_tensornet(checkpoint: str = "materialyze/TensorNet-PES-MatPES-PBE-2025.2", system: str = "crystal"):
+def probe_tensornet(
+    checkpoint: str = "materialyze/TensorNet-PES-MatPES-PBE-2025.2", system: str = "crystal"
+):
     """Probe a TensorNet/MatGL checkpoint. Default: MatPES PBE on Cu bulk."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -190,6 +211,7 @@ def probe_tensornet(checkpoint: str = "materialyze/TensorNet-PES-MatPES-PBE-2025
 # -----------------------------------------------------------------------------
 # MACE-OFF23 — MACE force field for organic molecules
 # -----------------------------------------------------------------------------
+
 
 @probe_image(
     "mace_off23_env.py",
@@ -204,6 +226,7 @@ def probe_mace_off23(checkpoint: str = "medium", system: str = "molecule"):
 # MACE-MP-0 / MACE-Large — MACE foundation models for inorganic materials
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "mace_env.py",
     ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.4.0,<2.10"],
@@ -216,6 +239,7 @@ def probe_mace(checkpoint: str = "medium", system: str = "crystal"):
 # -----------------------------------------------------------------------------
 # ANI-2x — TorchANI neural network potential for organic molecules
 # -----------------------------------------------------------------------------
+
 
 @probe_image(
     "ani_env.py",
@@ -230,6 +254,7 @@ def probe_ani(checkpoint: str = "ANI2x", system: str = "molecule"):
 # Orb — Orbital Materials universal potential (v2, v3)
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "orb_env.py",
     ["orb-models>=0.4.0", "ase>=3.22", "torch>=2.0"],
@@ -243,6 +268,7 @@ def probe_orb(checkpoint: str = "orb-v2", system: str = "crystal"):
 # MatterSim — Microsoft universal potential (v1)
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "mattersim_env.py",
     ["mattersim>=1.1.0", "ase>=3.22", "torch>=2.0"],
@@ -255,6 +281,7 @@ def probe_mattersim(checkpoint: str = "MatterSim-v1.0.0-5M", system: str = "crys
 # -----------------------------------------------------------------------------
 # NequIP — E(3)-equivariant GNN (system-specific, deployed model required)
 # -----------------------------------------------------------------------------
+
 
 @probe_image(
     "nequip_env.py",
@@ -279,11 +306,16 @@ def probe_nequip(checkpoint: str, system: str = "crystal"):
 # TorchMD-Net — equivariant transformer for MD
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "torchmdnet_env.py",
     [
-        "ase>=3.22", "torch>=2.0",
-        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+        "ase>=3.22",
+        "torch>=2.0",
+        "torch-geometric",
+        "torch-scatter",
+        "torch-sparse",
+        "torch-cluster",
     ],
     no_deps=["torchmd-net>=2.0.0"],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
@@ -297,11 +329,17 @@ def probe_torchmdnet(checkpoint: str, system: str = "molecule"):
 # GemNet — OC20 GemNet-OC / GemNet-dT via fairchem-core 1.x
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "gemnet_env.py",
     [
-        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
-        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+        "torch>=2.4.0",
+        "fairchem-core>=1.0.0,<2.0.0",
+        "ase>=3.22",
+        "torch-geometric",
+        "torch-scatter",
+        "torch-sparse",
+        "torch-cluster",
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
@@ -314,15 +352,23 @@ def probe_gemnet(checkpoint: str = "GemNet-OC-Large-S2EF-OC20-All+MD", system: s
 # EquiformerV2 — OC20 EquiformerV2 via fairchem-core 1.x
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "equiformer_env.py",
     [
-        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
-        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+        "torch>=2.4.0",
+        "fairchem-core>=1.0.0,<2.0.0",
+        "ase>=3.22",
+        "torch-geometric",
+        "torch-scatter",
+        "torch-sparse",
+        "torch-cluster",
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_equiformer(checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD", system: str = "slab_co"):
+def probe_equiformer(
+    checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD", system: str = "slab_co"
+):
     """Probe an EquiformerV2 OC20 checkpoint on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -331,11 +377,17 @@ def probe_equiformer(checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD", sys
 # DimeNet++ — OC20 DimeNet++ via fairchem-core 1.x
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "dimenet_env.py",
     [
-        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
-        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+        "torch>=2.4.0",
+        "fairchem-core>=1.0.0,<2.0.0",
+        "ase>=3.22",
+        "torch-geometric",
+        "torch-scatter",
+        "torch-sparse",
+        "torch-cluster",
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
@@ -348,11 +400,17 @@ def probe_dimenet(checkpoint: str = "DimeNet++-S2EF-OC20-All", system: str = "sl
 # SCN — OC20 SCN via fairchem-core 1.x
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "scn_env.py",
     [
-        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
-        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+        "torch>=2.4.0",
+        "fairchem-core>=1.0.0,<2.0.0",
+        "ase>=3.22",
+        "torch-geometric",
+        "torch-scatter",
+        "torch-sparse",
+        "torch-cluster",
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
@@ -365,11 +423,17 @@ def probe_scn(checkpoint: str = "SCN-S2EF-OC20-All+MD", system: str = "slab_co")
 # eSCN — OC20 eSCN via fairchem-core 1.x
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "escn_env.py",
     [
-        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
-        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+        "torch>=2.4.0",
+        "fairchem-core>=1.0.0,<2.0.0",
+        "ase>=3.22",
+        "torch-geometric",
+        "torch-scatter",
+        "torch-sparse",
+        "torch-cluster",
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
@@ -382,11 +446,17 @@ def probe_escn(checkpoint: str = "eSCN-L6-M2-Lay12-S2EF-OC20-All+MD", system: st
 # PaiNN — OC20 PaiNN via fairchem-core 1.x
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "painn_env.py",
     [
-        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
-        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+        "torch>=2.4.0",
+        "fairchem-core>=1.0.0,<2.0.0",
+        "ase>=3.22",
+        "torch-geometric",
+        "torch-scatter",
+        "torch-sparse",
+        "torch-cluster",
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
@@ -399,11 +469,17 @@ def probe_painn(checkpoint: str = "PaiNN-S2EF-OC20-All", system: str = "slab_co"
 # SchNet — OC20 SchNet via fairchem-core 1.x
 # -----------------------------------------------------------------------------
 
+
 @probe_image(
     "schnet_env.py",
     [
-        "torch>=2.4.0", "fairchem-core>=1.0.0,<2.0.0", "ase>=3.22",
-        "torch-geometric", "torch-scatter", "torch-sparse", "torch-cluster",
+        "torch>=2.4.0",
+        "fairchem-core>=1.0.0,<2.0.0",
+        "ase>=3.22",
+        "torch-geometric",
+        "torch-scatter",
+        "torch-sparse",
+        "torch-cluster",
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
@@ -415,6 +491,7 @@ def probe_schnet(checkpoint: str = "SchNet-S2EF-OC20-All", system: str = "slab_c
 # -----------------------------------------------------------------------------
 # UMA — FAIRChem multi-task universal model (small and medium)
 # -----------------------------------------------------------------------------
+
 
 @probe_image(
     "uma_env.py",

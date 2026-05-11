@@ -105,11 +105,7 @@ def main() -> int:
         atoms = build_system(args.system)
         t0 = stage(f"build_system:{args.system}:{len(atoms)}atoms", t0)
 
-        calc = (
-            setup(args.checkpoint, args.device)
-            if args.checkpoint
-            else setup(device=args.device)
-        )
+        calc = setup(args.checkpoint, args.device) if args.checkpoint else setup(device=args.device)
         t0 = stage("setup_calculator", t0)
 
         atoms.calc = calc

@@ -14,12 +14,12 @@ instead of mace_mp().
 """
 
 CHECKPOINTS = {
-    "mace-mp-0-small":   "small",
-    "mace-mp-0-medium":  "medium",
-    "mace-mp-0-large":   "large",
-    "mace-off23-small":  "off:small",
+    "mace-mp-0-small": "small",
+    "mace-mp-0-medium": "medium",
+    "mace-mp-0-large": "large",
+    "mace-off23-small": "off:small",
     "mace-off23-medium": "off:medium",
-    "mace-off23-large":  "off:large",
+    "mace-off23-large": "off:large",
 }
 
 
@@ -27,6 +27,8 @@ def setup(checkpoint: str, device: str = "cuda"):
     arg = CHECKPOINTS[checkpoint]
     if arg.startswith("off:"):
         from mace.calculators import mace_off
+
         return mace_off(model=arg[4:], device=device, default_dtype="float32")
     from mace.calculators import mace_mp
+
     return mace_mp(model=arg, device=device, default_dtype="float32")
