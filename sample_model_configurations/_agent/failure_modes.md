@@ -114,6 +114,130 @@ Bump to `gpu="A100"` for production smoke tests if needed.
 
 ---
 
+## ASE API migrations
+
+**Signature:** `ImportError: cannot import name 'ExpCellFilter' from 'ase.constraints'`
+**Cause:** ASE 3.23 moved `ExpCellFilter` from `ase.constraints` to `ase.filters`. Libraries
+pinned against older ASE (matgl, some FAIRChem versions) still import from the old path.
+**Fix:** Monkeypatch before importing the offending library:
+```python
+import ase.constraints
+if not hasattr(ase.constraints, "ExpCellFilter"):
+    from ase.filters import ExpCellFilter
+    ase.constraints.ExpCellFilter = ExpCellFilter
+```
+
+---
+
+## DGL / torchdata compatibility
+
+**Signature:** `ModuleNotFoundError: No module named 'torchdata.datapipes'` deep inside a DGL import.
+**Cause:** DGL 2.x imports `torchdata.datapipes` (via `dgl.graphbolt`) at `__init__` time,
+but `torchdata >= 0.7` removed `datapipes`. The packages co-resolve fine but fail at runtime.
+**Fix:** Stub the entire `dgl.graphbolt` subpackage before `import dgl` runs. matgl only uses
+DGL for graph construction — graphbolt is never called at inference time.
+```python
+import sys, types
+for _name in [
+    "dgl.graphbolt", "dgl.graphbolt.base", "dgl.graphbolt.dataloader",
+    "dgl.graphbolt.feature_fetcher", "dgl.graphbolt.minibatch_transformer",
+]:
+    if _name not in sys.modules:
+        sys.modules[_name] = types.ModuleType(_name)
+```
+
+---
+
+## matgl model registry / loading
+
+**Signature:** `KeyError` or `ValueError` when calling `matgl.load_model("M3GNet-MP-2021.2.8-PES")`
+or `matgl.load_model("TensorNet-MatPES-PBE-v2025.1-PES")`.
+**Cause:** matgl 1.0.0 dropped M3GNet-MP and the old TensorNet pretrained registry entries
+(they moved to HuggingFace under `materialyze`). `load_model` with a bare name only checks
+the GitHub manifest, which no longer lists these models.
+**Fix:** Use `huggingface_hub.snapshot_download(repo_id="materialyze/<model>")` to get a local
+path, then pass that path to `matgl.load_model(local_path)`.
+
+**Signature:** `TypeError: Normalizer' is not in safe_globals` or similar during `matgl.load_model`.
+**Cause:** PyTorch 2.6 changed `torch.load` default to `weights_only=True`; matgl's serialized
+models include custom classes that must be explicitly allowlisted.
+**Fix:**
+```python
+from matgl.data.transformer import Normalizer
+torch.serialization.add_safe_globals([Normalizer])
+```
+Call this before `matgl.load_model`.
+
+**Signature:** `pip install matgl` resolves but then `from matgl.apps._pes_pyg import ...` fails
+at runtime (ModuleNotFoundError).
+**Cause:** matgl 1.0.0 on PyPI doesn't include the `_pes_pyg` module needed for the
+HuggingFace TensorNet models. Requires matgl 2.x from the git main branch.
+**Fix:** Install matgl from git with `--no-deps` (its `lightning` dep can't resolve via uv):
+```
+uv pip install --system --no-deps "matgl @ git+https://github.com/materialsvirtuallab/matgl.git"
+```
+Then install the actual runtime deps separately: `torch`, `ase`, `pymatgen`, `monty`,
+`ruamel.yaml`, `scipy`, PyG packages.
+
+---
+
+## matgl backend split (DGL vs PyG)
+
+**Signature:** `ValueError: Invalid backend` when calling `matgl.set_backend("dgl")`.
+**Cause:** matgl 2.x (from git main or PyPI >=2.0) dropped DGL and is PyG-only.
+matgl 1.x (PyPI) is DGL-based. The two versions co-exist under the same package name.
+**Fix:** The old DGL-based models (M3GNet-MP-2021.2.8-PES) are no longer accessible
+via any current matgl version — the pretrained weights URL was removed. Use TensorNet
+or CHGNet as substitutes. For new PyG-based TensorNet models use matgl 2.x (git).
+
+**Signature:** `ValueError: No valid model found in pre-trained_models at
+https://github.com/materialsvirtuallab/matgl/raw/main/pretrained_models/`.
+**Cause:** matgl 1.x PyPI fetches pretrained weights from the matgl GitHub repo,
+but the `pretrained_models/` directory was removed (models moved to HuggingFace).
+This affects M3GNet-MP-2021.2.8-PES and other legacy models.
+**Fix:** No fix — the weights are gone from this path. Use materialyze HF models
+for TensorNet, or use CHGNet/Orb as M3GNet-PES substitutes.
+
+---
+
+## fairchem API version split
+
+**Signature:** `KeyError: '<model_name>'` when calling
+`pretrained_mlip.get_predict_unit("<old-ocp-model>")` in fairchem>=2.0.
+**Cause:** fairchem 2.0 is UMA-only; all OC20-era models (GemNet-OC, GemNet-T,
+EquiformerV2, SCN, eSCN, PaiNN, SchNet, DimeNet++) were dropped from the 2.0 API.
+**Fix:** Use `fairchem-core>=1.0.0,<2.0.0` and `OCPCalculator` with
+`model_name_to_local_file` for auto-download. Checkpoint names follow the pattern
+`GemNet-OC-Large-S2EF-OC20-All+MD` — inspect the ValueError message for the full list.
+
+**Signature:** `FileNotFoundError: [Errno 2] No such file or directory: '<model_name>'`
+when passing a model name string to `OCPCalculator(checkpoint_path=model)`.
+**Cause:** fairchem 1.x `OCPCalculator` expects a local file path, not a model name.
+**Fix:** Use `model_name_to_local_file(model, local_cache=cache_dir)` to download the
+checkpoint first, then pass the returned path to `OCPCalculator`.
+
+---
+
+## ASE adsorbate molecule in probe
+
+**Signature:** `KeyError: 'CO'` when calling `add_adsorbate(slab, "CO", ...)`.
+**Cause:** `add_adsorbate` treats a string argument as an element symbol, not a
+molecule name. "CO" is not in ASE's atomic number table.
+**Fix:** Pass an `Atoms` object instead: `add_adsorbate(slab, molecule("CO"), ...)`.
+
+---
+
+## torchmd-net lightning dependency
+
+**Signature:** `uv pip install torchmd-net` fails: "Because there are no versions of
+lightning and all versions of torchmd-net depend on lightning...".
+**Cause:** `lightning` (the PyPI package) has a dependency cycle or namespace conflict
+that prevents uv from resolving it, even though the package itself works fine.
+**Fix:** Same approach as matgl — install with `--no-deps` and list runtime deps
+(torch, ase, torch-geometric, torch-scatter, torch-sparse, torch-cluster) separately.
+
+---
+
 ## How to read this file when porting a new MLIP
 
 1. Try the build / probe.

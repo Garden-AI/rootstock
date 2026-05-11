@@ -16,9 +16,9 @@ OMol checkpoints expect `charge` and `spin` in `atoms.info`.
 """
 
 CHECKPOINTS = {
-    "esen-md-direct-all-omol":     "esen-md-direct-all-omol",
+    "esen-md-direct-all-omol": "esen-md-direct-all-omol",
     "esen-sm-conserving-all-omol": "esen-sm-conserving-all-omol",
-    "esen-sm-direct-all-omol":     "esen-sm-direct-all-omol",
+    "esen-sm-direct-all-omol": "esen-sm-direct-all-omol",
 }
 
 

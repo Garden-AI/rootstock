@@ -1,6 +1,6 @@
 # `_agent/` — workshop tooling
 
-Scaffolding around the *creation* of `<mlip>_env.py` configs. Hardware-agnostic
+Scaffolding around the *creation* of `<mlip>.py` configs. Hardware-agnostic
 — sits at the workshop root because the same probe/taxonomy applies whether
 the target is NVIDIA, AMD, or CPU-only.
 
@@ -18,17 +18,35 @@ the target is NVIDIA, AMD, or CPU-only.
 ## How `probe.py` is used
 
 `modal_app.py` mounts both the chosen config and `probe.py` into each MLIP's
-image at fixed paths (e.g., `/workshop/config.py`, `/workshop/probe.py`),
-then the probe function shells out to `python /workshop/probe.py --config
-/workshop/config.py ...`. The subprocess's stdout streams back to the local
-`modal run` log, so `STAGE` markers show up live.
+image at fixed paths (`/workshop/config.py`, `/workshop/probe.py`),
+then the probe function shells out:
+
+```
+python /workshop/probe.py --config /workshop/config.py \
+    --checkpoint <name> --system <molecule|crystal|slab_co> --device cuda
+```
+
+The subprocess's stdout streams back to the local `modal run` log, so `STAGE`
+markers show up live.
 
 If a stage doesn't fire within ~30s of the previous, the next stage is hung.
 That's the whole observability story — keep it boring.
 
+## Probe systems
+
+| `--system` | Atoms | Description |
+|------------|-------|-------------|
+| `molecule` | H₂O (3 atoms) | Good for organic MLIPs: ANI, MACE-OFF23 |
+| `crystal`  | Cu FCC bulk (8 atoms) | Good for universal inorganic potentials |
+| `slab_co`  | Cu(111) 2×2×3 + CO (14 atoms) | Good for OC20 catalysis models |
+
+The CO adsorbate in `slab_co` is built as `molecule("CO")` — an `Atoms` object,
+not an element string. Passing a string "CO" to `add_adsorbate` hits
+`KeyError: 'CO'` (see `failure_modes.md`).
+
 ## What doesn't live here
 
-- `<mlip>_env.py` configs — those are the public artifact; they live in
+- `<mlip>.py` configs — those are the public artifact; they live in
   `nvidia_configs/` (or future `*_configs/` subfolders).
 - The Modal app itself — `modal_app.py` is a sibling of this folder.
 - Rootstock CLI / server / worker code — that's `rootstock/` at the repo

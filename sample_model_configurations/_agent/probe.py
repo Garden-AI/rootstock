@@ -44,13 +44,16 @@ def build_system(kind: str):
     if kind == "crystal":
         from ase.build import bulk
 
-        return bulk("Cu", "fcc", a=3.6) * (2, 2, 2)
+        atoms = bulk("Cu", "fcc", a=3.6) * (2, 2, 2)
+        atoms.positions[0, 0] += 0.05
+        atoms.positions[1, 1] -= 0.03
+        return atoms
 
     if kind == "slab_co":
-        from ase.build import add_adsorbate, fcc111
+        from ase.build import add_adsorbate, fcc111, molecule
 
         slab = fcc111("Cu", size=(2, 2, 3), vacuum=10.0)
-        add_adsorbate(slab, "CO", height=2.0, position="ontop")
+        add_adsorbate(slab, molecule("CO"), height=2.0, position="ontop")
         return slab
 
     raise ValueError(f"Unknown --system kind: {kind!r}")
@@ -105,11 +108,7 @@ def main() -> int:
         atoms = build_system(args.system)
         t0 = stage(f"build_system:{args.system}:{len(atoms)}atoms", t0)
 
-        calc = (
-            setup(args.checkpoint, args.device)
-            if args.checkpoint
-            else setup(device=args.device)
-        )
+        calc = setup(args.checkpoint, args.device) if args.checkpoint else setup(device=args.device)
         t0 = stage("setup_calculator", t0)
 
         atoms.calc = calc
