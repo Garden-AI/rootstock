@@ -13,7 +13,9 @@
 """UMA env — hosts Meta's UMA foundation model via FAIRChem."""
 
 CHECKPOINTS = {
+    "uma-s-1": "uma-s-1",
     "uma-s-1p1": "uma-s-1p1",
+    "uma-m-1p1": "uma-m-1p1",
 }
 
 

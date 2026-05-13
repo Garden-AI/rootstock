@@ -10,6 +10,8 @@
 
 CHECKPOINTS = {
     "orb-v2": "orb-v2",
+    "orb-d3-v2": "orb-d3-v2",
+    "orb-mptraj-only-v2": "orb-mptraj-only-v2",
 }
 
 
