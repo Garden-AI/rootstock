@@ -255,10 +255,22 @@ def probe_ani(checkpoint: str = "ani-2x", system: str = "molecule"):
 
 @probe_image(
     "orb.py",
-    ["orb-models>=0.4.0", "ase>=3.22", "torch>=2.0"],
+    ["orb-models>=0.4.0,<0.5", "ase>=3.22", "torch>=2.0"],
 )
 def probe_orb(checkpoint: str = "orb-v2", system: str = "crystal"):
-    """Probe an Orb checkpoint. Default: orb-v2 on Cu bulk."""
+    """Probe an Orb v2 checkpoint. Default: orb-v2 on Cu bulk."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+@probe_image(
+    "orb_v3.py",
+    ["orb-models>=0.6.2", "ase>=3.25", "torch>=2.8"],
+    python_version="3.12",
+)
+def probe_orb_v3(
+    checkpoint: str = "orb-v3-conservative-inf-omat", system: str = "crystal"
+):
+    """Probe an Orb v3 checkpoint. Default: conservative-inf-omat on Cu bulk."""
     return _run_probe_subprocess(checkpoint, system)
 
 
