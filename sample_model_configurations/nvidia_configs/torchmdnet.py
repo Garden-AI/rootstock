@@ -8,7 +8,6 @@
 #     "torch-sparse",
 #     "torch-cluster",
 # ]
-# Note: torchmd-net must be installed with --no-deps (lightning dep unresolvable via uv)
 #
 # [tool.uv]
 # find-links = ["https://data.pyg.org/whl/torch-2.4.0+cu121.html"]
