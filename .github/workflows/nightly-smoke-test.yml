@@ -1,0 +1,29 @@
+name: Nightly smoke-test
+
+on:
+  schedule:
+    - cron: "0 7 * * *"   # 07:00 UTC, off-peak for US clusters
+  workflow_dispatch:       # manual trigger for debugging
+
+jobs:
+  smoke-test:
+    strategy:
+      fail-fast: false      # one cluster's failure shouldn't cancel others
+      matrix:
+        # Expand as endpoints come online: [delta, della, sophia, perlmutter, frontier]
+        cluster: [delta]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60     # smoke-test is minutes; 60 absorbs queue waits
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install groundhog-hpc
+        run: uv tool install --python 3.13 groundhog-hpc@latest
+
+      - name: Dispatch smoke-test to ${{ matrix.cluster }}
+        env:
+          GLOBUS_COMPUTE_CLIENT_ID: ${{ secrets.GLOBUS_COMPUTE_CLIENT_ID }}
+          GLOBUS_COMPUTE_CLIENT_SECRET: ${{ secrets.GLOBUS_COMPUTE_CLIENT_SECRET }}
+        run: hog run scripts/nightly_smoke_test.py main -- ${{ matrix.cluster }}
