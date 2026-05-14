@@ -3,11 +3,24 @@
 # dependencies = ['globus-compute-sdk<4.7', 'rootstock']
 #
 # [tool.uv]
-# exclude-newer = "2026-05-14T20:19:30Z"
 # python-preference = "managed"
 #
 # [tool.hog.delta]
-# endpoint = "67a5485a-4084-41f0-9863-2d5de388276e"
+# endpoint = "c2381fa2-ff0f-460e-b6ac-8286086f122e"
+# account = "bhhl-delta-gpu"                              # Type: string
+# scheduler_options = "#SBATCH --gpus-per-node=1"         # Type: string
+# # qos =                                                 # Type: string
+# # walltime =                                            # Type: string
+# # exclusive =                                           # Type: boolean
+# # partition =                                           # Type: string
+# # constraint =                                          # Type: string
+# # max_blocks =                                          # Type: integer
+# # min_blocks =                                          # Type: integer
+# # init_blocks =                                         # Type: integer
+# # mem_per_node =                                        # Type: integer
+# # cores_per_node =                                      # Type: integer
+# # endpoint_setup =                                      # Type: string
+# # max_workers_per_node =                                # Type: integer
 # ///
 
 import sys

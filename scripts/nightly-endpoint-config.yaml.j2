@@ -1,0 +1,37 @@
+# nightly smoke-test workflow. Renders to ~/.globus_compute/<endpoint>/config.yaml
+# on a cluster's login/workflow node. Companion to scripts/nightly_smoke_test.py.
+#
+# Defaults are tuned for the smoke-test workload: one worker per node, one GPU
+# per worker, on-demand blocks (init_blocks=0) so we don't burn allocation
+# between nightly runs. Override per-cluster as needed — e.g. NCSA Delta:
+#
+#   account: bchg-delta-gpu
+#   partition: gpuA100x4
+#   ifname: <verify on a gpuA100x4 node via `ip -br addr`>
+
+endpoint_setup: {{ endpoint_setup | default() }}
+
+engine:
+    type: GlobusComputeEngine
+    max_workers_per_node: {{ max_workers_per_node | default(1) }}
+
+    address:
+        type: address_by_hostname
+
+    provider:
+        type: SlurmProvider
+        account: {{ account | default() }}
+        constraint: {{ constraint | default() }}
+        cores_per_node: {{ cores_per_node | default(8) }}
+        exclusive: {{ exclusive | default(False) }}
+        launcher:
+           type: SrunLauncher
+        mem_per_node: {{ mem_per_node | default(48) }}
+        partition: {{ partition | default() }}
+        qos: {{ qos | default() }}
+        scheduler_options: "{{ scheduler_options | default('#SBATCH --gpus-per-node=1') }}"
+        walltime: "{{ walltime | default('00:30:00') }}"
+
+        init_blocks: {{ init_blocks | default(0) }}
+        min_blocks: {{ min_blocks | default(0) }}
+        max_blocks: {{ max_blocks | default(1) }}
