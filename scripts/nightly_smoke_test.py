@@ -6,7 +6,7 @@
 # python-preference = "managed"
 #
 # [tool.hog.delta]
-# endpoint = "c2381fa2-ff0f-460e-b6ac-8286086f122e"
+# endpoint = "27687af7-a20e-477a-8d4e-b5a7a097f864"
 # account = "bhhl-delta-gpu"                              # Type: string
 # scheduler_options = "#SBATCH --gpus-per-node=1"         # Type: string
 # # qos =                                                 # Type: string
@@ -28,7 +28,7 @@ import sys
 import groundhog_hpc as hog
 
 
-@hog.function()
+@hog.function(endpoint="delta")
 def smoke_test(root: str | None = None) -> dict:
     import subprocess
 
@@ -40,9 +40,38 @@ def smoke_test(root: str | None = None) -> dict:
     return {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr}
 
 
+@hog.function(endpoint="delta")
+def hello_endpoint():
+    import getpass
+    import platform
+    import socket
+    import time
+
+    return {
+        "hostname": socket.gethostname(),
+        "user": getpass.getuser(),
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "epoch": time.time(),
+    }
+
+
 @hog.harness()
-def main(target: str = "delta", root: str | None = None) -> int:
-    result = smoke_test.remote(root, endpoint=target)
+def hello(endpoint: str = "delta"):
+    from pprint import pprint
+
+    result = hello_endpoint.remote(endpoint=endpoint)
+    pprint(result)
+    return
+
+
+@hog.harness()
+def main(target: str | None = None, root: str | None = None) -> int:
+    if target:
+        result = smoke_test.remote(root, endpoint=target)
+    else:
+        result = smoke_test.remote(root)
+        
 
     print(result["stdout"])
     print(result["stderr"], file=sys.stderr)

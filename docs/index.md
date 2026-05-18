@@ -71,4 +71,12 @@ Swap the underlying potential by changing `checkpoint`: e.g. `checkpoint="uma-s-
 
     [:octicons-arrow-right-24: Cluster Setup](cluster-setup.md)
 
+-   :material-test-tube:{ .lg .middle } **Nightly Smoke-Testing**
+
+    ---
+
+    Keep a cluster's manifest current with automated nightly checks.
+
+    [:octicons-arrow-right-24: Nightly Smoke-Testing](nightly-smoke-testing.md)
+
 </div>
