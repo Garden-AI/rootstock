@@ -2,14 +2,17 @@
 
 Rootstock makes it easy to use machine-learned interatomic potentials (MLIPs) on national lab and academic HPC clusters. Researchers can use multiple MLIPs (MACE, CHGNet, UMA, TensorNet, and others) with ASE or LAMMPS without managing the conflicting Python environments that each MLIP requires.
 
-Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment behind the scenes. Swapping models is a one-line change, even if the MLIPs require different Python or library versions. Rootstock also integrates with [LAMMPS](https://www.lammps.org/) through a `fix` with any supported MLIP.
+Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment behind the scenes. Swapping models is a one-line change, even if the MLIPs require different Python or library versions. Rootstock also integrates with [LAMMPS](https://www.lammps.org/) through a `fix`.
 
 ## Status
 
-Rootstock is **early-stage software under active development.** It is currently deployed on two HPC clusters:
+Rootstock is **early-stage software under active development.** It is currently deployed (or being deployed) on the following HPC clusters:
 
 - **Della** — Princeton Research Computing
-- **Sophia** — Argonne Leadership Computing Facility (ALCF)
+- **Sophia** and **Polaris** — Argonne Leadership Computing Facility (ALCF)
+- **Delta** — Argonne Leadership Computing Facility (NCSA)
+- **Frontier** - Oak Ridge Leadership Computing Facility (OLCF)
+- **Perlmutter** - National Energy Research Scientific Computing Center (NERSC)
 
 We are looking for additional clusters and early users to help shape the tool. If you're interested in trying Rootstock on your cluster or for a specific project, please reach out to Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
 
