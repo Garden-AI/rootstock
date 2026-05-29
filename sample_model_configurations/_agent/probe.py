@@ -38,7 +38,10 @@ def build_system(kind: str):
         from ase.build import molecule
 
         atoms = molecule("H2O")
-        atoms.info = {"charge": 0, "spin": 1}
+        # charge/spin for OMol-style models; external_field (zero — a physical
+        # no-op) for polar/electrostatic models like MACE-POLAR. Models that
+        # don't read a key simply ignore it.
+        atoms.info = {"charge": 0, "spin": 1, "external_field": [0.0, 0.0, 0.0]}
         return atoms
 
     if kind == "crystal":

@@ -26,6 +26,26 @@ output.
 **Fix:** Pass `--verbose` to `rootstock install` so uv prints per-package
 download progress. Not a real failure; just noisy.
 
+**Signature:** `No solution found ... Because the current Python version
+(3.10.x) does not satisfy Python>=3.11,<3.14 and fairchem-core==2.20.0
+depends on Python>=3.11`.
+**Cause:** fairchem-core 2.20+ dropped Python 3.10. The probe image default
+(`python_version="3.10"`) and a config `requires-python = ">=3.10"` no
+longer resolve.
+**Fix:** Set `python_version="3.11"` on the `@probe_image(...)` and bump the
+config's PEP 723 `requires-python = ">=3.11"`. (eSEN's pinned
+`fairchem-core>=2.0.0` still builds on 3.10; only the 2.20 envs need 3.11.)
+
+**Signature:** `Failed to download and build '<name> @ git+...'` →
+`Package metadata name '<other-name>' does not match given name '<name>'`.
+**Cause:** A git/VCS requirement's PEP 508 name must match the distribution
+name the repo *declares*, not the repo slug. `graph_electrostatics` (repo) is
+published as `graph-longrange`.
+**Fix:** Use the declared distribution name in the requirement:
+`graph-longrange @ git+https://github.com/WillBaldwin0/graph_electrostatics.git`.
+The imported module (`graph_longrange`) is a third, separate name — don't
+assume any of the three match.
+
 ---
 
 ## HuggingFace auth & cache
@@ -34,7 +54,7 @@ download progress. Not a real failure; just noisy.
 model download.
 **Cause:** `HF_TOKEN` not set in container, or token lacks gated-repo
 permission, or model license not accepted.
-**Fix:** Add `secrets=[modal.Secret.from_name("huggingface-token")]` to the
+**Fix:** Add `secrets=[modal.Secret.from_name("huggingface")]` to the
 modal function. Verify token has gated access for the specific model org.
 
 **Signature:** Model re-downloads on every run despite previous build

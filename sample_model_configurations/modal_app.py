@@ -54,7 +54,7 @@ AGENT = HERE / "_agent"
 IMG_CONFIG = "/workshop/config.py"
 IMG_PROBE = "/workshop/probe.py"
 
-HF_SECRET = modal.Secret.from_name("huggingface-token")
+HF_SECRET = modal.Secret.from_name("huggingface")
 
 
 def probe_image(
@@ -142,6 +142,21 @@ def _run_probe_subprocess(checkpoint: str, system: str, device: str = "cuda") ->
 )
 def probe_esen(checkpoint: str = "esen-md-direct-all-omol", system: str = "molecule"):
     """Probe an eSEN checkpoint. Default: OMol25 H2O."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
+# AllScAIP — FAIRChem scalable attention MLIP (OMol25, energy-conserving)
+# -----------------------------------------------------------------------------
+
+
+@probe_image(
+    "allscaip.py",
+    ["fairchem-core>=2.20", "ase>=3.22", "torch>=2.4.0"],
+    python_version="3.11",
+)
+def probe_allscaip(checkpoint: str = "allscaip-md-conserving-all-omol", system: str = "molecule"):
+    """Probe the AllScAIP energy-conserving OMol25 model on H2O."""
     return _run_probe_subprocess(checkpoint, system)
 
 
@@ -235,6 +250,30 @@ def probe_mace(checkpoint: str = "mace-mp-0-medium", system: str = "crystal"):
 
 
 # -----------------------------------------------------------------------------
+# MACE-POLAR-1 — electrostatic/polarizable MACE foundation models (OMol25)
+# -----------------------------------------------------------------------------
+# Not in the PyPI mace-torch release yet: installs mace from git main plus
+# graph_electrostatics. Uses the mace_polar() loader; the molecule probe system
+# supplies the required charge/spin/external_field info keys.
+
+
+@probe_image(
+    "mace_polar.py",
+    [
+        "ase>=3.22",
+        "torch>=2.4.0,<2.10",
+        "mace-torch @ git+https://github.com/ACEsuit/mace.git@main",
+        "graph-longrange @ git+https://github.com/WillBaldwin0/graph_electrostatics.git",
+    ],
+    python_version="3.11",
+    apt_packages=["git"],
+)
+def probe_mace_polar(checkpoint: str = "mace-polar-1-l", system: str = "molecule"):
+    """Probe MACE-POLAR-1-L on H2O. Use --checkpoint mace-polar-1-m for the medium variant."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+# -----------------------------------------------------------------------------
 # ANI-2x — TorchANI neural network potential for organic molecules
 # -----------------------------------------------------------------------------
 
@@ -267,9 +306,7 @@ def probe_orb(checkpoint: str = "orb-v2", system: str = "crystal"):
     ["orb-models>=0.6.2", "ase>=3.25", "torch>=2.8"],
     python_version="3.12",
 )
-def probe_orb_v3(
-    checkpoint: str = "orb-v3-conservative-inf-omat", system: str = "crystal"
-):
+def probe_orb_v3(checkpoint: str = "orb-v3-conservative-inf-omat", system: str = "crystal"):
     """Probe an Orb v3 checkpoint. Default: conservative-inf-omat on Cu bulk."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -376,7 +413,9 @@ def probe_gemnet(checkpoint: str = "gemnet-oc-large-s2ef-oc20-all-md", system: s
     ],
     find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
 )
-def probe_equiformer(checkpoint: str = "equiformer-v2-153m-s2ef-oc20-all-md", system: str = "slab_co"):
+def probe_equiformer(
+    checkpoint: str = "equiformer-v2-153m-s2ef-oc20-all-md", system: str = "slab_co"
+):
     """Probe an EquiformerV2 OC20 checkpoint on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
@@ -503,8 +542,8 @@ def probe_schnet(checkpoint: str = "schnet-s2ef-oc20-all", system: str = "slab_c
 
 @probe_image(
     "uma.py",
-    ["torch>=2.4.0", "fairchem-core>=2.0.0", "ase>=3.22", "torch-geometric"],
-    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+    ["fairchem-core>=2.20", "ase>=3.22", "torch>=2.4.0"],
+    python_version="3.11",
 )
 def probe_uma_small(checkpoint: str = "uma-s-1p1", system: str = "crystal"):
     """Probe UMA Small on OMAT-style bulk materials."""
@@ -513,8 +552,18 @@ def probe_uma_small(checkpoint: str = "uma-s-1p1", system: str = "crystal"):
 
 @probe_image(
     "uma.py",
-    ["torch>=2.4.0", "fairchem-core>=2.0.0", "ase>=3.22", "torch-geometric"],
-    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
+    ["fairchem-core>=2.20", "ase>=3.22", "torch>=2.4.0"],
+    python_version="3.11",
+)
+def probe_uma_1p2(checkpoint: str = "uma-s-1p2", system: str = "crystal"):
+    """Probe UMA Small v1.2 (latest, fixes the uma-s-1 extensivity bug)."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+@probe_image(
+    "uma.py",
+    ["fairchem-core>=2.20", "ase>=3.22", "torch>=2.4.0"],
+    python_version="3.11",
 )
 def probe_uma_medium(checkpoint: str = "uma-m-1p1", system: str = "crystal"):
     """Probe UMA Medium on OMAT-style bulk materials."""

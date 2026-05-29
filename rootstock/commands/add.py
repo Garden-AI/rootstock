@@ -86,9 +86,17 @@ def _run_download(
         )
 
         env = {**os.environ, **get_model_cache_env(root, cache_root)}
+        # Run from env_dir so the implicit "" entry that `python -c` puts on
+        # sys.path resolves to the env directory (which holds only env_source.py
+        # and the venv internals) rather than the caller's CWD. Without this, a
+        # config whose top-level import name matches a file in the caller's CWD
+        # — e.g. running from environments/ where mace.py lives while adding a
+        # checkpoint whose setup() does `import mace` — shadows the installed
+        # package and fails with "'mace' is not a package".
         result = subprocess.run(
             [str(env_python), "-c", script],
             env=env,
+            cwd=str(env_dir),
             capture_output=True,
             text=True,
         )
