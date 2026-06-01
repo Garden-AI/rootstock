@@ -68,10 +68,11 @@ def hello(endpoint: str = "delta"):
 @hog.harness()
 def main(target: str | None = None, root: str | None = None) -> int:
     if target:
-        result = smoke_test.remote(root, endpoint=target)
+        fut = smoke_test.submit(root, endpoint=target)
     else:
-        result = smoke_test.remote(root)
-        
+        fut = smoke_test.submit(root)
+
+    result = fut.result()
 
     print(result["stdout"])
     print(result["stderr"], file=sys.stderr)
