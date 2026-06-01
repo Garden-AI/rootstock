@@ -7,6 +7,7 @@ on:
 
 jobs:
   smoke-test:
+    environment: smoke-tests   # required to access the env-scoped Globus secrets
     strategy:
       fail-fast: false      # one cluster's failure shouldn't cancel others
       matrix:
