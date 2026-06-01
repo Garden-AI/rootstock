@@ -3,7 +3,7 @@
 # dependencies = [
 #     "nequip>=0.6.0",
 #     "ase>=3.22",
-#     "torch>=2.0",
+#     "torch>=2.4.0,<2.5",
 #     "torch-geometric",
 # ]
 #
@@ -23,9 +23,12 @@ Note: NequIP is system-specific (not universal). The checkpoint must match
 the element set of your system.
 """
 
-CHECKPOINTS = {
-    "nequip-deployed-model": "deployed_nequip.pth",
-}
+# NequIP is system-specific: there is no universal pretrained checkpoint to
+# ship. Users supply their own model deployed with `nequip-deploy`, whose file
+# must be named `*.nequip.pth` or `*.nequip.pt2` (the loader rejects other
+# names). Register one with its canonical id → path, e.g.:
+#     "my-system-nequip": "/path/to/my_model.nequip.pth",
+CHECKPOINTS: dict[str, str] = {}
 
 
 def setup(checkpoint: str, device: str = "cuda"):
