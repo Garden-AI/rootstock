@@ -1,0 +1,45 @@
+# nightly smoke-test workflow. Companion to scripts/nightly_smoke_test.py.
+#
+# Defaults are tuned for the smoke-test workload: one worker per node, one GPU
+# per worker, on-demand blocks (init_blocks=0) so we don't burn allocation
+# between nightly runs. Override per-cluster as needed — e.g. NCSA Delta:
+#
+#   account: bhhl-delta-gpu
+#   partition: gpuA100x4
+#   ifname: eth1
+#
+# `ifname` is the network interface ON THE LOGIN NODE the endpoint runs on; the
+# interchange advertises that interface's address so compute-node workers can
+# connect back to register. It MUST be verified per-cluster: run `ip -br addr`
+# on the login node and pick the interface with a routable (internal,
+# non-link-local) IPv4. Do NOT use `address_by_hostname` — on some clusters
+# (Delta) the login hostname resolves only to non-routable link-local IPv6
+# (fe80::), so workers silently fail to register and jobs are marked MISSING.
+
+endpoint_setup: {{ endpoint_setup | default() }}
+
+engine:
+    type: GlobusComputeEngine
+    max_workers_per_node: {{ max_workers_per_node | default(1) }}
+
+    address:
+        type: address_by_interface
+        ifname: {{ ifname | default('eth1') }}
+
+    provider:
+        type: SlurmProvider
+        account: {{ account | default() }}
+        constraint: {{ constraint | default() }}
+        cores_per_node: {{ cores_per_node | default(8) }}
+        exclusive: {{ exclusive | default(False) }}
+        launcher:
+           type: SrunLauncher
+        mem_per_node: {{ mem_per_node | default(48) }}
+        partition: {{ partition | default() }}
+        qos: {{ qos | default() }}
+        scheduler_options: "{{ scheduler_options | default('#SBATCH --gpus-per-node=1') }}"
+        walltime: "{{ walltime | default('00:30:00') }}"
+
+        init_blocks: {{ init_blocks | default(0) }}
+        min_blocks: {{ min_blocks | default(0) }}
+        max_blocks: {{ max_blocks | default(1) }}

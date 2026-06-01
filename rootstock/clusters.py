@@ -40,6 +40,9 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
         root=Path("/global/cfs/cdirs/m4845/rootstock"),
         cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),
     ),
+    "delta": Cluster(
+        root=Path("/work/hdd/data/rootstock")
+    )
 }
 
 def get_cluster(cluster: str) -> Cluster:

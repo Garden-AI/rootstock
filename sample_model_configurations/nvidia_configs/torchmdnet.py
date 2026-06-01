@@ -1,8 +1,9 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
+#     "torchmd-net",
 #     "ase>=3.22",
-#     "torch>=2.0",
+#     "torch>=2.4.0,<2.5",
 #     "torch-geometric",
 #     "torch-scatter",
 #     "torch-sparse",
