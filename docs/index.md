@@ -80,7 +80,7 @@ To deploy Rootstock on your cluster or use it for a specific project, contact Wi
 
     ---
 
-    See what is deployed on each cluster and copy a working config.
+    Where Rootstock runs, plus the live per-cluster manifest.
 
     [:octicons-arrow-right-24: Clusters](clusters.md)
 

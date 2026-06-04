@@ -166,8 +166,7 @@ If a node has both network access and a GPU, run without `--no-verify` to do eve
     `smoke-test` calls each env's `setup()` with no extra kwargs. A checkpoint that only works with non-default kwargs (e.g., a UMA checkpoint that needs `task=omol`) will appear failing in nightly smoke-test even though `add` succeeded. The remedy is to make the preferred kwargs the env's default in the env file.
 
 !!! note "Finding Environment Files"
-    See the [Example Configs](clusters.md) page for environment files that are known to work — you can use these as a starting point for your cluster.
-    Some minor tweaks may be required depending on site specific requirements.
+    The live dashboard manifest exposes the environment source file for every deployed env; see the [Clusters](clusters.md) page. Copy a working source as a starting point for your cluster — some tweaks may be required for site-specific requirements.
 
 ## Step 5: Register with the Dashboard (Optional)
 

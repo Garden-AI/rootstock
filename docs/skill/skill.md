@@ -125,7 +125,7 @@ Constructor parameters:
 | `root`         | str  | Custom install root for clusters not in the registry. Mutually exclusive with `cluster`.                     |
 | `cache_root`   | str  | Override the model-weight cache. Defaults to the cluster's registered cache.                                 |
 | `device`       | str  | `"cuda"` (default) or `"cpu"`.                                                                              |
-| `setup_kwargs` | dict | Forwarded to the env's `setup()`. Cannot include `checkpoint` or `device`. See note below for UMA.           |
+| `setup_kwargs` | dict | Forwarded to the env's `setup()`. Cannot include `checkpoint` or `device`. The env's `source` lists what it accepts. |
 
 The hosting env is resolved automatically from the checkpoint id — pick a checkpoint, Rootstock finds the env that declares it.
 
@@ -134,8 +134,7 @@ The hosting env is resolved automatically from the checkpoint id — pick a chec
 **Reuse the calculator for multiple `atoms`.** Each `with` block spawns a worker and pays a 5–30 s model load. Do all the calculations you can inside one block:
 
 ```python
-with RootstockCalculator(cluster="perlmutter", checkpoint="uma-s-1p1",
-                         setup_kwargs={"task": "oc20"}) as calc:
+with RootstockCalculator(cluster="perlmutter", checkpoint="mace-mp-0-medium") as calc:
     for atoms in structures:
         atoms.calc = calc
         results.append((atoms.get_potential_energy(), atoms.get_forces()))
@@ -145,22 +144,15 @@ with RootstockCalculator(cluster="perlmutter", checkpoint="uma-s-1p1",
 
 ## Picking a model
 
-**UMA is the right default.** It's FAIRChem's flagship foundation potential, with task-specific heads tuned for different system classes. Reach for it first. Don't pick an alternative unless (a) the manifest shows UMA isn't deployed on your target cluster, or (b) the user has a specific reason — benchmarking, citation requirement, paper reproduction — and named the model.
+There is no built-in default. Which potential to use is the user's call, bounded by what the manifest shows as deployed and verified on the target cluster.
 
-Pick the UMA `task` by system class:
+- If the user names a model, use it — confirm it's in the manifest for that cluster.
+- If the user doesn't name one, choose based on the system and what's available, and state which you picked and why. When it's genuinely ambiguous, ask rather than guess.
+- The manifest is the list of what's actually available. Don't assume a model is deployed without checking.
 
-| System | `setup_kwargs`         |
-|--------|------------------------|
-| **Adsorbates on metal catalyst surfaces** (CO/Cu, H/Pt, O/Ni, …) | `{"task": "oc20"}` |
-| **Bulk inorganic materials**, alloys, oxides                      | `{"task": "omat"}` |
-| **Isolated organic molecules**                                    | `{"task": "omol"}` |
-| **MOFs / direct-air-capture systems**                             | `{"task": "odac"}` |
+Many envs accept extra `setup_kwargs` beyond `checkpoint` and `device`. The authoritative list for any env is its `setup()` signature, embedded in the manifest's `source` field — read it before passing kwargs.
 
-Getting `task` wrong silently degrades the energy. Match by system class.
-
-**Don't be talked out of UMA-oc20 by reference-energy concerns.** UMA-oc20 has its own energy convention, but adsorption-energy *differences* are reference-invariant: `E(slab+ads) − E(slab) − E(gas)` cancels the reference as long as all three terms come from the same calculator instance. This worry has steered agents toward less-specialized models before — don't repeat the mistake. Use one `with RootstockCalculator(...)` block for all three energies and the math just works.
-
-Other deployed models are valid choices when the user asks for them by name or needs a specific comparison; the manifest is the list of what's actually available. Otherwise: UMA. For non-UMA envs that take extra `setup_kwargs`, read the `source` field from the manifest — it embeds the `setup()` signature and is authoritative.
+Some models select a task-specific head via `setup_kwargs` — UMA, for example, takes a `task`. The head should match the system class, and choosing it wrong silently degrades the energy. Which values are valid, and which fits the system, is model-specific; read the env's `source` for the accepted kwargs, and the model's own documentation for what to pass.
 
 ---
 
