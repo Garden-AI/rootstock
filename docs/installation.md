@@ -5,7 +5,9 @@ Users install only the lightweight `rootstock` package. The heavy ML dependencie
 ## Requirements
 
 - Python 3.10 or later
-- Access to a supported HPC cluster (Della, Sophia, or a custom installation)
+- Access to a cluster where Rootstock is deployed, or a custom install root
+
+For current cluster and model coverage, see the [Matter Model Almanac](https://garden-ai.github.io/almanac) and the [deployed clusters](clusters.md) page.
 
 ## Install with pip
 
@@ -26,11 +28,10 @@ After installation, verify that Rootstock is working:
 ```python
 from rootstock import RootstockCalculator
 
-# Verify import works
-print(f"Rootstock installed successfully")
+print("Rootstock installed successfully")
 ```
 
-You can also check available clusters from the command line:
+You can also resolve a cluster's install root from the command line:
 
 ```bash
 rootstock resolve --cluster della --json

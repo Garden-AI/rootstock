@@ -112,6 +112,7 @@ This will interactively prompt you for:
 | **maintainer name / email** | Identifies the maintainer for this installation |
 
 !!! tip "Dashboard Integration"
+    If you provide API credentials, Rootstock pushes the cluster manifest to the dashboard automatically whenever you install or update environments. You can skip this and run a deployment that's never published.
 
 ## Step 3: Install Environments
 
@@ -229,12 +230,11 @@ After setup, the Rootstock root directory will look like this:
 {root}/
 ├── .python/                # uv-managed Python interpreters
 ├── environments/           # Environment source files (*.py with PEP 723 metadata)
-│   ├── mace_env.py
-│   ├── chgnet_env.py
-│   ├── uma_env.py
-│   └── tensornet_env.py
+│   ├── mace.py
+│   ├── uma.py
+│   └── tensornet.py
 ├── envs/                   # Pre-built virtual environments
-│   ├── mace_env/
+│   ├── mace/
 │   │   ├── bin/python
 │   │   ├── lib/python3.11/site-packages/
 │   │   └── env_source.py
@@ -253,12 +253,15 @@ To update an environment with new dependencies:
 
 ```bash
 # Rebuild the venv (drops verification timestamps for that env's checkpoints)
-rootstock install mace_env.py --force
+rootstock install mace.py --force
 
-# Re-verify checkpoints after the rebuild
-rootstock add mace small
-rootstock add mace medium
-rootstock add mace large
+# Re-verify checkpoints after the rebuild, by canonical id
+rootstock add mace-mp-0-small
+rootstock add mace-mp-0-medium
+rootstock add mace-mp-0-large
+
+# Or re-verify every fetched checkpoint at once
+rootstock smoke-test
 
 # Push updated manifest
 rootstock manifest push

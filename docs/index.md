@@ -1,21 +1,32 @@
 # Rootstock
 
-Rootstock makes it easy to use machine-learned interatomic potentials (MLIPs) on HPC clusters. Researchers can use multiple MLIPs (MACE, CHGNet, UMA, TensorNet, and others) with ASE or LAMMPS without managing conflicting Python environments.
+Rootstock lets you run many machine-learned interatomic potentials (MLIPs) on an HPC cluster from a single [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator. Each MLIP family runs in its own pre-built, isolated Python environment that a maintainer has already installed and verified on the cluster, so you never resolve conflicting Python or library versions yourself. Swapping models is a one-line change to the `checkpoint` argument.
 
-Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment. Swapping models is a one-line change, even when MLIPs require different Python or library versions. Rootstock also integrates with [LAMMPS](https://www.lammps.org/) through a `fix` command for any supported MLIP.
+## How it works
 
-## Status
+Three figures give the mental model: how you use Rootstock, how it runs a model, and how models get added.
 
-Rootstock is **early-stage software under active development.** It is currently deployed on two HPC clusters:
+### How do I use Rootstock?
 
-- **Della** — Princeton Research Computing
-- **Sophia** — Argonne Leadership Computing Facility (ALCF)
+Browse the [Matter Model Almanac](https://garden-ai.github.io/almanac) to find a model that is installed and verified on your cluster, then point a `RootstockCalculator` at it. Each model is already installed in an isolated environment, so changing models does not change your own environment.
 
-We are seeking additional clusters and early users to help shape the tool. If you are interested in deploying Rootstock on your cluster or using it for a specific project, contact Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
+![Rootstock user journey: browse the almanac, then run a checkpoint on a cluster](assets/rootstock_user_journey.png)
+
+### How does Rootstock run a model?
+
+You call the calculator from the lightweight `rootstock` library, which carries no model dependencies. Rootstock starts the model in a managed subprocess on the same GPU node, in the environment built for that cluster, loading weights from a cluster-local cache. Positions and forces are exchanged over a local Unix socket using the i-PI protocol. The model is loaded once and kept warm across calls.
+
+![Rootstock runtime: a lightweight client proxies to an isolated model subprocess over a Unix socket](assets/rootstock_runtime.png)
+
+### How does Rootstock add models?
+
+Maintainers define each model family as a Python file: a PEP 723 dependency list, a `CHECKPOINTS` table of canonical ids, and a `setup()` loader that returns an ASE calculator. They build the isolated environment and verify it on a GPU node, and automated re-verification catches regressions over time.
+
+![Rootstock model installation: define a model file, build the env, verify on a GPU node](assets/rootstock_model_installation.png)
 
 ## Quick Start
 
-Rootstock is designed for HPC clusters where it has been set up by a system maintainer. The code below runs in your normal Python environment — inside a SLURM job script, an interactive session, or a Jupyter notebook. Rootstock handles MLIP environment isolation automatically.
+Rootstock runs on clusters where a maintainer has set it up. Your code runs in a normal Python environment on the cluster — a SLURM job, an interactive session, or a Jupyter notebook. Rootstock handles MLIP environment isolation for you.
 
 ```python
 from ase.build import bulk
@@ -33,7 +44,17 @@ with RootstockCalculator(
     print(atoms.get_forces())
 ```
 
-Swap the underlying potential by changing `checkpoint`: e.g. `checkpoint="uma-s-1p1"` or `checkpoint="tensornet-matpes-pbe-2025-2"`.
+Use it as a context manager so the worker subprocess is torn down when you are done. Swap the underlying potential by changing `checkpoint`, e.g. `checkpoint="uma-s-1p1"`.
+
+## Driving Rootstock from an agent
+
+There are two ways to use Rootstock. The main path is classical: you write Python (ASE) or a LAMMPS input script and run it on the cluster. The other path is agentic: a coding agent drives Rootstock for you. Rootstock ships an [agent skill](skill/skill.md) that teaches an agent to discover what is deployed and to call `RootstockCalculator` correctly.
+
+## Availability
+
+Rootstock is deployed on a growing set of HPC clusters. Current model-by-cluster coverage — which checkpoints are installed and verified where — lives in the [Matter Model Almanac](https://garden-ai.github.io/almanac) and the live dashboard; see [Clusters](clusters.md).
+
+To deploy Rootstock on your cluster or use it for a specific project, contact Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
 
 ## Next Steps
 
@@ -51,17 +72,25 @@ Swap the underlying potential by changing `checkpoint`: e.g. `checkpoint="uma-s-
 
     ---
 
-    Learn about the `RootstockCalculator` API and available models.
+    Learn the `RootstockCalculator` API and the CLI.
 
     [:octicons-arrow-right-24: API](api.md)
 
--   :material-earth:{ .lg .middle } **Example Configs**
+-   :material-earth:{ .lg .middle } **Clusters**
 
     ---
 
-    See example environment configurations from deployed clusters.
+    See what is deployed on each cluster and copy a working config.
 
-    [:octicons-arrow-right-24: Example Configs](clusters.md)
+    [:octicons-arrow-right-24: Clusters](clusters.md)
+
+-   :material-puzzle:{ .lg .middle } **Integrations**
+
+    ---
+
+    Use Rootstock from ASE, LAMMPS, and an agent skill.
+
+    [:octicons-arrow-right-24: Integrations](integrations.md)
 
 -   :material-server:{ .lg .middle } **Cluster Setup**
 

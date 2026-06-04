@@ -47,12 +47,13 @@ Copyright &copy; 2026 The authors
 nav = [
   { "Home" = "index.md" },
   { "Installation" = "installation.md" },
-  { "Example Configs" = "clusters.md" },
-  { "LAMMPS Integration" = "lammps.md" },
-  { "Cluster Setup" = "cluster-setup.md" },
-  { "Writing Environments" = "environments.md" },
   { "API Reference" = "api.md" },
   { "Architecture" = "architecture.md" },
+  { "Integrations" = "integrations.md" },
+  { "Clusters" = "clusters.md" },
+  { "Writing Environments" = "environments.md" },
+  { "Cluster Setup" = "cluster-setup.md" },
+  { "LAMMPS Integration" = "lammps.md" },
   { "Development" = "development.md" },
 ]
 

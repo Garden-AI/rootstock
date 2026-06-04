@@ -1,9 +1,13 @@
 # Writing Environment Files
 
+Adding a model to Rootstock follows three steps: define the model family in a Python file, build its isolated environment, and verify it on a GPU node.
+
+![Define a model family as a Python file, build its isolated env, then verify and re-verify it on a GPU node](assets/rootstock_model_installation.png)
+
 Each MLIP environment is defined by a small Python file with three pieces:
 
 1. A [PEP 723](https://peps.python.org/pep-0723/) inline metadata block declaring the venv's dependencies.
-2. A module-level `CHECKPOINTS: dict[str, str]` table mapping **canonical checkpoint ids** (the slugs that appear on the Almanac, in `rootstock add <id>`, and in `RootstockCalculator(checkpoint=<id>)`) to whatever string the upstream library expects.
+2. A module-level `CHECKPOINTS: dict[str, str]` table mapping **canonical checkpoint ids** to whatever string the upstream library expects. A canonical id is the slug used in `rootstock add <id>` and `RootstockCalculator(checkpoint=<id>)`; the [Matter Model Almanac](https://garden-ai.github.io/almanac) registers the same ids so its matrix can join to them.
 3. A `setup(checkpoint, device, ...)` function that looks the id up in `CHECKPOINTS` and returns an ASE calculator.
 
 ## Creating a New Environment
@@ -45,7 +49,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 ## How It Works
 
 1. **PEP 723 metadata.** Rootstock uses `uv` to build an isolated venv from the listed dependencies.
-2. **`CHECKPOINTS` table.** This is the env's local dispatch table. The keys are canonical ids agreed with the Almanac (one row in the matrix per id). The values are whatever the upstream library wants — could be a short name, a HuggingFace path, a function name, anything.
+2. **`CHECKPOINTS` table.** This is the env's local dispatch table. The keys are canonical ids; the Almanac registers the same ids as its join key. The values are whatever the upstream library wants — a short name, a HuggingFace path, a function name, anything.
 3. **`setup(checkpoint, device)`.** Called once when a worker starts. The returned calculator is reused for all calculations in that session.
 
 When a user runs `rootstock add mace-mp-0-medium`, Rootstock walks every installed env's `env_source.py`, AST-parses the `CHECKPOINTS` literal, and finds the env that declares the id. A typo errors immediately ("no installed env declares ..."), instead of failing inside `setup()`.
@@ -101,7 +105,7 @@ Return: an ASE-compatible calculator.
 
 ### MACE (MP-0 and OFF23 in one env)
 
-MACE-MP-0 and MACE-OFF23 ship in the same `mace-torch` package, so they share a single env. The `off:` prefix on the upstream string in `CHECKPOINTS` routes to `mace_off()` instead of `mace_mp()` — a small dispatch in `setup()`. Two distinct page identifiers (`mace-mp-0`, `mace-off23`) on the Almanac, six matrix rows, one venv to maintain.
+MACE-MP-0 and MACE-OFF23 ship in the same `mace-torch` package, so they share a single env. The `off:` prefix on the upstream string in `CHECKPOINTS` routes to `mace_off()` instead of `mace_mp()` — a small dispatch in `setup()`.
 
 ```python
 # /// script
@@ -148,7 +152,7 @@ def setup(checkpoint: str, device: str = "cuda", task: str = "omat"):
 
 ### TensorNet (MatGL via HuggingFace)
 
-The upstream string is a HuggingFace path; the canonical id is the slug shown on the Almanac.
+The upstream string is a HuggingFace path; the canonical id is a short slug.
 
 ```python
 CHECKPOINTS = {
@@ -179,7 +183,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 ### Match canonical ids to the Almanac
 
-The canonical ids in `CHECKPOINTS` are the join key with the Almanac. If the Almanac lists `mace-mp-0-medium` and you ship a `CHECKPOINTS` key of `mace_mp_0_medium`, no row in the matrix lights up. Match the Almanac entry exactly. The Almanac is the public list of canonical ids; this env file is the local dispatch.
+The canonical ids in `CHECKPOINTS` are the join key with the Almanac. If the Almanac registers `mace-mp-0-medium` and you ship a `CHECKPOINTS` key of `mace_mp_0_medium`, the two never join and no row in the matrix lights up. Match the registered id exactly. The Almanac is the registry of canonical ids; this env file is the local dispatch.
 
 ### Per-cluster variants
 

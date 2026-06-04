@@ -1,8 +1,14 @@
 # Architecture
 
+This page explains how Rootstock runs a model.
+
+![Rootstock runtime: an ASE calculator proxies to an isolated model in a managed subprocess on the same GPU node, exchanging positions and forces over a local Unix socket.](assets/rootstock_runtime.png)
+
 ## Overview
 
-When you create a `RootstockCalculator`, Rootstock spawns a subprocess that runs the MLIP in its own pre-built virtual environment. The main process and worker communicate over a Unix domain socket using the [i-PI protocol](http://ipi-code.org/). All communication occurs on a single node with no remote network calls.
+When you create a `RootstockCalculator`, Rootstock spawns a worker subprocess that runs the MLIP in its own pre-built virtual environment on the same node. Your own environment only needs the lightweight `rootstock` package, not the model's dependencies. The main process and worker communicate over a Unix domain socket using the [i-PI protocol](http://ipi-code.org/). All communication is local to one node; there are no remote network calls.
+
+The worker loads the model once and keeps it warm, so repeated calls reuse the loaded weights.
 
 ```
 Your script (on cluster node)          Worker subprocess
@@ -18,22 +24,11 @@ Your script (on cluster node)          Worker subprocess
 
 ## Design Benefits
 
-This design eliminates environment conflicts when experimenting with different MLIPs or using multiple MLIPs in a single workflow:
-
-- **No environment conflicts**: Each MLIP runs in isolation with its exact required dependencies
-- **One-line model swapping**: Change `checkpoint="mace-mp-0-medium"` to `checkpoint="uma-s-1p1"` without reinstalling anything
-- **Multi-model workflows**: Use multiple MLIPs in the same script (sequentially)
-- **Clean user environments**: Users only install the lightweight `rootstock` package
+Each MLIP runs in its own isolated environment with its exact dependencies. This removes version conflicts between models, including models that require incompatible Python or library versions. You can swap models in one line, change `checkpoint="mace-mp-0-medium"` to `checkpoint="uma-s-1p1"`, and use several models sequentially in the same script.
 
 ## Tradeoffs
 
-The architecture introduces minimal overhead due to inter-process communication:
-
-- **~4% overhead** on an 864-atom system
-- Communication occurs via Unix domain socket (fast, local-only)
-- Positions and forces are serialized using the i-PI protocol
-
-For most use cases, this overhead is negligible compared to MLIP forward pass time.
+Inter-process communication adds a small cost. On an 864-atom system the overhead is about 4%. Positions and forces are serialized with the i-PI protocol and pass over a local Unix domain socket. For most workloads this is negligible next to the MLIP forward pass.
 
 ## Directory Structure
 

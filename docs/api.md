@@ -74,11 +74,11 @@ with RootstockCalculator(...) as calc:
 
 ## Available Models
 
-Available models vary by cluster and change as new environments are added. See the [Example Configs](clusters.md) page for current deployments on each cluster.
+What is deployed and verified per cluster changes over time. The authoritative, current list lives in the Almanac and dashboard; see [Clusters](clusters.md).
 
 ### Checkpoint Reference
 
-Canonical checkpoint ids deployed by the bundled env files in `sample_model_configurations/nvidia_configs/`:
+The table below lists the canonical checkpoint ids defined by the bundled env files. It illustrates the ids these envs expose; it is not a statement of what is installed on any given cluster. For current availability per cluster, consult the Almanac/dashboard via [Clusters](clusters.md).
 
 | Env | Canonical checkpoint ids |
 |---|---|
@@ -88,9 +88,9 @@ Canonical checkpoint ids deployed by the bundled env files in `sample_model_conf
 | `tensornet` | `tensornet-matpes-pbe-2025-2` |
 | `uma` | `uma-s-1p1` |
 
-### Checking Available Models
+### Checking What Is Installed
 
-To see available models on your cluster, check the [Example Configs](clusters.md) page or run:
+To see what is installed on your cluster, consult the Almanac/dashboard via [Clusters](clusters.md), or run:
 
 ```bash
 rootstock status
@@ -246,13 +246,19 @@ Exit code is 0 if all tested checkpoints passed, 1 otherwise.
 
 #### `rootstock serve`
 
-Start a worker process for an external i-PI server (advanced usage).
+Start a worker process for an external i-PI server (advanced usage). Takes a single canonical checkpoint id; the hosting env is resolved from the id.
 
 ```bash
 rootstock serve mace-mp-0-medium \
   --socket /tmp/ipi_socket \
   --device cuda
 ```
+
+Options:
+
+- `--socket <path>`: Unix socket path for the i-PI server
+- `--device <dev>`: Device (default: `cuda`)
+- `--kwarg KEY=VAL`: Repeatable extra kwarg passed to `setup()` (same JSON-decoding as `add`)
 
 #### `rootstock manifest`
 

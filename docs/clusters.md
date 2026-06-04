@@ -1,8 +1,8 @@
-# Example Configs
+# Deployed Clusters
 
-View live environment configurations from clusters where Rootstock is currently deployed. The configurations below are fetched from the dashboard API and show the exact environments, dependencies, and checkpoints available on each cluster.
+This page shows the environments and checkpoints currently deployed on each cluster, fetched live from the dashboard manifest. For every cluster it lists the install root, the built environments, their Python and dependency versions, and the canonical checkpoint ids available. This is the authoritative current-state view; the [Matter Model Almanac](https://garden-ai.github.io/almanac) records the same model-by-cluster coverage in matrix form.
 
-Use these as a starting point when setting up your own cluster.
+End users can check here for what is available before pointing a `RootstockCalculator` at a cluster. Maintainers can copy a working environment source file from the entries below as a starting point for a new install.
 
 <style>
 #clusters-container h2 { scroll-margin-top: 80px; }

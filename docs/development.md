@@ -29,7 +29,8 @@ rootstock/
 │   ├── worker.py          # i-PI client state machine
 │   ├── environment.py     # Pre-built environment management
 │   ├── clusters.py        # Cluster registry and known environments
-│   └── cli.py             # CLI commands (init, install, status, list, etc.)
+│   ├── cli.py             # CLI entry point
+│   └── commands/          # One module per CLI command (install, add, status, ...)
 ├── environments/          # Example environment files
 ├── lammps/                # LAMMPS fix source files
 ├── tests/
@@ -44,7 +45,7 @@ pytest tests/
 
 ## Get Involved
 
-Rootstock is an early-stage project. We welcome feedback, bug reports, and collaborators. If you are interested in:
+We welcome feedback, bug reports, and collaborators. If you are interested in:
 
 - Deploying Rootstock on your cluster
 - Contributing environment files for new MLIPs
