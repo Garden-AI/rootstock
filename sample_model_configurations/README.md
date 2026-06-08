@@ -13,6 +13,7 @@ sample_model_configurations/
 │   └── README.md
 └── nvidia_configs/     # configs targeting NVIDIA GPUs
     ├── allegro.py      # Allegro (NequIP family, custom model required)
+    ├── allscaip.py     # AllScAIP (FAIRChem scalable-attention, OMol25)
     ├── ani.py          # ANI-2x / ANI-1ccx / ANI-1x (organic molecules)
     ├── dimenet.py      # DimeNet++ (OC20 catalysis)
     ├── equiformer.py   # EquiformerV2 (OC20 catalysis)
@@ -22,6 +23,7 @@ sample_model_configurations/
     ├── m3gnet.py       # M3GNet → uses CHGNet (M3GNet-PES unavailable)
     ├── mace.py         # MACE-MP-0 / MACE-Large (inorganic universal)
     ├── mace_off23.py   # MACE-OFF23 (organic molecules)
+    ├── mace_polar.py   # MACE-POLAR-1 (electrostatic MACE, git-main + graph-longrange)
     ├── mattersim.py    # MatterSim-v1 (Microsoft universal)
     ├── nequip.py       # NequIP (system-specific, deployed model required)
     ├── orb.py          # Orb v2/v3 (Orbital Materials universal)
@@ -112,7 +114,7 @@ committing.
 
 ## Required Modal setup
 
-- A `huggingface-token` Modal secret with read access to any gated model
+- A `huggingface` Modal secret with read access to any gated model
   repos you'll touch (e.g., FAIRChem checkpoints).
 - That's it — the cache volume is created on first run.
 

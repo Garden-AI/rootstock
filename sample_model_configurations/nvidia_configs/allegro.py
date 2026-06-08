@@ -1,10 +1,10 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#     "allegro @ git+https://github.com/mir-group/allegro.git",
+#     "nequip-allegro @ git+https://github.com/mir-group/allegro.git",
 #     "nequip>=0.6.0",
 #     "ase>=3.22",
-#     "torch>=2.0",
+#     "torch>=2.4.0,<2.5",
 #     "torch-geometric",
 # ]
 #

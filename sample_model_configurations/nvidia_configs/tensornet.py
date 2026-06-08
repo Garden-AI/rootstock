@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "torch>=2.4.0",
+#     "torch>=2.4.0,<2.5",
 #     "ase>=3.22",
 #     "huggingface_hub",
 #     "matgl",

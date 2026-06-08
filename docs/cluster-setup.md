@@ -156,11 +156,12 @@ If a node has both network access and a GPU, run without `--no-verify` to do eve
 
 `rootstock add` is idempotent — re-running it after a successful download will skip the download phase and just re-verify.
 
-`rootstock smoke-test` re-verifies every fetched checkpoint and is suitable for nightly cron:
-
-```bash
-0 4 * * * rootstock smoke-test --json > /var/log/rootstock-smoke.log 2>&1
-```
+`rootstock smoke-test` re-verifies every fetched checkpoint. To keep a cluster's
+manifest current automatically, set it up on a nightly schedule — see
+[Nightly Automated Smoke-Testing](nightly-smoke-testing.md) for the recommended
+approach (a Globus Compute endpoint dispatched from CI). A bare local cron entry
+(`0 4 * * * rootstock smoke-test --json`) also works where the cluster permits
+user cron, but the dispatched approach is preferred and portable across sites.
 
 !!! note "Smoke-test always uses default kwargs"
     `smoke-test` calls each env's `setup()` with no extra kwargs. A checkpoint that only works with non-default kwargs (e.g., a UMA checkpoint that needs `task=omol`) will appear failing in nightly smoke-test even though `add` succeeded. The remedy is to make the preferred kwargs the env's default in the env file.

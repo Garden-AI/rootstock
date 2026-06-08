@@ -1,20 +1,21 @@
 # /// script
-# requires-python = ">=3.10,<3.11"
+# requires-python = ">=3.11"
 # dependencies = [
-#     "torch>=2.4.0",
-#     "fairchem-core>=2.0.0",
+#     "fairchem-core>=2.20",
 #     "ase>=3.22",
-#     "torch-geometric",
+#     "torch>=2.4.0",
 # ]
-#
-# [tool.uv]
-# find-links = ["https://data.pyg.org/whl/torch-2.4.0+cu121.html"]
 # ///
-"""UMA env — hosts Meta's UMA foundation model via FAIRChem."""
+"""UMA env — hosts Meta's UMA foundation model via FAIRChem.
+
+fairchem-core v2 dropped the torch-geometric / pyg-find-links install dance, so
+this env is a plain PyPI install. The original uma-s-1 had an extensivity bug
+and was removed from the fairchem 2.20 registry — use uma-s-1p1 or uma-s-1p2.
+"""
 
 CHECKPOINTS = {
-    "uma-s-1": "uma-s-1",
     "uma-s-1p1": "uma-s-1p1",
+    "uma-s-1p2": "uma-s-1p2",
     "uma-m-1p1": "uma-m-1p1",
 }
 

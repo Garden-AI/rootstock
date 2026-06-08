@@ -5,6 +5,14 @@
 #     "ase>=3.25",
 #     "torch>=2.8",
 # ]
+#
+# [tool.uv.sources]
+# torch = { index = "pytorch-cu128" }
+#
+# [[tool.uv.index]]
+# name = "pytorch-cu128"
+# url = "https://download.pytorch.org/whl/cu128"
+# explicit = true
 # ///
 """Orb v3 env — Orbital Materials' Orb v3 universal potentials.
 
