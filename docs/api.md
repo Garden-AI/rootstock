@@ -4,7 +4,7 @@
 
 The main interface to Rootstock is the `RootstockCalculator` class, an ASE-compatible calculator.
 
-### Basic Usage
+### Basic usage
 
 ```python
 from ase.build import bulk
@@ -57,7 +57,7 @@ RootstockCalculator(
 )
 ```
 
-### Context Manager
+### Context manager
 
 `RootstockCalculator` should be used as a context manager to ensure proper cleanup of the worker subprocess:
 
@@ -69,16 +69,13 @@ with RootstockCalculator(...) as calc:
 # Worker process is automatically terminated when exiting the context
 ```
 
-!!! tip "Manual Cleanup"
-    If you cannot use a context manager, call `calc.close()` manually to terminate the worker process.
+## Available models
 
-## Available Models
+What is deployed and verified per cluster changes over time. The authoritative, current list lives in the [Matter Model Almanac](https://garden-ai.github.io/almanac).
 
-What is deployed and verified per cluster changes over time. The authoritative, current list lives in the Almanac and dashboard; see [Clusters](clusters.md).
+### Checkpoint reference
 
-### Checkpoint Reference
-
-The table below lists the canonical checkpoint ids defined by the bundled env files. It illustrates the ids these envs expose; it is not a statement of what is installed on any given cluster. For current availability per cluster, consult the Almanac/dashboard via [Clusters](clusters.md).
+The table below lists the canonical checkpoint ids defined by the bundled env files. It illustrates the ids these envs expose; it is not a statement of what is installed on any given cluster. For current availability per cluster, consult the [Matter Model Almanac](https://garden-ai.github.io/almanac).
 
 | Env | Canonical checkpoint ids |
 |---|---|
@@ -88,9 +85,9 @@ The table below lists the canonical checkpoint ids defined by the bundled env fi
 | `tensornet` | `tensornet-matpes-pbe-2025-2` |
 | `uma` | `uma-s-1p1` |
 
-### Checking What Is Installed
+### Checking what is installed
 
-To see what is installed on your cluster, consult the Almanac/dashboard via [Clusters](clusters.md), or run:
+To see what is installed on your cluster, consult the [Matter Model Almanac](https://garden-ai.github.io/almanac), or run:
 
 ```bash
 rootstock status
@@ -98,11 +95,11 @@ rootstock status
 
 This command displays installed environments, their checkpoints, and cache sizes.
 
-## CLI Reference
+## CLI reference
 
 The Rootstock CLI provides commands for both administrators (setting up clusters) and users (querying available environments).
 
-### User Commands
+### User commands
 
 Commands users can run to explore available environments:
 
@@ -134,7 +131,7 @@ rootstock resolve --cluster della
 rootstock resolve --cluster della --json
 ```
 
-### Administrator Commands
+### Administrator commands
 
 Commands for cluster administrators to set up and manage Rootstock installations:
 
@@ -195,9 +192,6 @@ Options:
 - `--force`: Update registration and rebuild if environment exists
 - `--verbose`, `-v`: Verbose output
 - `--no-push`: Skip pushing manifest to backend
-
-!!! note "`--models` was removed in v0.8.0"
-    Pre-downloading weights at install time is now a separate step. Use `rootstock add <checkpoint-id>` instead. Passing `--models` to `install` will exit with a migration error.
 
 #### `rootstock add`
 

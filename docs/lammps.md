@@ -1,4 +1,4 @@
-# LAMMPS Integration
+# LAMMPS integration
 
 !!! warning "Experimental"
     LAMMPS support is experimental and far less tested than the ASE path. For most work, use [`RootstockCalculator`](api.md) from Python. If you try the LAMMPS fix and hit issues, reach out.

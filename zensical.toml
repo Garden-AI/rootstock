@@ -45,15 +45,14 @@ Copyright &copy; 2026 The authors
 #
 # Read more: https://zensical.org/docs/setup/navigation/
 nav = [
-  { "Home" = "index.md" },
-  { "Installation" = "installation.md" },
+  { "What is Rootstock?" = "index.md" },
+  { "How does a RootstockCalculator work?" = "architecture.md" },
+  { "Run — with Python and ASE" = "run-python.md" },
+  { "Run — from other tools" = "run-tools.md" },
+  { "Run — with agents" = "run-agents.md" },
   { "API Reference" = "api.md" },
-  { "Architecture" = "architecture.md" },
-  { "Integrations" = "integrations.md" },
-  { "Clusters" = "clusters.md" },
-  { "Writing Environments" = "environments.md" },
+  { "Adding Models" = "environments.md" },
   { "Cluster Setup" = "cluster-setup.md" },
-  { "LAMMPS Integration" = "lammps.md" },
   { "Development" = "development.md" },
 ]
 

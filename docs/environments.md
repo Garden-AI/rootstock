@@ -1,16 +1,28 @@
-# Writing Environment Files
+# Adding Models
 
-Adding a model to Rootstock follows three steps: define the model family in a Python file, build its isolated environment, and verify it on a GPU node.
+A model family is made available to Rootstock through an **environment file**: a small Python file that pins the model's dependencies in an isolated virtual environment and exposes a `setup()` that returns an ASE calculator. One file covers a whole family — every checkpoint it lists.
+
+These files are written once per family and kept as working **samples** in the Rootstock repo, under [`sample_model_configurations/nvidia_configs/`](https://github.com/Garden-AI/rootstock/tree/main/sample_model_configurations/nvidia_configs). Samples are grouped by hardware target; other targets (AMD/ROCm, Apple Silicon, CPU-only) get their own `*_configs/` folder as they are added.
 
 ![Define a model family as a Python file, build its isolated env, then verify and re-verify it on a GPU node](assets/rootstock_model_installation.png)
 
-Each MLIP environment is defined by a small Python file with three pieces:
+## The flow
+
+Adding a model to a cluster is usually a copy-and-adapt job, not authoring from scratch:
+
+1. **Start from a sample.** Copy the matching `<mlip>.py` from the repo onto the cluster. (Authoring a brand-new family is the exception — see [Writing a file from scratch](#writing-a-file-from-scratch).)
+2. **Build and verify.** Run `rootstock install <mlip>.py`, then `rootstock add <checkpoint-id>` to download a checkpoint and verify it with a forward pass on a GPU node.
+3. **Adapt to the cluster.** Clusters differ — driver and CUDA versions, the available Python, filesystem quirks — so expect the first verify to surface something. Adjust the dependency pins or `setup()` until it passes, and keep the working file. This iteration is the normal case, not a rare one.
+
+An environment file has three pieces:
 
 1. A [PEP 723](https://peps.python.org/pep-0723/) inline metadata block declaring the venv's dependencies.
 2. A module-level `CHECKPOINTS: dict[str, str]` table mapping **canonical checkpoint ids** to whatever string the upstream library expects. A canonical id is the slug used in `rootstock add <id>` and `RootstockCalculator(checkpoint=<id>)`; the [Matter Model Almanac](https://garden-ai.github.io/almanac) registers the same ids so its matrix can join to them.
 3. A `setup(checkpoint, device, ...)` function that looks the id up in `CHECKPOINTS` and returns an ASE calculator.
 
-## Creating a New Environment
+## Writing a file from scratch
+
+When no sample exists for a model family yet, scaffold a fresh file:
 
 ```bash
 # Scaffold a template in the current directory
@@ -23,9 +35,9 @@ rootstock new-env mace -o ./environments/mace.py
 rootstock new-env mace --force
 ```
 
-The generated file has a placeholder `CHECKPOINTS` dict and a `setup()` skeleton. Fill in the dependencies, populate `CHECKPOINTS`, and implement `setup()`.
+The generated file has a placeholder `CHECKPOINTS` dict and a `setup()` skeleton. Fill in the dependencies, populate `CHECKPOINTS`, and implement `setup()` — the rest of this page describes what goes in each piece. Once it works, contribute it back as a sample so the next cluster can copy it.
 
-## Basic Structure
+## Basic structure
 
 ```python
 # /// script
@@ -46,7 +58,7 @@ def setup(checkpoint: str, device: str = "cuda"):
     return mace_mp(model=CHECKPOINTS[checkpoint], device=device, default_dtype="float32")
 ```
 
-## How It Works
+## How it works
 
 1. **PEP 723 metadata.** Rootstock uses `uv` to build an isolated venv from the listed dependencies.
 2. **`CHECKPOINTS` table.** This is the env's local dispatch table. The keys are canonical ids; the Almanac registers the same ids as its join key. The values are whatever the upstream library wants — a short name, a HuggingFace path, a function name, anything.
@@ -54,9 +66,9 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 When a user runs `rootstock add mace-mp-0-medium`, Rootstock walks every installed env's `env_source.py`, AST-parses the `CHECKPOINTS` literal, and finds the env that declares the id. A typo errors immediately ("no installed env declares ..."), instead of failing inside `setup()`.
 
-## Required Elements
+## Required elements
 
-### PEP 723 Metadata Block
+### PEP 723 metadata block
 
 ```python
 # /// script
@@ -169,7 +181,7 @@ def setup(checkpoint: str, device: str = "cuda"):
     return PESCalculator(potential=matgl.load_model(local_path))
 ```
 
-## Best Practices
+## Best practices
 
 ### Pin dependency versions
 
@@ -185,11 +197,13 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 The canonical ids in `CHECKPOINTS` are the join key with the Almanac. If the Almanac registers `mace-mp-0-medium` and you ship a `CHECKPOINTS` key of `mace_mp_0_medium`, the two never join and no row in the matrix lights up. Match the registered id exactly. The Almanac is the registry of canonical ids; this env file is the local dispatch.
 
-### Per-cluster variants
+### Expect cluster-specific edits
 
-A maintainer with quirky hardware can ship a variant — e.g. `mace_rocm.py` — that supports a strict subset of the canonical ids the standard env declares. Keys that aren't in this env's `CHECKPOINTS` simply won't resolve to it; `rootstock add` finds the right env for each id.
+The same model rarely drops onto every cluster unchanged. Driver and CUDA versions, the available Python, and filesystem behavior all vary, so adapting a sample's dependency pins or `setup()` for a given cluster is routine, not exceptional. A file can also declare a strict subset of the canonical ids the standard sample carries — keys it doesn't list simply won't resolve to it, and `rootstock add` finds the right env for each id.
 
-## Testing Your Environment
+When an entire hardware class needs a different dependency stack (a non-NVIDIA GPU, say), that belongs in its own sample folder alongside `nvidia_configs/`, rather than as a one-off edit to an existing file.
+
+## Testing your environment
 
 ```bash
 # Build the venv
