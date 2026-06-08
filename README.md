@@ -1,20 +1,14 @@
 # Rootstock
 
-Rootstock makes it easy to use machine-learned interatomic potentials (MLIPs) on national lab and academic HPC clusters. Researchers can use multiple MLIPs (MACE, CHGNet, UMA, TensorNet, and others) with ASE or LAMMPS without managing the conflicting Python environments that each MLIP requires.
+Rootstock lets you run many machine-learned interatomic potentials (MLIPs) on an HPC cluster from a single [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator, without managing the conflicting Python environments each MLIP requires.
 
-Rootstock provides an [ASE](https://wiki.fysik.dtu.dk/ase/)-compatible calculator that runs each MLIP in an isolated, pre-built Python environment behind the scenes. Swapping models is a one-line change, even if the MLIPs require different Python or library versions. Rootstock also integrates with [LAMMPS](https://www.lammps.org/) through a `fix`.
+Each MLIP family runs in its own pre-built, isolated Python environment that a maintainer has already installed and verified on the cluster. Swapping models is a one-line change to the `checkpoint` argument, even when the MLIPs need different Python or library versions.
 
-## Status
+Full documentation: [garden-ai.github.io/rootstock](https://garden-ai.github.io/rootstock/). The current model-by-cluster coverage lives in the [Matter Model Almanac](https://garden-ai.github.io/almanac).
 
-Rootstock is **early-stage software under active development.** It is currently deployed (or being deployed) on the following HPC clusters:
+## Availability
 
-- **Della** — Princeton Research Computing
-- **Sophia** and **Polaris** — Argonne Leadership Computing Facility (ALCF)
-- **Delta** — Argonne Leadership Computing Facility (NCSA)
-- **Frontier** - Oak Ridge Leadership Computing Facility (OLCF)
-- **Perlmutter** - National Energy Research Scientific Computing Center (NERSC)
-
-We are looking for additional clusters and early users to help shape the tool. If you're interested in trying Rootstock on your cluster or for a specific project, please reach out to Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
+Rootstock is deployed on a growing set of HPC clusters. Which checkpoints are installed and verified where lives in the [Matter Model Almanac](https://garden-ai.github.io/almanac) and the live dashboard. To deploy Rootstock on your cluster or use it for a specific project, contact Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
 
 ## Quick Start
 
@@ -36,7 +30,7 @@ with RootstockCalculator(
     print(atoms.get_forces())
 ```
 
-Swap the underlying potential by changing `checkpoint`: e.g. `checkpoint="uma-s-1p1"` or `checkpoint="tensornet-matpes-pbe-2025-2"`.
+Swap the underlying potential by changing `checkpoint`, e.g. `checkpoint="uma-s-1p1"`.
 
 ## Installation
 
@@ -65,7 +59,7 @@ RootstockCalculator(root="/scratch/gpfs/specific/install/path/rootstock", checkp
 
 ## Available Models
 
-The set of available models varies by cluster and changes as new environments are added. See the [example configs](https://garden-ai.github.io/rootstock/clusters/) in the docs for what is currently deployed on each cluster.
+What is deployed and verified per cluster changes over time. The [Matter Model Almanac](https://garden-ai.github.io/almanac) and the [Clusters](https://garden-ai.github.io/rootstock/clusters/) page show the current coverage.
 
 ## Architecture
 
@@ -87,54 +81,7 @@ This design takes out the pain of environment conflicts when experimenting with 
 
 ## LAMMPS Support (Experimental)
 
-Rootstock includes a native LAMMPS `fix` that auto-spawns a worker subprocess, giving LAMMPS users access to any Rootstock-managed MLIP. 
-
-Add one line to your LAMMPS input script:
-
-```
-fix mlip all rootstock cluster della checkpoint mace-mp-0-medium device cuda elements Cu
-```
-
-The fix handles worker lifecycle, socket communication, and cleanup automatically. Virial information is passed through, so barostats (`npt`, `nph`) work correctly. Energy is accessible via `f_mlip` in thermo output.
-
-### Building the Fix
-
-The fix ships as two files (`fix_rootstock.h`, `fix_rootstock.cpp`) with no dependencies beyond the C++ standard library and POSIX sockets. Copy them into your LAMMPS `src/` directory and rebuild:
-
-```bash
-./lammps/install.sh /path/to/lammps/src
-cd /path/to/lammps/build
-cmake ../cmake [your usual flags]
-make -j 4
-```
-
-Rootstock must also be installed and on `PATH` so the fix can call `rootstock resolve` and `rootstock serve`:
-
-```bash
-pip install rootstock
-```
-
-### LAMMPS Fix Syntax
-
-```
-fix <id> <group> rootstock cluster <n> checkpoint <ckpt> \
-    device <dev> [timeout <sec>] elements <e1> <e2> ...
-```
-
-| Keyword | Required | Default | Description |
-|---------|----------|---------|-------------|
-| `cluster` | yes | — | Cluster name (e.g., `della`) |
-| `checkpoint` | yes | — | Canonical checkpoint id (e.g., `mace-mp-0-medium`, `uma-s-1p1`) |
-| `device` | no | `cuda` | `cuda` or `cpu` |
-| `timeout` | no | `120` | Seconds to wait for worker startup |
-| `elements` | yes | — | Element symbols mapping atom types (must be last) |
-
-### Notes
-
-- Requires `units metal`. The fix checks this at startup.
-- Use `pair_style zero`. The fix provides all interatomic forces.
-- Single-node only — the worker sees all atoms and computes its own neighborhoods.
-- LAMMPS integration is experimental and has not been tested as thoroughly as the ASE integration yet. If you try it and run into issues, please reach out.
+Rootstock ships an experimental LAMMPS `fix` that spawns a worker subprocess, giving a LAMMPS run access to a Rootstock-managed MLIP for molecular dynamics. It is far less tested than the ASE path. See [LAMMPS Integration](https://garden-ai.github.io/rootstock/lammps/) in the docs for the fix syntax and current limitations.
 
 ## Setting Up a New Cluster
 
@@ -273,4 +220,4 @@ ruff format rootstock/
 
 ## Get Involved
 
-Rootstock is an early-stage project and we welcome feedback, bug reports, and collaborators. If you're interested in deploying Rootstock on your cluster, contributing environment files for new MLIPs, or using it for a research project, please contact Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
+We welcome feedback, bug reports, and collaborators. If you're interested in deploying Rootstock on your cluster, contributing environment files for new MLIPs, or using it for a research project, contact Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).

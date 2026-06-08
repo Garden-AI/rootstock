@@ -1,4 +1,4 @@
-# Setting Up a New Cluster
+# Setting up a new cluster
 
 This guide is for administrators setting up Rootstock on a new cluster. Run all commands below **on the cluster itself** after SSH access is established. Write access to a shared filesystem location visible to users is required.
 
@@ -17,7 +17,7 @@ On a login node:
 pip install rootstock
 ```
 
-## Step 2: Initialize the Rootstock Directory
+## Step 2: Initialize the Rootstock directory
 
 Choose a location on a shared filesystem where other users have access:
 
@@ -112,8 +112,9 @@ This will interactively prompt you for:
 | **maintainer name / email** | Identifies the maintainer for this installation |
 
 !!! tip "Dashboard Integration"
+    If you provide API credentials, Rootstock pushes the cluster manifest to the dashboard automatically whenever you install or update environments. You can skip this and run a deployment that's never published.
 
-## Step 3: Install Environments
+## Step 3: Install environments
 
 Still on the login node — `install` only builds the venv, no model weights yet:
 
@@ -137,7 +138,7 @@ Each `rootstock install` command:
 
 This process can take several minutes per environment, depending on the MLIP and network conditions.
 
-## Step 4: Add Checkpoints
+## Step 4: Add checkpoints
 
 `rootstock add` is a separate, idempotent step that **downloads** weights and (where available) **verifies** them with a forward pass. Splitting download from verify lets you do the right thing on each kind of node:
 
@@ -166,18 +167,17 @@ user cron, but the dispatched approach is preferred and portable across sites.
     `smoke-test` calls each env's `setup()` with no extra kwargs. A checkpoint that only works with non-default kwargs (e.g., a UMA checkpoint that needs `task=omol`) will appear failing in nightly smoke-test even though `add` succeeded. The remedy is to make the preferred kwargs the env's default in the env file.
 
 !!! note "Finding Environment Files"
-    See the [Example Configs](clusters.md) page for environment files that are known to work — you can use these as a starting point for your cluster.
-    Some minor tweaks may be required depending on site specific requirements.
+    The live dashboard manifest at [`garden-ai-prod--rootstock-admin-dashboard.modal.run`](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) exposes the environment source file for every deployed env. Copy a working source as a starting point for your cluster — some tweaks may be required for site-specific requirements.
 
-## Step 5: Register with the Dashboard (Optional)
+## Step 5: Register with the dashboard (optional)
 
 If you configured API credentials during `rootstock init`, the manifest is pushed automatically when you install or update environments.
 
-### Managing the Manifest
+### Managing the manifest
 
 The manifest tracks the state of your Rootstock installation and is used by the dashboard to display available environments. You can manage it with the following commands:
 
-#### View Current Manifest
+#### View current manifest
 
 ```bash
 # Display the manifest in human-readable format
@@ -187,7 +187,7 @@ rootstock manifest show
 rootstock manifest show --json
 ```
 
-#### Push Manifest to Dashboard
+#### Push manifest to dashboard
 
 If the automatic push failed (e.g., due to network issues), you can manually retry:
 
@@ -195,7 +195,7 @@ If the automatic push failed (e.g., due to network issues), you can manually ret
 rootstock manifest push
 ```
 
-#### Initialize a New Manifest
+#### Initialize a new manifest
 
 To create or reinitialize a manifest for a cluster:
 
@@ -210,7 +210,7 @@ rootstock manifest init --cluster della --force
 rootstock manifest init --cluster della --no-push
 ```
 
-## Verifying the Installation
+## Verifying the installation
 
 After setup, verify that everything works:
 
@@ -222,7 +222,7 @@ rootstock status
 rootstock list
 ```
 
-## Directory Structure
+## Directory structure
 
 After setup, the Rootstock root directory will look like this:
 
@@ -230,12 +230,11 @@ After setup, the Rootstock root directory will look like this:
 {root}/
 ├── .python/                # uv-managed Python interpreters
 ├── environments/           # Environment source files (*.py with PEP 723 metadata)
-│   ├── mace_env.py
-│   ├── chgnet_env.py
-│   ├── uma_env.py
-│   └── tensornet_env.py
+│   ├── mace.py
+│   ├── uma.py
+│   └── tensornet.py
 ├── envs/                   # Pre-built virtual environments
-│   ├── mace_env/
+│   ├── mace/
 │   │   ├── bin/python
 │   │   ├── lib/python3.11/site-packages/
 │   │   └── env_source.py
@@ -248,18 +247,25 @@ After setup, the Rootstock root directory will look like this:
     └── huggingface/
 ```
 
-## Updating Environments
+### Why the `home/` directory?
+
+Some ML libraries (FAIRChem, MatGL) ignore `XDG_CACHE_HOME` and write to `~/.cache/` unconditionally. Rootstock redirects `HOME` during environment builds and worker runtime so model weights land in the shared install directory rather than in individual users' home directories.
+
+## Updating environments
 
 To update an environment with new dependencies:
 
 ```bash
 # Rebuild the venv (drops verification timestamps for that env's checkpoints)
-rootstock install mace_env.py --force
+rootstock install mace.py --force
 
-# Re-verify checkpoints after the rebuild
-rootstock add mace small
-rootstock add mace medium
-rootstock add mace large
+# Re-verify checkpoints after the rebuild, by canonical id
+rootstock add mace-mp-0-small
+rootstock add mace-mp-0-medium
+rootstock add mace-mp-0-large
+
+# Or re-verify every fetched checkpoint at once
+rootstock smoke-test
 
 # Push updated manifest
 rootstock manifest push
