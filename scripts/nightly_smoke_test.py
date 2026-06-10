@@ -9,8 +9,8 @@
 # endpoint = "27687af7-a20e-477a-8d4e-b5a7a097f864"
 # account = "bhhl-delta-gpu"                              # Type: string
 # scheduler_options = "#SBATCH --gpus-per-node=1"         # Type: string
+# walltime = "04:00:00"                                           # Type: string
 # # qos =                                                 # Type: string
-# # walltime =                                            # Type: string
 # # exclusive =                                           # Type: boolean
 # # partition =                                           # Type: string
 # # constraint =                                          # Type: string
