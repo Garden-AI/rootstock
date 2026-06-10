@@ -26,4 +26,4 @@ jobs:
         env:
           GLOBUS_COMPUTE_CLIENT_ID: ${{ secrets.GLOBUS_COMPUTE_CLIENT_ID }}
           GLOBUS_COMPUTE_CLIENT_SECRET: ${{ secrets.GLOBUS_COMPUTE_CLIENT_SECRET }}
-        run: hog run scripts/nightly_smoke_test.py main -- ${{ matrix.cluster }}
+        run: hog run scripts/nightly_smoke_test.py main -- --target ${{ matrix.cluster }}
