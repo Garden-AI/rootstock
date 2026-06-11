@@ -187,10 +187,6 @@ def _install_single_environment(
     dependencies = metadata.get("dependencies", [])
     requires_python = metadata.get("requires-python", ">=3.10")
 
-    # Extract uv-specific config (generic, works for any environment)
-    uv_config = metadata.get("tool", {}).get("uv", {})
-    find_links = uv_config.get("find-links", [])
-
     # Extract minimum version properly
     try:
         python_version = extract_minimum_python_version(requires_python)
@@ -200,8 +196,6 @@ def _install_single_environment(
 
     print(f"  Python: {requires_python} -> {python_version}")
     print(f"  Dependencies: {dependencies}")
-    if find_links:
-        print(f"  Find-links: {find_links}")
 
     # Ensure home directory exists for model downloads
     home_dir = root / "home"
@@ -266,20 +260,21 @@ def _install_single_environment(
 
     env_python = env_target / "bin" / "python"
 
-    # Install dependencies using uv pip with --python flag
+    # Install dependencies with `uv sync --script` so the env source's full
+    # PEP 723 uv config is honored — not just `dependencies`, but
+    # `[tool.uv.sources]`, `[[tool.uv.index]]`, and `[tool.uv]` find-links.
+    # The `uv pip` interface silently ignores sources/index pins. `--active` +
+    # VIRTUAL_ENV targets the venv we just created 
     print("2. Installing dependencies...")
 
     if dependencies:
-        pip_cmd = ["uv", "pip", "install", "--python", str(env_python)]
-        for link in find_links:
-            pip_cmd.extend(["--find-links", link])
-        pip_cmd.extend(dependencies)
-
+        sync_env = dict(uv_env)
+        sync_env["VIRTUAL_ENV"] = str(env_target)
         result = subprocess.run(
-            pip_cmd,
+            ["uv", "sync", "--script", str(env_source), "--active"],
             capture_output=not verbose,
             text=True,
-            env=uv_env,
+            env=sync_env,
         )
         if result.returncode != 0:
             print(

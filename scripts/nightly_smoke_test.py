@@ -9,8 +9,8 @@
 # endpoint = "27687af7-a20e-477a-8d4e-b5a7a097f864"
 # account = "bhhl-delta-gpu"                              # Type: string
 # scheduler_options = "#SBATCH --gpus-per-node=1"         # Type: string
+# walltime = "04:00:00"                                           # Type: string
 # # qos =                                                 # Type: string
-# # walltime =                                            # Type: string
 # # exclusive =                                           # Type: boolean
 # # partition =                                           # Type: string
 # # constraint =                                          # Type: string
@@ -68,10 +68,11 @@ def hello(endpoint: str = "delta"):
 @hog.harness()
 def main(target: str | None = None, root: str | None = None) -> int:
     if target:
-        result = smoke_test.remote(root, endpoint=target)
+        fut = smoke_test.submit(root, endpoint=target)
     else:
-        result = smoke_test.remote(root)
-        
+        fut = smoke_test.submit(root)
+
+    result = fut.result()
 
     print(result["stdout"])
     print(result["stderr"], file=sys.stderr)

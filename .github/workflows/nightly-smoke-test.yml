@@ -7,6 +7,7 @@ on:
 
 jobs:
   smoke-test:
+    environment: smoke-tests   # required to access the env-scoped Globus secrets
     strategy:
       fail-fast: false      # one cluster's failure shouldn't cancel others
       matrix:
@@ -26,4 +27,4 @@ jobs:
         env:
           GLOBUS_COMPUTE_CLIENT_ID: ${{ secrets.GLOBUS_COMPUTE_CLIENT_ID }}
           GLOBUS_COMPUTE_CLIENT_SECRET: ${{ secrets.GLOBUS_COMPUTE_CLIENT_SECRET }}
-        run: hog run scripts/nightly_smoke_test.py main -- --target ${{ matrix.cluster }}
+        run: hog run scripts/nightly_smoke_test.py main -- --target=${{ matrix.cluster }}
