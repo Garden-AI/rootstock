@@ -137,3 +137,88 @@ def test_install_command_passes_helper_spec_as_final_arg(tmp_path, monkeypatch, 
         f"expected exactly one 'uv pip install ... rootstock==9.9.9' call, "
         f"got calls: {captured_calls!r}"
     )
+
+
+def test_dependencies_installed_via_uv_sync_script(tmp_path, monkeypatch, capsys):
+    """Env dependencies install through `uv sync --script`, not `uv pip install`.
+
+    `uv pip install` ignores `[tool.uv.sources]`/`[[tool.uv.index]]`, so a torch
+    pin to a CUDA-specific index would be silently dropped. The deps step must
+    go through the script interface (`uv sync --script ... --active`) with
+    VIRTUAL_ENV pointed at the freshly-built venv so the env source's full uv
+    config is honored.
+    """
+    monkeypatch.setattr("rootstock.__version__", "9.9.9")
+
+    env_dir = tmp_path / "environments"
+    env_dir.mkdir()
+    env_source = env_dir / "withdeps.py"
+    env_source.write_text(
+        "# /// script\n"
+        '# requires-python = ">=3.10"\n'
+        '# dependencies = ["torch>=2.0"]\n'
+        "#\n"
+        "# [tool.uv.sources]\n"
+        '# torch = { index = "pytorch-cu128" }\n'
+        "#\n"
+        "# [[tool.uv.index]]\n"
+        '# name = "pytorch-cu128"\n'
+        '# url = "https://download.pytorch.org/whl/cu128"\n'
+        "# explicit = true\n"
+        "# ///\n"
+        "CHECKPOINTS = {}\n"
+        'def setup(checkpoint: str, device: str = "cuda"):\n'
+        "    return None\n"
+    )
+
+    captured_calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(cmd, **kwargs):
+        captured_calls.append((list(cmd), kwargs))
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = ""
+        result.stdout = ""
+        return result
+
+    monkeypatch.setattr("rootstock.commands.install.subprocess.run", fake_run)
+    monkeypatch.setattr("rootstock.commands.install.shutil.copy", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "rootstock.commands.manifest.update_and_push_manifest",
+        lambda *a, **k: None,
+    )
+
+    from rootstock.commands.install import _install_single_environment
+
+    rc = _install_single_environment(
+        root=tmp_path,
+        source=str(env_source),
+        force=False,
+        verbose=False,
+    )
+    assert rc == 0
+
+    env_target = str(tmp_path / "envs" / "withdeps")
+
+    sync_calls = [
+        (cmd, kwargs)
+        for cmd, kwargs in captured_calls
+        if cmd[:2] == ["uv", "sync"]
+    ]
+    assert len(sync_calls) == 1, (
+        f"expected exactly one 'uv sync' call, got: {[c for c, _ in captured_calls]!r}"
+    )
+    cmd, kwargs = sync_calls[0]
+    assert cmd == ["uv", "sync", "--script", str(env_source), "--active"]
+    assert kwargs["env"]["VIRTUAL_ENV"] == env_target
+
+    # The dependency must NOT be installed through the `uv pip` interface,
+    # which would ignore the pinned CUDA index.
+    pip_dep_calls = [
+        cmd
+        for cmd, _ in captured_calls
+        if cmd[:3] == ["uv", "pip", "install"] and any("torch" in arg for arg in cmd)
+    ]
+    assert pip_dep_calls == [], (
+        f"dependencies must not be installed via 'uv pip install': {pip_dep_calls!r}"
+    )
