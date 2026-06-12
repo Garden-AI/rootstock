@@ -29,6 +29,10 @@ Commands:
     rootstock list [--root <path>]
     rootstock serve <checkpoint-id> [--root <path>] --socket <path> [--device <dev>]
     rootstock resolve --cluster <name> [--json]
+    rootstock setup-perms [<root>] [--cluster <name>] --group <group> [--apply] [--retrofit]
+        Render (dry-run) or apply the world-readable shared-install permission
+        recipe for an install root (and split cache root):
+            rootstock setup-perms --cluster perlmutter --group m4845 --apply
 """
 
 import argparse
@@ -45,6 +49,7 @@ from .commands import (
     cmd_new_env,
     cmd_resolve,
     cmd_serve,
+    cmd_setup_perms,
     cmd_smoke_test,
     cmd_status,
 )
@@ -139,6 +144,11 @@ def main():
         "--no-push",
         action="store_true",
         help="Don't push manifest to backend (useful during development)",
+    )
+    install_parser.add_argument(
+        "--no-perm-check",
+        action="store_true",
+        help="Skip the up-front shared-install permission check",
     )
     install_parser.set_defaults(func=cmd_install)
 
@@ -252,6 +262,52 @@ def main():
     resolve_parser.add_argument("--cluster", required=True, help="Cluster name")
     resolve_parser.add_argument("--json", action="store_true", help="Output as JSON")
     resolve_parser.set_defaults(func=cmd_resolve)
+
+    # setup-perms command
+    setup_perms_parser = subparsers.add_parser(
+        "setup-perms",
+        help="Render or apply shared-install permissions",
+        description=(
+            "Render (dry-run, default) or apply the permission recipe for a "
+            "world-readable shared install: setgid + group-write for "
+            "co-maintainers, world read+traverse, and default ACLs so new files "
+            "inherit. Pass --apply to execute the commands after confirmation."
+        ),
+    )
+    setup_perms_parser.add_argument(
+        "root",
+        nargs="?",
+        help="Install root path (omit when using --cluster)",
+    )
+    setup_perms_parser.add_argument(
+        "--cache-root",
+        help="Cache root path, when on a separate filesystem from the install root",
+    )
+    setup_perms_parser.add_argument(
+        "--cluster",
+        help="Resolve install and cache roots from the cluster registry",
+    )
+    setup_perms_parser.add_argument(
+        "--group",
+        required=True,
+        help="Project group that owns the install (e.g., m4845)",
+    )
+    setup_perms_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the commands without executing (default)",
+    )
+    setup_perms_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Execute the commands (after a confirmation prompt)",
+    )
+    setup_perms_parser.add_argument(
+        "--retrofit",
+        action="store_true",
+        help="Also apply recursively so existing files become world-readable",
+    )
+    setup_perms_parser.set_defaults(func=cmd_setup_perms)
 
     # serve command
     serve_parser = subparsers.add_parser(

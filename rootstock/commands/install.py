@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .common import get_root_or_exit
+from .common import get_root_or_exit, resolve_cache_root
 
 ROOTSTOCK_GITHUB_URL = "https://github.com/Garden-AI/rootstock.git"
 
@@ -318,6 +318,33 @@ def _install_single_environment(
     return 0
 
 
+def _warn_on_permissions(root: Path) -> None:
+    """Best-effort, bounded permission check run up front (warn-only).
+
+    A shared install with the wrong perms "works for the maintainer, breaks for
+    everyone else" — so we surface it before the slow build, not after. Never
+    fails the install; only the root directories are stat'd (no recursion), so
+    it's cheap on HPC filesystems.
+    """
+    from ..perms import check_permissions
+
+    issues = check_permissions(root, resolve_cache_root(root))
+    if not issues:
+        return
+
+    print(
+        "\nWarning: shared-install permissions may be misconfigured:",
+        file=sys.stderr,
+    )
+    for issue in issues:
+        print(f"  - {issue.path}: {issue.problem}", file=sys.stderr)
+    print(
+        "  Fix with: rootstock setup-perms --group <project-group> --apply\n"
+        "  (or pass --no-perm-check to silence this)",
+        file=sys.stderr,
+    )
+
+
 def cmd_install(args) -> int:
     """
     Install environment(s) from a file, directory, or rebuild by name.
@@ -353,6 +380,10 @@ def cmd_install(args) -> int:
             file=sys.stderr,
         )
         return 1
+
+    # Surface permission problems before the (slow) build starts.
+    if not getattr(args, "no_perm_check", False):
+        _warn_on_permissions(root)
 
     # DIRECTORY MODE: install all *.py files
     if source_path.is_dir():
