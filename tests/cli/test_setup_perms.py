@@ -13,7 +13,6 @@ def _args(**overrides):
         cache_root=None,
         cluster=None,
         group="m4845",
-        dry_run=True,
         apply=False,
         retrofit=False,
     )
@@ -73,8 +72,8 @@ def test_retrofit_adds_recursive(capsys):
     rc = cmd_setup_perms(_args(root="/install/root", retrofit=True))
     assert rc == 0
     out = capsys.readouterr().out
-    assert "setfacl -R -m g:m4845:rwx /install/root" in out
-    assert "setfacl -R -dm o::r-x /install/root" in out
+    assert "setfacl -R -m g:m4845:rwX /install/root" in out
+    assert "setfacl -R -dm o::r-X /install/root" in out
 
 
 def test_apply_runs_commands_after_confirmation(monkeypatch, capsys):

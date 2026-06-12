@@ -49,15 +49,16 @@ def test_render_cache_root_same_as_install_emits_nothing_extra():
 def test_render_retrofit_adds_recursive_variants():
     cmds = render_commands("/install/root", cache_root="/cache/root", group="m4845", retrofit=True)
     lines = [format_command(c) for c in cmds]
-    assert "setfacl -R -m g:m4845:rwx /install/root" in lines
-    assert "setfacl -R -dm g:m4845:rwx /install/root" in lines
-    assert "setfacl -R -m o::r-x /install/root" in lines
-    assert "setfacl -R -dm o::r-x /install/root" in lines
+    # Capital X so recursing doesn't mark every file executable.
+    assert "setfacl -R -m g:m4845:rwX /install/root" in lines
+    assert "setfacl -R -dm g:m4845:rwX /install/root" in lines
+    assert "setfacl -R -m o::r-X /install/root" in lines
+    assert "setfacl -R -dm o::r-X /install/root" in lines
     # World-readable retrofit also applies to the separate cache root.
-    assert "setfacl -R -m o::r-x /cache/root" in lines
-    assert "setfacl -R -dm o::r-x /cache/root" in lines
+    assert "setfacl -R -m o::r-X /cache/root" in lines
+    assert "setfacl -R -dm o::r-X /cache/root" in lines
     # ...but no recursive named-group ACL on the cache root.
-    assert "setfacl -R -m g:m4845:rwx /cache/root" not in lines
+    assert "setfacl -R -m g:m4845:rwX /cache/root" not in lines
 
 
 # --------------------------------------------------------------------------- #

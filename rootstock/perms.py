@@ -74,16 +74,18 @@ def render_commands(
     if retrofit:
         # Existing files: make the named-group ACL and world r-x apply to what's
         # already there, plus default ACLs so the tree stays consistent.
+        # Capital ``X`` grants execute only on directories (and already-executable
+        # files), so recursing doesn't mark every .py/.so/weight file executable.
         cmds += [
-            ["setfacl", "-R", "-m", f"g:{group}:rwx", str(install_root)],
-            ["setfacl", "-R", "-dm", f"g:{group}:rwx", str(install_root)],
-            ["setfacl", "-R", "-m", "o::r-x", str(install_root)],
-            ["setfacl", "-R", "-dm", "o::r-x", str(install_root)],
+            ["setfacl", "-R", "-m", f"g:{group}:rwX", str(install_root)],
+            ["setfacl", "-R", "-dm", f"g:{group}:rwX", str(install_root)],
+            ["setfacl", "-R", "-m", "o::r-X", str(install_root)],
+            ["setfacl", "-R", "-dm", "o::r-X", str(install_root)],
         ]
         if separate_cache:
             cmds += [
-                ["setfacl", "-R", "-m", "o::r-x", str(cache_root)],
-                ["setfacl", "-R", "-dm", "o::r-x", str(cache_root)],
+                ["setfacl", "-R", "-m", "o::r-X", str(cache_root)],
+                ["setfacl", "-R", "-dm", "o::r-X", str(cache_root)],
             ]
 
     return cmds

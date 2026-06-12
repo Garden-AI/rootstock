@@ -293,11 +293,6 @@ def main():
         help="Project group that owns the install (e.g., m4845)",
     )
     setup_perms_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the commands without executing (default)",
-    )
-    setup_perms_parser.add_argument(
         "--apply",
         action="store_true",
         help="Execute the commands (after a confirmation prompt)",
