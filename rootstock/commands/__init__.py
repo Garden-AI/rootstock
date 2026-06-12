@@ -7,6 +7,7 @@ from .install import cmd_install
 from .manifest import cmd_manifest
 from .resolve import cmd_resolve
 from .serve import cmd_serve
+from .setup_perms import cmd_setup_perms
 from .smoke_test import cmd_smoke_test
 from .status import cmd_list, cmd_status
 
@@ -19,6 +20,7 @@ __all__ = [
     "cmd_new_env",
     "cmd_resolve",
     "cmd_serve",
+    "cmd_setup_perms",
     "cmd_smoke_test",
     "cmd_status",
 ]

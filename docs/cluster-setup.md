@@ -43,8 +43,6 @@ When `cache_root` is omitted from the registry, both paths are the same. Users d
 
 ### Permissions for shared installs
 
-(We are trying to further automate this, but for the time being ...)
-
 Shared installs on HPC clusters should be **world-readable**: anyone on the cluster (not just members of the maintainer's project group) should be able to use the environments and model weights. Nothing in a rootstock install is sensitive — it's all derived from public PyPI packages and public model checkpoints. Maintainer secrets (API tokens) live in the maintainer's `~/.config/rootstock/config.toml`, not in the shared root.
 
 The setup needs to satisfy:
@@ -54,32 +52,31 @@ The setup needs to satisfy:
 - All other cluster users get read + traverse.
 - New files created by `uv pip install` (and by rootstock) inherit the project group, world-read, and group-write, so the above stays true going forward.
 
-The recipe — run **once** as the maintainer, before `rootstock init`. Replace `<group>` with your project group (e.g., `m4845`).
+`rootstock setup-perms` renders and applies this recipe for you. Run it **once** as the maintainer, before `rootstock init`. Pass a registered cluster name (it resolves both the install root and, where split, the cache root) and your project group:
 
 ```bash
-# Install root: setgid + group-write for co-maintainers, world read+traverse
-chmod 2775 /path/to/install/root
-chgrp <group> /path/to/install/root
-setfacl -m  g:<group>:rwx  /path/to/install/root
-setfacl -dm g:<group>:rwx  /path/to/install/root   # default ACL — inherited by new files
-
-# Cache root (only if separate filesystem). World-readable, only maintainer writes:
-chmod 2755 /path/to/cache/root
-chgrp <group> /path/to/cache/root
-# Group inherits read+traverse from the mode bits; the setgid bit is just for
-# group-ownership inheritance on new files. No named group ACL needed.
+rootstock setup-perms --cluster perlmutter --group m4845 --apply
 ```
 
-If the install or cache root **already has files in it** when you set this up (e.g., you're retrofitting a deployment that started out project-only), apply the same ACLs recursively so existing files become world-readable too:
+Or point it at explicit paths instead of a cluster:
 
 ```bash
-setfacl -R -m  o::r-x  /path/to/install/root
-setfacl -R -dm o::r-x  /path/to/install/root
-setfacl -R -m  o::r-x  /path/to/cache/root
-setfacl -R -dm o::r-x  /path/to/cache/root
+rootstock setup-perms /path/to/install/root \
+  --cache-root /path/to/cache/root \
+  --group <group> --apply
 ```
 
-Then **the maintainer's shell** needs `umask 002` so newly written files honor the inherited group-write bits. Add to `~/.bashrc` (or whatever rc the cluster sources for non-interactive shells):
+Omit `--apply` for a **dry run** (the default) that just prints the `chmod` / `chgrp` / `setfacl` commands — useful if you (or a cautious sysadmin) want to review them or paste them into a script before anything touches the filesystem. `--apply` runs them after a confirmation prompt, stopping at the first failure.
+
+If the install or cache root **already has files in it** when you set this up (e.g., you're retrofitting a deployment that started out project-only), add `--retrofit` so the recipe also applies recursively and existing files become world-readable too:
+
+```bash
+rootstock setup-perms --cluster perlmutter --group m4845 --retrofit --apply
+```
+
+`rootstock install` re-checks these permissions up front on every run and prints a warning if the root doesn't look world-readable (wrong mode bits, missing setgid, missing default ACL, or a mask clamp from too-restrictive a umask). The check is read-only and never blocks the build; pass `--no-perm-check` to silence it.
+
+Then **the maintainer's shell** needs `umask 002` so newly written files honor the inherited group-write bits. (This is the one piece `setup-perms` can't do for you — it's a per-shell setting.) Add to `~/.bashrc` (or whatever rc the cluster sources for non-interactive shells):
 
 ```bash
 umask 002

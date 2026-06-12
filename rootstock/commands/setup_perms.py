@@ -1,0 +1,85 @@
+"""``rootstock setup-perms`` — render or apply the shared-install perm recipe."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+from ..clusters import get_cluster
+from ..perms import format_command, render_commands
+
+
+def _resolve_roots(args) -> tuple[Path, Path | None] | None:
+    """Resolve (install_root, cache_root) from --cluster or the positional root.
+
+    Returns None (after printing an error) on bad input. ``cache_root`` is None
+    when there is no separate cache filesystem.
+    """
+    if args.cluster:
+        try:
+            cluster = get_cluster(args.cluster)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return None
+        install_root = cluster.root
+        cache_root = cluster.cache_root  # None when same as install root
+        return install_root, cache_root
+
+    if not args.root:
+        print(
+            "Error: provide an install root path or --cluster <name>.",
+            file=sys.stderr,
+        )
+        return None
+
+    install_root = Path(args.root)
+    cache_root = Path(args.cache_root) if args.cache_root else None
+    return install_root, cache_root
+
+
+def cmd_setup_perms(args) -> int:
+    """Render (dry-run, default) or apply the shared-install permission recipe."""
+    resolved = _resolve_roots(args)
+    if resolved is None:
+        return 1
+    install_root, cache_root = resolved
+
+    commands = render_commands(
+        install_root,
+        cache_root,
+        group=args.group,
+        retrofit=args.retrofit,
+    )
+
+    if not args.apply:
+        # Dry-run (default): print the commands a maintainer (or sysadmin) would
+        # run, so they can review or paste them into a script.
+        print(f"# Permission recipe for {install_root} (group: {args.group})")
+        if cache_root is not None and cache_root != install_root:
+            print(f"# Separate cache root: {cache_root}")
+        if args.retrofit:
+            print("# --retrofit: includes recursive setfacl for existing files")
+        for argv in commands:
+            print(format_command(argv))
+        return 0
+
+    # --apply: confirm, then run each command, stopping at the first failure.
+    print(f"About to apply these permissions to {install_root} (group: {args.group}):")
+    for argv in commands:
+        print(f"  {format_command(argv)}")
+    answer = input("Proceed? [y/N]: ").strip().lower()
+    if answer not in ("y", "yes"):
+        print("Aborted.")
+        return 1
+
+    for argv in commands:
+        result = subprocess.run(argv, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Error: command failed: {format_command(argv)}", file=sys.stderr)
+            if result.stderr:
+                print(result.stderr.rstrip(), file=sys.stderr)
+            return 1
+
+    print("Permissions applied.")
+    return 0
