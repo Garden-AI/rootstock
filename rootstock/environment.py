@@ -292,32 +292,48 @@ def parse_checkpoints_dict(env_source_path: Path) -> dict[str, str]:
     )
 
 
+def list_declared_checkpoints(root: Path | str) -> dict[str, dict[str, str]]:
+    """
+    Walk ``{root}/envs/*/env_source.py`` and return ``{env_name: CHECKPOINTS}``
+    for every installed env that declares a valid ``CHECKPOINTS`` dict.
+
+    This is the single source of truth for "which canonical checkpoint ids can
+    ``rootstock add`` accept". Envs whose source file is missing or whose
+    ``CHECKPOINTS`` dict is malformed are silently skipped. Results are ordered
+    by env name.
+    """
+    root = Path(root)
+    envs_dir = root / "envs"
+    declared: dict[str, dict[str, str]] = {}  # env_name -> {id: upstream}
+    if not envs_dir.exists():
+        return declared
+    for env_dir in sorted(envs_dir.iterdir()):
+        source = env_dir / "env_source.py"
+        if not source.exists():
+            continue
+        try:
+            declared[env_dir.name] = parse_checkpoints_dict(source)
+        except ValueError:
+            continue
+    return declared
+
+
 def find_env_for_checkpoint(
     root: Path | str, checkpoint_id: str
 ) -> tuple[str, dict[str, str]]:
     """
-    Walk ``{root}/envs/*/env_source.py`` and return ``(env_name, CHECKPOINTS)``
-    for the env that declares ``checkpoint_id``.
+    Return ``(env_name, CHECKPOINTS)`` for the installed env that declares
+    ``checkpoint_id``.
 
     Raises ``CheckpointNotFoundError`` with a message listing every canonical
     id declared by any installed env, plus a hint to ``rootstock install`` if
     nothing matches.
     """
     root = Path(root)
-    envs_dir = root / "envs"
-    declared: dict[str, list[str]] = {}  # env_name -> [ids]
-    if envs_dir.exists():
-        for env_dir in sorted(envs_dir.iterdir()):
-            source = env_dir / "env_source.py"
-            if not source.exists():
-                continue
-            try:
-                ckpts = parse_checkpoints_dict(source)
-            except ValueError:
-                continue
-            declared[env_dir.name] = list(ckpts)
-            if checkpoint_id in ckpts:
-                return env_dir.name, ckpts
+    declared = list_declared_checkpoints(root)
+    for env_name, ckpts in declared.items():
+        if checkpoint_id in ckpts:
+            return env_name, ckpts
 
     if declared:
         listing = "\n".join(

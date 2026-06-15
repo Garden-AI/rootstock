@@ -13,6 +13,7 @@ from ..environment import (
     CheckpointNotFoundError,
     find_env_for_checkpoint,
     get_model_cache_env,
+    list_declared_checkpoints,
 )
 from ..manifest import (
     CheckpointInfo,
@@ -156,8 +157,41 @@ def _ensure_manifest_entry(
     return manifest, env, env.checkpoints[checkpoint]
 
 
+def _print_checkpoint_catalog(root: Path) -> int:
+    """Print every canonical checkpoint id ``rootstock add`` accepts, grouped
+    by hosting env. Returns a process exit code."""
+    declared = list_declared_checkpoints(root)
+    if not declared:
+        print(
+            f"No envs are installed at {root}. "
+            f"Run `rootstock install <env-file> --root {root}` first."
+        )
+        return 0
+
+    print(f"Checkpoints available to add in {root}:")
+    for env_name, ckpts in declared.items():
+        print(f"  {env_name}:")
+        if not ckpts:
+            print("    (none)")
+            continue
+        for ckpt_id in ckpts:
+            print(f"    {ckpt_id}")
+    return 0
+
+
 def cmd_add(args) -> int:
     root = get_root_or_exit(args)
+
+    if getattr(args, "list", False):
+        return _print_checkpoint_catalog(root)
+
+    if not args.checkpoint:
+        print(
+            "Error: a checkpoint id is required (or pass --list to see available ids)",
+            file=sys.stderr,
+        )
+        return 2
+
     cache_root = resolve_cache_root(root)
     checkpoint = args.checkpoint
     device = args.device

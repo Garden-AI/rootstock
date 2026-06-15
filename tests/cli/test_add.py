@@ -89,6 +89,7 @@ def _make_args(root: Path, **overrides):
 
     args = _Args()
     args.checkpoint = overrides.get("checkpoint", "mace-mp-0-medium")
+    args.list = overrides.get("list", False)
     args.kwarg = overrides.get("kwarg")
     args.device = overrides.get("device", "cuda")
     args.no_verify = overrides.get("no_verify", False)
@@ -237,3 +238,34 @@ def test_add_errors_when_no_envs_installed(tmp_path):
 
     rc = cmd_add(_make_args(tmp_path, checkpoint="mace-mp-0-medium", no_verify=True))
     assert rc == 1
+
+
+# ---------- cmd_add --list (checkpoint catalog) ---------------------------
+
+
+def test_add_list_shows_declared_checkpoints(fake_root, capsys):
+    """--list prints every declared id grouped by env, without touching the
+    download/verify paths."""
+    rc = cmd_add(_make_args(fake_root, list=True, checkpoint=None))
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "mace:" in out
+    for ckpt_id in ("mace-mp-0-small", "mace-mp-0-medium", "mace-mp-0-large"):
+        assert ckpt_id in out
+
+
+def test_add_list_when_no_envs_installed(tmp_path, capsys):
+    """--list on an empty root points the user at install rather than erroring."""
+    rc = cmd_add(_make_args(tmp_path, list=True, checkpoint=None))
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "No envs are installed" in out
+    assert "rootstock install" in out
+
+
+def test_add_without_checkpoint_or_list_returns_2(fake_root):
+    """Omitting both the checkpoint and --list is a usage error."""
+    rc = cmd_add(_make_args(fake_root, checkpoint=None))
+    assert rc == 2
