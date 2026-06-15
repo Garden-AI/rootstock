@@ -9,6 +9,7 @@ import json
 import os
 import socket
 import subprocess
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -87,6 +88,12 @@ class RootstockServer:
         self._process: subprocess.Popen | None = None
         self._connected = False
 
+        # Worker stdout/stderr are redirected to temp files (not pipes) so a
+        # chatty model load can't fill the OS pipe buffer and block before the
+        # worker connects. See _start_worker / _read_worker_output.
+        self._stdout_file = None
+        self._stderr_file = None
+
         # Track INIT state
         self._init_sent = False
         self._init_numbers: list[int] | None = None
@@ -137,11 +144,21 @@ class RootstockServer:
         if self.log:
             print(f"Spawning worker: {' '.join(cmd)}", file=self.log, flush=True)
 
+        # Redirect worker output to temp files rather than pipes. The worker
+        # loads the model in setup() *before* connecting to the socket; a noisy
+        # load that exceeds the OS pipe buffer (~64 KB) would block on the write
+        # and never connect, deadlocking _accept_connection. Regular files have
+        # no such buffer limit, and we can still read them back to report errors
+        # if the worker dies. When logging, inherit the parent's fds as before.
+        if not self.log:
+            self._stdout_file = tempfile.TemporaryFile()
+            self._stderr_file = tempfile.TemporaryFile()
+
         self._process = subprocess.Popen(
             cmd,
             env=env,
-            stdout=subprocess.PIPE if not self.log else None,
-            stderr=subprocess.PIPE if not self.log else None,
+            stdout=self._stdout_file,
+            stderr=self._stderr_file,
         )
 
     def _accept_connection(self):
@@ -156,7 +173,7 @@ class RootstockServer:
             except TimeoutError:
                 # Check if process died
                 if self._process.poll() is not None:
-                    stdout, stderr = self._process.communicate()
+                    stdout, stderr = self._read_worker_output()
                     raise RuntimeError(
                         f"Worker process died with code {self._process.returncode}.\n"
                         f"stdout: {stdout}\nstderr: {stderr}"
@@ -171,6 +188,24 @@ class RootstockServer:
 
         if self.log:
             print("Worker connected", file=self.log, flush=True)
+
+    def _read_worker_output(self) -> tuple[str, str]:
+        """Read the worker's captured stdout/stderr from the temp files.
+
+        Returns decoded ``(stdout, stderr)``. Empty strings when output was not
+        captured (e.g. logging mode, where the worker inherits the parent fds).
+        """
+
+        def _drain(f) -> str:
+            if f is None:
+                return ""
+            try:
+                f.seek(0)
+                return f.read().decode("utf-8", errors="replace")
+            except (ValueError, OSError):
+                return ""
+
+        return _drain(self._stdout_file), _drain(self._stderr_file)
 
     def calculate(
         self,
@@ -260,6 +295,16 @@ class RootstockServer:
                 self._process.kill()
                 self._process.wait()
             self._process = None
+
+        # Close worker output temp files
+        for attr in ("_stdout_file", "_stderr_file"):
+            f = getattr(self, attr)
+            if f is not None:
+                try:
+                    f.close()
+                except OSError:
+                    pass
+                setattr(self, attr, None)
 
         # Clean up socket file
         if os.path.exists(self.socket_path):
