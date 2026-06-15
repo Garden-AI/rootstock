@@ -24,6 +24,8 @@ Commands:
     rootstock add <checkpoint-id> [--root <path>] [--device <dev>] [--kwarg KEY=VAL ...]
         Resolve the env that hosts <checkpoint-id> from the installed envs,
         then download and verify the weights.
+    rootstock add --list [--root <path>]
+        List every canonical checkpoint id that add accepts, grouped by env.
 
     rootstock status [--root <path>]
     rootstock list [--root <path>]
@@ -160,12 +162,19 @@ def main():
             "Idempotent download-or-verify. Resolves the hosting env from the "
             "installed envs by matching the canonical checkpoint id against each "
             "env's CHECKPOINTS dict. Skips download if already fetched. "
-            "Use --no-verify on login nodes without GPUs."
+            "Use --no-verify on login nodes without GPUs. "
+            "Pass --list to see every checkpoint id that can be added."
         ),
     )
     add_parser.add_argument(
         "checkpoint",
+        nargs="?",
         help="Canonical checkpoint id (e.g., 'mace-mp-0-medium', 'uma-s-1p1')",
+    )
+    add_parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List canonical checkpoint ids that add accepts (grouped by env) and exit",
     )
     add_parser.add_argument(
         "--kwarg",

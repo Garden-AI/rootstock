@@ -22,6 +22,7 @@ from .environment import (
     EnvironmentManager,
     get_model_cache_env,
     list_built_environments,
+    list_declared_checkpoints,
     list_environments,
 )
 from .manifest import Manifest, load_manifest, save_manifest
@@ -36,6 +37,7 @@ __all__ = [
     "EnvironmentManager",
     "list_environments",
     "list_built_environments",
+    "list_declared_checkpoints",
     "get_model_cache_env",
     "parse_pep723_metadata",
     "validate_environment_file",
