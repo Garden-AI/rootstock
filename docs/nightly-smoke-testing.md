@@ -10,22 +10,17 @@ pass each) and pushes the refreshed `manifest.json` to the backend. Running it
 on a schedule keeps each cluster's manifest honest about checkpoint health.
 
 The mechanism is a **self-scheduling batch job**: a single GPU job that first
-re-queues its own next run, then runs the smoke-test. The manifest push *is* the
-result — nothing off-cluster waits on the job, so there are **no GitHub Actions,
-no Globus endpoint, and no login-node daemon** to keep alive. The only state
-that persists between runs is "a job is queued for next time," which the job
+re-queues its own next run, then runs the smoke-test. The only state that
+persists between runs is "a job is queued for next time," which the job
 maintains by resubmitting itself.
 
-Two ready-to-edit recipes ship in the repo:
+Two recipes with placeholders:
 
 - `scripts/nightly_smoke_test.sbatch` — SLURM (e.g. Della, Delta)
 - `scripts/nightly_smoke_test.pbs` — PBS Pro (e.g. ALCF Sophia)
 
 > The command and these recipes keep the name "nightly" for continuity, but the
-> default cadence is **weekly** (`CADENCE_DAYS=7`). Checkpoints don't rot on
-> their own; the drift this guards against (driver/library/filesystem changes)
-> doesn't move nightly, and a >1hr GPU job per cluster every night is real
-> allocation burn. Set `CADENCE_DAYS=1` for a cluster under active change.
+> default cadence is **weekly** (`CADENCE_DAYS=7`). 
 
 ## Prerequisites
 
@@ -59,8 +54,6 @@ Two ready-to-edit recipes ship in the repo:
    - a next run is queued — `squeue --me -n rootstock-nightly` (SLURM) /
      `qstat -u $USER` (PBS) shows a pending/queued job, and
    - the manifest landed — `rootstock status` shows fresh `verified_at` times.
-
-That's the whole setup. No daemons, no secrets, no off-cluster pieces.
 
 ## How the self-scheduling works
 
@@ -127,12 +120,3 @@ Override via env at submit time (SLURM: inline `VAR=val sbatch …`; PBS:
 > non-default kwargs (e.g. a UMA checkpoint needing `task=omol`) will appear
 > failing even though `add` succeeded. The remedy is to make the preferred
 > kwargs the env's default in the env file.
-
-## Observability
-
-- **Passive (now):** `rootstock status` renders per-checkpoint `⚠ stale`
-  markers, so a cluster that stopped reporting is visible on demand.
-- **Active (follow-up, backend repo):** the backend already receives every
-  manifest push with a timestamp, so "cluster X hasn't reported in N days" is
-  detectable purely server-side. That staleness alert is tracked as a follow-up
-  against the backend repo — no on-cluster code needed.
