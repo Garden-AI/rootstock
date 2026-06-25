@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# === EDIT THESE for your cluster (PBS Pro, e.g. ALCF Sophia) ===============
+#PBS -N rootstock-nightly
+#PBS -A CHANGEME-allocation
+#PBS -q CHANGEME-gpu-queue
+#PBS -l select=1:ngpus=1
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+# ==========================================================================
+#
+# Self-scheduling nightly smoke-test for PBS clusters. PBS sibling of
+# scripts/nightly_smoke_test.sbatch — see that file's header for the design.
+#
+# A single GPU batch job that (1) re-queues its own next run, then (2) runs
+# `rootstock smoke-test`, which pushes the refreshed manifest to the backend.
+# The push IS the result channel, so nothing off-cluster waits on this job.
+#
+# One-time kickoff (submit from the directory containing this script; PBS has
+# no reliable way to recover the script path mid-job, so we reference it by
+# its submit directory):
+#   qsub scripts/nightly_smoke_test.pbs
+#
+# Stop the chain:
+#   touch ~/.rootstock-nightly-stop      # next run won't reschedule
+#   qstat -u $USER                       # find the queued (Q) next run
+#   qdel <jobid>                         # delete it
+#
+# Fast end-to-end test (reschedule ~3 min out instead of next week):
+#   qsub -a $(date -d "+3 minutes" +%m%d%H%M) scripts/nightly_smoke_test.pbs
+# (passing -a on the command line just kicks off the chain sooner; subsequent
+#  runs use the cadence below.)
+
+set -euo pipefail
+
+# --- Knobs (override via env: qsub -v VAR=val) ------------------------------
+export ROOTSTOCK_ROOT="${ROOTSTOCK_ROOT:-/CHANGEME/path/to/rootstock}"
+
+# Cadence. Default weekly at RUN_HOUR, drift-free wall-clock (not "now+24h").
+# Set CADENCE_DAYS=1 for nightly. PBS -a takes [[CC]YY]MMDDhhmm.
+CADENCE_DAYS="${CADENCE_DAYS:-7}"
+RUN_HOUR="${RUN_HOUR:-02:00}"
+RESCHEDULE_AT="${RESCHEDULE_AT:-$(date -d "+${CADENCE_DAYS} days ${RUN_HOUR}" +%m%d%H%M)}"
+
+STOP_FILE="${STOP_FILE:-$HOME/.rootstock-nightly-stop}"
+JOB_NAME="${JOB_NAME:-rootstock-nightly}"
+
+# PBS copies the script to a spool dir, so $0 is unreliable. Reference the
+# original by submit directory (override SELF_PATH if you submit from elsewhere).
+SELF_PATH="${SELF_PATH:-${PBS_O_WORKDIR:-$(pwd)}/nightly_smoke_test.pbs}"
+
+# --- Reschedule FIRST -------------------------------------------------------
+# Queue the next run before any work, so a crash in the smoke-test can't break
+# the chain. The next job sits queued (Q) until -a; qdel it to stop the chain.
+if [[ -z "${PBS_JOBID:-}" ]]; then
+  echo "not running under PBS; skipping reschedule (dry run)."
+elif [[ -e "$STOP_FILE" ]]; then
+  echo "stop file present ($STOP_FILE); chain ends here."
+elif qselect -u "$USER" -N "$JOB_NAME" -s Q 2>/dev/null | grep -q .; then
+  # Belt-and-suspenders against duplicate chains.
+  echo "a '$JOB_NAME' job is already queued; not scheduling another."
+else
+  next_id="$(qsub -a "$RESCHEDULE_AT" "$SELF_PATH")"
+  echo "scheduled next run: job $next_id (begins at $RESCHEDULE_AT)"
+fi
+
+# --- Payload ----------------------------------------------------------------
+# Keep the ACL mask rw- on shared filesystems (batch jobs don't source bashrc).
+umask 0002
+
+# ALCF compute nodes have no direct outbound network; set the proxy defensively
+# in case any checkpoint's setup() re-checks gating. smoke-test never downloads.
+export HTTP_PROXY="${HTTP_PROXY:-http://proxy.alcf.anl.gov:3128}"
+export HTTPS_PROXY="${HTTPS_PROXY:-http://proxy.alcf.anl.gov:3128}"
+export http_proxy="$HTTP_PROXY"
+export https_proxy="$HTTPS_PROXY"
+
+if [[ -f ~/.cache/huggingface/token ]]; then
+  export HF_TOKEN="$(cat ~/.cache/huggingface/token)"
+  export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
+else
+  echo "WARNING: no HF token at ~/.cache/huggingface/token; gated checkpoints may fail." >&2
+fi
+
+# Ensure `rootstock` is on PATH here (activate the venv / module load as your
+# cluster requires). Batch jobs start from a bare environment.
+#   source ~/.venvs/rootstock/bin/activate
+
+nvidia-smi | head -4 || true
+echo "=== rootstock smoke-test (root=$ROOTSTOCK_ROOT) ==="
+
+# Re-verify every fetched checkpoint on GPU and PUSH the manifest (no
+# --no-push): unattended substitute for CI, must leave the backend as CI would.
+rootstock smoke-test \
+  --device cuda \
+  --json \
+  | tee "rootstock-nightly-${PBS_JOBID:-manual}.json"
