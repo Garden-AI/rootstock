@@ -6,7 +6,7 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
-#SBATCH -t 02:00:00
+#SBATCH -t 12:00:00
 #SBATCH -o rootstock-nightly-%j.out
 # ==========================================================================
 #

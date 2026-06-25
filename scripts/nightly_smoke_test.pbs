@@ -4,7 +4,7 @@
 #PBS -A CHANGEME-allocation
 #PBS -q CHANGEME-gpu-queue
 #PBS -l select=1:ngpus=1
-#PBS -l walltime=02:00:00
+#PBS -l walltime=12:00:00
 #PBS -l filesystems=home:eagle
 #PBS -j oe
 # ==========================================================================
