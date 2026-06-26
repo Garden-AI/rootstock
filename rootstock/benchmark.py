@@ -47,7 +47,7 @@ installed on this cluster, then pick a few checkpoints::
 
     rootstock benchmark \
         --root /projects/bchg/rootstock \
-        --checkpoints mace-mp-0-medium uma-s-1p1 7net-0 \
+        --checkpoints mace-mp-0-medium uma-s-1p1 sevennet-0 \
         --devices cuda \
         --system Cu:256 \
         --calls 100 --warmup 10 \

@@ -31,7 +31,7 @@ export ROOTSTOCK_ROOT="${ROOTSTOCK_ROOT:-/CHANGEME/path/to/rootstock}"
 
 # Checkpoints to compare — a spread of sizes/families. List what's installed:
 #   rootstock benchmark --root $ROOTSTOCK_ROOT --list
-CHECKPOINTS="${CHECKPOINTS:-mace-mp-0-medium uma-s-1p1 7net-0}"
+CHECKPOINTS="${CHECKPOINTS:-mace-mp-0-medium uma-s-1p1 sevennet-0}"
 DEVICES="${DEVICES:-cuda}"
 SYSTEM="${SYSTEM:-Cu:256}"
 CALLS="${CALLS:-100}"
