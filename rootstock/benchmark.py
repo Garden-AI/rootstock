@@ -40,11 +40,12 @@ What it reports, per (checkpoint, device)
 
 Usage
 -----
-List what is installed on this cluster, then pick a few checkpoints::
+With the ``rootstock`` CLI installed (no repo checkout needed) -- list what is
+installed on this cluster, then pick a few checkpoints::
 
-    uv run benchmarks/ipc_overhead.py --root /projects/bchg/rootstock --list
+    rootstock benchmark --root /projects/bchg/rootstock --list
 
-    uv run benchmarks/ipc_overhead.py \
+    rootstock benchmark \
         --root /projects/bchg/rootstock \
         --checkpoints mace-mp-0-medium uma-s-1p1 7net-0 \
         --devices cuda \
@@ -55,8 +56,10 @@ List what is installed on this cluster, then pick a few checkpoints::
 ``--root`` (or ``--cluster`` for a registered cluster) is the only
 cluster-specific knob; everything else is identical across machines. Add
 ``--devices cuda cpu`` to cover both. Run inside a GPU allocation for cuda.
-Can also be run as a module (``python -m benchmarks.ipc_overhead``) from a
-rootstock checkout where ``rootstock`` is already importable.
+
+From a repo checkout the same entry point is also reachable as
+``uv run rootstock/benchmark.py ...`` (the PEP 723 header above lets uv resolve
+deps on the fly) or ``python -m rootstock.benchmark ...``.
 """
 
 from __future__ import annotations
@@ -352,8 +355,9 @@ def list_available(root: Path) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv=None) -> int:
     p = argparse.ArgumentParser(
+        prog="rootstock benchmark",
         description="Benchmark Rootstock i-PI IPC overhead vs. in-env direct calls.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -383,7 +387,7 @@ def main() -> int:
     p.add_argument("--device", help=argparse.SUPPRESS)
     p.add_argument("--worker-data", help=argparse.SUPPRESS)
 
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     if args.worker_mode:
         return run_worker_mode(args)
