@@ -27,6 +27,10 @@ Commands:
     rootstock add --list [--root <path>]
         List every canonical checkpoint id that add accepts, grouped by env.
 
+    rootstock benchmark [--root <path>] [--checkpoints <id> ...] [--devices cuda cpu] [--list]
+        Measure i-PI IPC overhead: RootstockCalculator vs. the same calculator
+        called directly inside its pre-built env. `--list` shows installed ids.
+
     rootstock status [--root <path>]
     rootstock list [--root <path>]
     rootstock serve <checkpoint-id> [--root <path>] --socket <path> [--device <dev>]
@@ -44,6 +48,7 @@ import sys
 from . import __version__
 from .commands import (
     cmd_add,
+    cmd_benchmark,
     cmd_init,
     cmd_install,
     cmd_list,
@@ -60,6 +65,13 @@ from .config import DEFAULT_CONFIG_FILE
 
 
 def main():
+    # `rootstock benchmark ...` forwards everything after the subcommand to the
+    # benchmark's own argument parser. Intercept it before the main parser runs,
+    # since argparse can't cleanly pass arbitrary flags through a subparser.
+    argv = sys.argv[1:]
+    if argv and argv[0] == "benchmark":
+        sys.exit(cmd_benchmark(argv[1:]))
+
     parser = argparse.ArgumentParser(
         prog="rootstock",
         description="Rootstock MLIP environment manager",
@@ -340,6 +352,21 @@ def main():
         ),
     )
     serve_parser.set_defaults(func=cmd_serve)
+
+    # benchmark command. Registered only so it appears in `rootstock --help`;
+    # the actual dispatch happens in the early intercept at the top of main(),
+    # which forwards all following args to the benchmark's own parser. (argparse
+    # REMAINDER can't reliably capture leading options, so we bypass it.)
+    subparsers.add_parser(
+        "benchmark",
+        help="Measure i-PI IPC overhead vs. in-env direct calls",
+        description=(
+            "Compare RootstockCalculator against the same calculator called "
+            "directly inside its pre-built env. See `rootstock benchmark --help` "
+            "for options."
+        ),
+        add_help=False,
+    )
 
     # manifest command
     manifest_parser = subparsers.add_parser(

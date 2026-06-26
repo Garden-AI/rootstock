@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# === EDIT THESE for your cluster (PBS Pro, e.g. ALCF Sophia) ===============
+#PBS -N rootstock-bench
+#PBS -A CHANGEME-allocation
+#PBS -q CHANGEME-gpu-queue
+#PBS -l select=1:ngpus=1
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+# ==========================================================================
+#
+# On-demand GPU job that measures Rootstock's i-PI IPC overhead by comparing
+# RootstockCalculator against the in-environment direct calculator, for a few
+# checkpoints. See `rootstock benchmark --help` for the methodology and options.
+# PBS sibling of scripts/benchmark_ipc_overhead.sbatch.
+#
+# Unlike the nightly smoke-test this does NOT reschedule itself — it's a
+# one-shot benchmark you run when you want numbers.
+#
+# Submit from the directory containing this script:
+#   qsub scripts/benchmark_ipc_overhead.pbs
+#
+# Override knobs (qsub -v passes them through):
+#   qsub -v CHECKPOINTS="mace-mp-0-medium uma-s-1p1",DEVICES="cuda cpu" \
+#     scripts/benchmark_ipc_overhead.pbs
+
+set -euo pipefail
+
+# --- Knobs (override via env: qsub -v VAR=val) ------------------------------
+export ROOTSTOCK_ROOT="${ROOTSTOCK_ROOT:-/CHANGEME/path/to/rootstock}"
+
+# Checkpoints to compare — a spread of sizes/families. List what's installed:
+#   rootstock benchmark --root $ROOTSTOCK_ROOT --list
+CHECKPOINTS="${CHECKPOINTS:-mace-mp-0-medium uma-s-1p1 7net-0}"
+DEVICES="${DEVICES:-cuda}"
+SYSTEM="${SYSTEM:-Cu:256}"
+CALLS="${CALLS:-100}"
+WARMUP="${WARMUP:-10}"
+
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+umask 0002
+
+# Some clusters' compute nodes have no direct outbound network (e.g. ALCF).
+# The benchmark replays a fixed trajectory and never downloads, so a proxy is
+# only needed if a checkpoint's setup() re-checks gating. Set it if yours does:
+#   export HTTPS_PROXY=http://proxy.example.org:3128
+
+if [[ -f ~/.cache/huggingface/token ]]; then
+  export HF_TOKEN="$(cat ~/.cache/huggingface/token)"
+  export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
+fi
+
+# Ensure `rootstock` is on PATH here (activate the venv / module load as your
+# cluster requires). Bare PBS jobs start with a minimal PATH.
+#   export PATH="$HOME/.local/bin:$PATH"
+
+nvidia-smi | head -4 || true
+echo "=== IPC-overhead benchmark (root=$ROOTSTOCK_ROOT) ==="
+
+OUT="rootstock-bench-${PBS_JOBID:-manual}.json"
+
+rootstock benchmark \
+  --root "$ROOTSTOCK_ROOT" \
+  --checkpoints $CHECKPOINTS \
+  --devices $DEVICES \
+  --system "$SYSTEM" \
+  --calls "$CALLS" \
+  --warmup "$WARMUP" \
+  --out "$OUT"
+
+echo "=== wrote $OUT ==="
