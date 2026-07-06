@@ -197,6 +197,10 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 The canonical ids in `CHECKPOINTS` are the join key with the Almanac. If the Almanac registers `mace-mp-0-medium` and you ship a `CHECKPOINTS` key of `mace_mp_0_medium`, the two never join and no row in the matrix lights up. Match the registered id exactly. The Almanac is the registry of canonical ids; this env file is the local dispatch.
 
+### Serve time must not write to the shared install
+
+`rootstock add` (run by a maintainer, who can write the shared cache) is when weights download; after that, `setup()` runs as arbitrary users who can only *read* the install. So `setup()` must not write under the shared root on a warm cache — no lock files, no re-downloads, no "touch to check". Libraries that take a write-lock even on cache hits (e.g. `cached_path`, which orb-models uses) break this: hand them a local file path instead of a URL, pre-fetching the file into `$XDG_CACHE_HOME` yourself — see `nvidia_configs/orb.py`. Runtime scratch (compiled kernels, config dirs) is already redirected per-user by rootstock; this rule is about what your `setup()` and its libraries do with model files.
+
 ### Expect cluster-specific edits
 
 The same model rarely drops onto every cluster unchanged. Driver and CUDA versions, the available Python, and filesystem behavior all vary, so adapting a sample's dependency pins or `setup()` for a given cluster is routine, not exceptional. A file can also declare a strict subset of the canonical ids the standard sample carries — keys it doesn't list simply won't resolve to it, and `rootstock add` finds the right env for each id.
