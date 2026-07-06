@@ -305,12 +305,55 @@ def _install_single_environment(
     print("4. Copying environment source...")
     shutil.copy(env_source, env_target / "env_source.py")
 
+    print("5. Pre-compiling bytecode...")
+    _precompile_environment(env_python, env_target)
+
     print(f"\nBuilt environment: {env_target}")
 
     # Update manifest (quiet=True to avoid cluttering build output)
     update_and_push_manifest(root, quiet=False, push=not no_push)
 
     return 0
+
+
+def _precompile_environment(env_python: Path, env_target: Path) -> None:
+    """Byte-compile the whole venv so shared-install users never need to.
+
+    Without this, the first import by each user tries to write ``__pycache__``
+    into the shared (read-only to them) venv, silently fails, and recompiles
+    in memory on every run — a per-import perf tax on everyone but the
+    maintainer.
+
+    Warn-only: large site-packages trees routinely contain files that don't
+    byte-compile (vendored test fixtures, py2 leftovers). Those fail at import
+    time too, so nothing real is importing them; they don't invalidate the
+    build.
+    """
+    env = os.environ.copy()
+    # .pyc files must land in-tree, next to their sources — not in the
+    # maintainer's per-user redirect, where other users can't see them.
+    env.pop("PYTHONPYCACHEPREFIX", None)
+
+    result = subprocess.run(
+        [str(env_python), "-m", "compileall", "-q", "-j", "0", str(env_target)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode != 0:
+        # compileall reports errors on stdout; -q suppresses everything else.
+        output = [
+            line
+            for line in (result.stdout + result.stderr).splitlines()
+            if line.strip()
+        ]
+        shown = "\n".join(f"    {line}" for line in output[:10])
+        print(
+            "  Warning: some files did not byte-compile (normal for vendored/"
+            "py2 files; they would fail at import time anyway):\n" + shown
+        )
+        if len(output) > 10:
+            print(f"    ... and {len(output) - 10} more lines")
 
 
 def _warn_on_permissions(root: Path) -> None:
@@ -354,6 +397,13 @@ def cmd_install(args) -> int:
         1: One or more installs failed
     """
     from ..environment import check_uv_available
+
+    # Shared installs must be world-readable and group-writable (the recipe in
+    # docs/cluster-setup.md). Everything this command creates is derived from
+    # public packages, so override any restrictive personal umask for the
+    # duration of the build — uv subprocesses inherit it — rather than
+    # retrofitting permissions afterwards.
+    os.umask(0o002)
 
     if getattr(args, "models", None):
         print(

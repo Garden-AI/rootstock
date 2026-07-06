@@ -16,7 +16,23 @@ from rootstock.clusters import (
     get_root_for_cluster,
 )
 from rootstock.commands.common import resolve_cache_root
-from rootstock.environment import EnvironmentManager, get_model_cache_env
+from rootstock.environment import (
+    EnvironmentManager,
+    get_model_cache_env,
+    get_user_cache_dir,
+)
+
+# Runtime write-back caches that must NEVER point into the shared roots —
+# non-maintainers can only read there.
+_PER_USER_VARS = (
+    "TRITON_CACHE_DIR",
+    "TORCHINDUCTOR_CACHE_DIR",
+    "TORCH_EXTENSIONS_DIR",
+    "CUDA_CACHE_PATH",
+    "PYTHONPYCACHEPREFIX",
+    "XDG_CONFIG_HOME",
+    "MPLCONFIGDIR",
+)
 
 # ---------- get_model_cache_env: pure function ----------------------------
 
@@ -43,6 +59,53 @@ def test_get_model_cache_env_none_cache_root_falls_back_to_root():
     a = get_model_cache_env(Path("/install"), cache_root=None)
     b = get_model_cache_env(Path("/install"))
     assert a == b
+
+
+# ---------- per-user write-back redirection --------------------------------
+
+
+def test_write_back_caches_never_point_into_shared_roots(monkeypatch, tmp_path: Path):
+    for var in _PER_USER_VARS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ROOTSTOCK_USER_CACHE_DIR", str(tmp_path / "user-cache"))
+
+    out = get_model_cache_env(Path("/install"), cache_root=Path("/cache"))
+    for var in _PER_USER_VARS:
+        assert out[var].startswith(str(tmp_path / "user-cache")), f"{var} = {out[var]}"
+        assert not out[var].startswith("/install")
+        assert not out[var].startswith("/cache")
+
+
+def test_write_back_caches_respect_preexisting_values(monkeypatch):
+    """A user pointing e.g. Triton at node-local SSD in a job script wins."""
+    monkeypatch.setenv("TRITON_CACHE_DIR", "/local/scratch/triton")
+    out = get_model_cache_env(Path("/install"))
+    assert out["TRITON_CACHE_DIR"] == "/local/scratch/triton"
+
+
+def test_write_back_caches_ignore_empty_preexisting_values(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ROOTSTOCK_USER_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("TRITON_CACHE_DIR", "")
+    out = get_model_cache_env(Path("/install"))
+    assert out["TRITON_CACHE_DIR"] == str(tmp_path / "triton")
+
+
+def test_get_user_cache_dir_defaults_to_real_home(monkeypatch):
+    monkeypatch.delenv("ROOTSTOCK_USER_CACHE_DIR", raising=False)
+    assert get_user_cache_dir() == Path.home() / ".cache" / "rootstock"
+
+
+def test_get_user_cache_dir_env_override(monkeypatch):
+    monkeypatch.setenv("ROOTSTOCK_USER_CACHE_DIR", "/pscratch/u/me/rs")
+    assert get_user_cache_dir() == Path("/pscratch/u/me/rs")
+
+
+def test_shared_read_redirects_unaffected_by_user_cache(monkeypatch, tmp_path: Path):
+    """Weights are still found in the shared cache — only writes move."""
+    monkeypatch.setenv("ROOTSTOCK_USER_CACHE_DIR", str(tmp_path))
+    out = get_model_cache_env(Path("/install"), cache_root=Path("/cache"))
+    assert out["HOME"] == "/cache/home"
+    assert out["HF_HUB_CACHE"] == "/cache/cache/huggingface/hub"
 
 
 # ---------- Cluster registry ---------------------------------------------
@@ -73,6 +136,12 @@ def test_perlmutter_registered_with_split():
     # CFS for code, PSCRATCH for cache.
     assert "cfs" in str(pm.root).lower()
     assert "pscratch" in str(pm.cache_root).lower()
+
+
+def test_polaris_shares_sophia_eagle_root():
+    """Both ALCF machines mount Eagle and share one install."""
+    assert get_cluster("polaris").root == get_cluster("sophia").root
+    assert get_cluster("polaris").cache_root is None
 
 
 def test_get_root_for_cluster_returns_install_root():

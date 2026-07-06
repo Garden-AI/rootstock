@@ -36,6 +36,11 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
     "sophia": Cluster(
         root=Path("/eagle/Garden-Ai/rootstock"),
     ),
+    # Polaris mounts the same Eagle filesystem as Sophia, so both ALCF
+    # machines share one install.
+    "polaris": Cluster(
+        root=Path("/eagle/Garden-Ai/rootstock"),
+    ),
     "perlmutter": Cluster(
         root=Path("/global/cfs/cdirs/m4845/rootstock"),
         cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),

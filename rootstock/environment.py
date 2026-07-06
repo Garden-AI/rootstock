@@ -21,12 +21,36 @@ class CheckpointNotFoundError(LookupError):
     """Raised when a canonical checkpoint id is not declared by any installed env."""
 
 
+def get_user_cache_dir() -> Path:
+    """
+    Per-user directory for runtime write-back caches.
+
+    Shared installs are world-*readable* but only maintainer-writable, so
+    anything a worker writes at runtime (compiled Triton/Inductor kernels,
+    torch C++ extension builds, NVIDIA compute cache, bytecode) must land
+    somewhere the calling user owns — not in the shared cache root.
+
+    Resolved from the real caller's home (before any HOME redirection is
+    applied); override with ROOTSTOCK_USER_CACHE_DIR.
+    """
+    override = os.environ.get("ROOTSTOCK_USER_CACHE_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / ".cache" / "rootstock"
+
+
 def get_model_cache_env(root: Path, cache_root: Path | None = None) -> dict[str, str]:
     """
-    Get environment variables to redirect model downloads to a shared cache.
+    Get environment variables to redirect model downloads to a shared cache
+    and runtime write-back to a per-user cache.
 
     HOME is redirected for libraries that hardcode `~/` for caching (e.g.,
     FAIRChem). XDG_CACHE_HOME and HF_HOME catch the well-behaved libraries.
+    Those point at the *shared* cache, which non-maintainers can only read —
+    so every cache a library writes at runtime (Triton/Inductor kernels,
+    torch extension builds, NVIDIA compute cache, bytecode) is redirected to
+    a per-user directory instead. Per-user vars respect values already set
+    in the caller's environment (e.g. TRITON_CACHE_DIR on node-local SSD).
 
     On most clusters the install root and the cache root coincide. On clusters
     where they live on different filesystems (e.g., Perlmutter — code on CFS,
@@ -43,12 +67,27 @@ def get_model_cache_env(root: Path, cache_root: Path | None = None) -> dict[str,
     base = cache_root if cache_root is not None else root
     cache_dir = base / "cache"
     home_dir = base / "home"
-    return {
+
+    user_cache = get_user_cache_dir()
+    per_user_defaults = {
+        "TRITON_CACHE_DIR": user_cache / "triton",
+        "TORCHINDUCTOR_CACHE_DIR": user_cache / "torchinductor",
+        "TORCH_EXTENSIONS_DIR": user_cache / "torch_extensions",
+        "CUDA_CACHE_PATH": user_cache / "nv" / "ComputeCache",
+        "PYTHONPYCACHEPREFIX": user_cache / "pycache",
+        "XDG_CONFIG_HOME": user_cache / "config",
+        "MPLCONFIGDIR": user_cache / "matplotlib",
+    }
+
+    env = {
         "HOME": str(home_dir),
         "XDG_CACHE_HOME": str(cache_dir),
         "HF_HOME": str(cache_dir / "huggingface"),
         "HF_HUB_CACHE": str(cache_dir / "huggingface" / "hub"),
     }
+    for var, default in per_user_defaults.items():
+        env[var] = os.environ.get(var) or str(default)
+    return env
 
 
 # Simplified wrapper template for pre-built environments.

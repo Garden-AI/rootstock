@@ -76,7 +76,7 @@ rootstock setup-perms --cluster perlmutter --group m4845 --retrofit --apply
 
 `rootstock install` re-checks these permissions up front on every run and prints a warning if the root doesn't look world-readable (wrong mode bits, missing setgid, missing default ACL, or a mask clamp from too-restrictive a umask). The check is read-only and never blocks the build; pass `--no-perm-check` to silence it.
 
-Then **the maintainer's shell** needs `umask 002` so newly written files honor the inherited group-write bits. (This is the one piece `setup-perms` can't do for you — it's a per-shell setting.) Add to `~/.bashrc` (or whatever rc the cluster sources for non-interactive shells):
+`rootstock install` and `rootstock add` force `umask 002` for their own duration (uv subprocesses inherit it), so files they create are born world-readable and group-writable regardless of your personal umask. For anything you write into the shared root *by hand* (e.g. dropping an env file into `environments/`), your shell still needs `umask 002`. Add to `~/.bashrc` (or whatever rc the cluster sources for non-interactive shells):
 
 ```bash
 umask 002
@@ -91,6 +91,28 @@ export UV_LINK_MODE=copy
 `uv` defaults to hardlinking from its cache into target venvs, which fails across filesystem boundaries and falls back to copy with a noisy warning. Setting `copy` mode silences the warning and is the correct mode for cross-filesystem builds anyway.
 
 After `rootstock init` runs, verify ACLs landed correctly with `getfacl` on a freshly created file. Group should show `rwx` (effective `rw-` or `rwx`) and `mask::rw-` or stronger. If you see `mask::---` or `#effective:---`, the maintainer's umask was too restrictive when the file was created — rerun with `umask 002` and rewrite the file.
+
+### Verifying world-readability before launch
+
+Two scripts in `scripts/` check the world-readable contract end-to-end. Neither needs rootstock installed in the caller's own Python.
+
+**Functional test (the ground truth).** Have a colleague — someone who does *not* own the install and is *not* in the project group — run, on a login node:
+
+```bash
+unshare --user --map-user=$(id -u) \
+    ./scripts/test_as_outsider.sh /global/cfs/cdirs/m4845/rootstock \
+    --cache-root /pscratch/sd/w/wengler/rootstock-cache
+```
+
+`unshare` strips supplementary groups (defeating group bits); the different uid defeats owner bits; what remains is exactly what an arbitrary cluster user experiences. The script loads every fetched checkpoint of every built env through the real `RootstockCalculator` path, runs one forward pass, and prints PASS/FAIL per checkpoint with permission errors called out explicitly. Do not run it as the maintainer and trust a pass — owner bits mask everything (the script warns when this is the case).
+
+**Static audit (diagnosis).** When the functional test fails — or to check the full tree without loading models — run:
+
+```bash
+./scripts/check_world_readable.sh /global/cfs/cdirs/m4845/rootstock
+```
+
+It walks the ancestor directories (every one needs `o+x` — if the project parent on CFS lacks it, that's a facilities ticket, not a chmod), checks other-bits on every file and directory, resolves symlink targets, and scans for per-user ACL entries and mask clamps that `ls -l` won't show. It prints actionable per-path fixes and exits nonzero on any violation.
 
 ### Initial setup
 
