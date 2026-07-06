@@ -99,12 +99,13 @@ Two scripts in `scripts/` check the world-readable contract end-to-end. Neither 
 **Functional test (the ground truth).** Have a colleague — someone who does *not* own the install and is *not* in the project group — run, on a login node:
 
 ```bash
-unshare --user --map-user=$(id -u) \
-    ./scripts/test_as_outsider.sh /global/cfs/cdirs/m4845/rootstock \
+./scripts/test_as_outsider.sh /global/cfs/cdirs/m4845/rootstock \
     --cache-root /pscratch/sd/w/wengler/rootstock-cache
 ```
 
-`unshare` strips supplementary groups (defeating group bits); the different uid defeats owner bits; what remains is exactly what an arbitrary cluster user experiences. The script loads every fetched checkpoint of every built env through the real `RootstockCalculator` path, runs one forward pass, and prints PASS/FAIL per checkpoint with permission errors called out explicitly. Do not run it as the maintainer and trust a pass — owner bits mask everything (the script warns when this is the case).
+The account matters, and there is no way to fake it: owner bits mask everything for whoever built the tree, group bits/ACLs mask everything for project-group members, and user namespaces (`unshare`) hide group membership without dropping it. The script detects masked configurations and warns; a group-masked run still usefully tests owner bits and runtime write-back, but only a true outsider run proves the world-readable contract.
+
+The script loads every fetched checkpoint of every built env through the real `RootstockCalculator` path, runs one forward pass, and prints PASS/FAIL per checkpoint with permission errors called out explicitly.
 
 **Static audit (diagnosis).** When the functional test fails — or to check the full tree without loading models — run:
 
