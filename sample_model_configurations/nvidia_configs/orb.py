@@ -4,6 +4,10 @@
 #     "orb-models>=0.4.0",
 #     "ase>=3.22",
 #     "torch>=2.0",
+#     # Not imported here — constrains orb-models' transitive dep. setup()'s
+#     # no-lock serve path relies on cached_path returning local files without
+#     # locking or writing, verified against exactly this version (#67).
+#     "cached_path==1.8.10",
 # ]
 #
 # [tool.uv.sources]
