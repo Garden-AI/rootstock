@@ -111,6 +111,22 @@ def test_add_no_verify_sets_fetched_at(fake_root, monkeypatch):
     assert ckpt.last_error is None
 
 
+def test_add_overrides_restrictive_umask(fake_root, monkeypatch):
+    """Weights written to the shared cache must be world-readable regardless
+    of the maintainer's personal umask."""
+    import os
+
+    monkeypatch.setattr(add_module, "_run_download", lambda *a, **kw: (True, None))
+
+    old = os.umask(0o077)
+    try:
+        assert cmd_add(_make_args(fake_root, no_verify=True)) == 0
+        # cmd_add must have replaced the restrictive umask with 002.
+        assert os.umask(0o022) == 0o002
+    finally:
+        os.umask(old)
+
+
 def test_add_then_add_is_idempotent(fake_root, monkeypatch):
     download_calls = []
     verify_calls = []

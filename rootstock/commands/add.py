@@ -180,6 +180,11 @@ def _print_checkpoint_catalog(root: Path) -> int:
 
 
 def cmd_add(args) -> int:
+    # Downloaded model weights land in the shared cache and must be readable
+    # by every user (and writable by co-maintainers), whatever the
+    # maintainer's personal umask says.
+    os.umask(0o002)
+
     root = get_root_or_exit(args)
 
     if getattr(args, "list", False):
