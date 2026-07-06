@@ -5,30 +5,33 @@
 # and reports PASS/FAIL per checkpoint, watching for permission errors on
 # runtime writes (Triton/Inductor kernels, torch extensions, HF locks, ...).
 #
-# For a conclusive result this must run as a uid that does NOT own the tree,
-# with no membership in the tree's group. On a login node the recommended
-# harness (run by a colleague, not the maintainer) is:
+# For a conclusive result this must run as an account that
+#   (a) does NOT own the tree (owner bits mask everything), and
+#   (b) is NOT in the tree's group (group bits and group ACLs mask too).
+# There is no way to drop either yourself — user namespaces hide group
+# membership from id(1) but the kernel still honors it for access checks.
 #
-#     unshare --user --map-user=$(id -u) \
-#         ./test_as_outsider.sh /global/cfs/cdirs/m4845/rootstock \
-#         --cache-root /pscratch/sd/w/wengler/rootstock-cache
-#
-# unshare strips supplementary groups (defeats group bits); the different uid
-# defeats owner bits; what remains is the other-bits contract this verifies.
 # The script warns — but does not stop — when run in a masked configuration,
-# so the maintainer can still use it as a smoke test.
+# so maintainers and group members can still use it as a smoke test. A
+# group-masked run still validates owner bits (if you aren't the owner) and
+# the per-user runtime write-back redirection.
 #
 # Usage:
 #   test_as_outsider.sh ROOT [--cache-root PATH] [--device DEV]
-#                            [--env NAME ...] [--checkpoint ID ...] [--strace]
+#                            [--env NAME ...] [--checkpoint ID ...]
+#                            [--driver-python PATH]
 #
 #   ROOT              rootstock install root (or use a registered cluster path)
 #   --cache-root      separate model-weight cache root (Perlmutter: PSCRATCH)
 #   --device          device for inference (default: cpu — works on login nodes)
 #   --env NAME        only test this env (repeatable; default: all built envs)
-#   --checkpoint ID   only test this checkpoint id (repeatable)
-#   --strace          wrap each probe in strace and report EACCES file ops
-#                     (needs strace on PATH; Linux only)
+#   --checkpoint ID   only test this checkpoint id (repeatable; must be fetched)
+#   --driver-python   Python used to drive the calculator (needs rootstock
+#                     importable). Default: the interpreter behind the
+#                     `rootstock` CLI on PATH, falling back to each env's own
+#                     venv python. The driver side applies the cache
+#                     redirection, so prefer a current rootstock here — env
+#                     venvs pin the version they were built with.
 #
 # Exit codes: 0 = all tested checkpoints pass, 1 = failures, 2 = usage error.
 
@@ -37,9 +40,13 @@ set -u
 ROOT=""
 CACHE_ROOT=""
 DEVICE="cpu"
-STRACE=0
+DRIVER_PYTHON=""
 ENV_FILTER=()
 CKPT_FILTER=()
+
+print_help() {
+    awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+}
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -47,8 +54,8 @@ while [ $# -gt 0 ]; do
         --device) DEVICE="${2:?--device needs a value}"; shift ;;
         --env) ENV_FILTER+=("${2:?--env needs a value}"); shift ;;
         --checkpoint) CKPT_FILTER+=("${2:?--checkpoint needs a value}"); shift ;;
-        --strace) STRACE=1 ;;
-        -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --driver-python) DRIVER_PYTHON="${2:?--driver-python needs a value}"; shift ;;
+        -h|--help) print_help; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 2 ;;
         *) ROOT="$1" ;;
     esac
@@ -80,25 +87,30 @@ fi
 
 if [ "$TREE_UID" = "$(id -u)" ]; then
     echo "WARNING: you OWN $ROOT — owner bits satisfy every access check, so"
-    echo "         this run cannot prove world-readability. Have a different"
-    echo "         user run it (inside 'unshare --user --map-user=\$(id -u)')."
+    echo "         this run cannot prove world-readability. Have a user who is"
+    echo "         neither the owner nor in the tree's group run it."
     MASKED=1
 fi
-if id -G | tr ' ' '\n' | grep -qx "$TREE_GID"; then
-    echo "WARNING: you are in the tree's group (gid $TREE_GID) — group bits may"
-    echo "         mask failures. Run inside: unshare --user --map-user=\$(id -u)"
+
+# Inside a user namespace, unmapped gids display as the overflow gid 65534 —
+# a tree gid of 65534 means group membership can't be inspected from here.
+if [ "$TREE_GID" = "65534" ]; then
+    echo "NOTE: user namespace detected — group ownership is hidden here, but"
+    echo "      the kernel still honors your real groups for access checks."
+    echo "      Verify from a normal shell that this account is not in the"
+    echo "      tree's group."
+elif id -G | tr ' ' '\n' | grep -qx "$TREE_GID"; then
+    echo "WARNING: you are in the tree's group (gid $TREE_GID) — group bits and"
+    echo "         group ACLs mask failures. This run still tests owner bits"
+    echo "         and runtime write-back, but cannot prove world-readability."
     MASKED=1
 fi
+
 if ! touch "${HOME}/.rootstock_outsider_write_test" 2>/dev/null; then
     echo "Error: \$HOME ($HOME) is not writable — per-user runtime caches need it." >&2
     exit 2
 fi
 rm -f "${HOME}/.rootstock_outsider_write_test"
-
-if [ "$STRACE" -eq 1 ] && ! command -v strace >/dev/null 2>&1; then
-    echo "WARNING: --strace requested but strace not found; continuing without it."
-    STRACE=0
-fi
 
 # Cheap read canary before spending minutes loading models.
 CANARY=$(find "$ROOT/envs" -name 'env_source.py' -print 2>/dev/null | head -1)
@@ -110,10 +122,44 @@ if [ -n "$CANARY" ] && ! cat "$CANARY" >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# The probe, run once per env with that env's own interpreter. It exercises
-# the real code path: rootstock (installed inside the venv) resolves the env,
-# spawns the worker, applies the cache-redirection env vars, loads the model,
-# and runs one forward pass on the standard smoke-test structure.
+# Driver interpreter. The DRIVER applies the cache-redirection env vars when
+# spawning workers, so its rootstock version is what users actually
+# experience. Prefer, in order: --driver-python, the interpreter behind the
+# `rootstock` CLI on PATH, then each env's own venv python (which pins the
+# rootstock version from env build time — possibly older).
+# ---------------------------------------------------------------------------
+
+driver_ok() { "$1" -c 'import rootstock, ase, numpy' >/dev/null 2>&1; }
+
+DRIVER=""
+if [ -n "$DRIVER_PYTHON" ]; then
+    if ! driver_ok "$DRIVER_PYTHON"; then
+        echo "Error: --driver-python $DRIVER_PYTHON cannot import rootstock/ase/numpy." >&2
+        exit 2
+    fi
+    DRIVER="$DRIVER_PYTHON"
+elif command -v rootstock >/dev/null 2>&1; then
+    shebang=$(head -1 "$(command -v rootstock)")
+    candidate="${shebang#\#!}"
+    candidate="${candidate# }"
+    if [ -x "$candidate" ] && driver_ok "$candidate"; then
+        DRIVER="$candidate"
+    fi
+fi
+
+if [ -n "$DRIVER" ]; then
+    version=$("$DRIVER" -c 'import rootstock; print(getattr(rootstock, "__version__", "?"))')
+    echo "driver: $DRIVER (rootstock $version)"
+else
+    echo "note: no rootstock CLI found on PATH; driving with each env's venv"
+    echo "      python. Env venvs pin the rootstock version from build time,"
+    echo "      so cache redirection may be OLDER than the current release."
+fi
+
+# ---------------------------------------------------------------------------
+# The probe. It exercises the real code path: the driver's rootstock resolves
+# the env, spawns the worker from the env's venv, applies the cache
+# redirection env vars, loads the model, and runs one forward pass.
 # ---------------------------------------------------------------------------
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/rootstock_outsider.XXXXXX") || exit 2
@@ -247,25 +293,13 @@ for env_dir in "$ROOT"/envs/*/; do
     echo
     echo "=== env: $env_name ==="
 
-    cmd=("$env_dir/bin/python" "$PROBE" --root "$ROOT" --env "$env_name" --device "$DEVICE")
+    driver="${DRIVER:-$env_dir/bin/python}"
+    cmd=("$driver" "$PROBE" --root "$ROOT" --env "$env_name" --device "$DEVICE")
     [ -n "$CACHE_ROOT" ] && cmd+=(--cache-root "$CACHE_ROOT")
     [ ${#CKPT_FILTER[@]} -gt 0 ] && cmd+=("${CKPT_FILTER[@]}")
 
-    if [ "$STRACE" -eq 1 ]; then
-        tracefile="$WORK/strace_$env_name"
-        strace -f -qq -e trace=%file -o "$tracefile" "${cmd[@]}"
-        rc=$?
-        if [ -f "$tracefile" ] && grep -q 'EACCES' "$tracefile"; then
-            echo "  strace: EACCES file ops (unique paths):"
-            grep 'EACCES' "$tracefile" \
-                | grep -oE '"[^"]+"' | sort -u | head -20 | sed 's/^/    /'
-        fi
-    else
-        "${cmd[@]}"
-        rc=$?
-    fi
-
-    [ $rc -ne 0 ] && TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    "${cmd[@]}"
+    [ $? -ne 0 ] && TOTAL_FAIL=$((TOTAL_FAIL + 1))
 done
 
 echo
@@ -283,5 +317,5 @@ if [ "$TOTAL_FAIL" -gt 0 ]; then
     echo "RESULT: FAIL — $TOTAL_FAIL of $TESTED env(s) had failures."
     exit 1
 fi
-echo "RESULT: OK — all tested envs passed as an outside user."
+echo "RESULT: OK — all tested envs passed."
 exit 0
