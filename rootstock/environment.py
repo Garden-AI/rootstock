@@ -77,6 +77,13 @@ def get_model_cache_env(root: Path, cache_root: Path | None = None) -> dict[str,
         "PYTHONPYCACHEPREFIX": user_cache / "pycache",
         "XDG_CONFIG_HOME": user_cache / "config",
         "MPLCONFIGDIR": user_cache / "matplotlib",
+        # cached_path (an orb-models dep) ignores XDG_CACHE_HOME and defaults
+        # to ~/.cache/cached_path under the redirected HOME — i.e. the shared
+        # root — where it takes a FileLock even on warm cache hits (#67).
+        # Point it per-user; envs that serve from the shared cache must hand
+        # cached_path a *local* file (see nvidia_configs/orb.py), which it
+        # returns without locking.
+        "CACHED_PATH_CACHE_ROOT": user_cache / "cached_path",
     }
 
     env = {

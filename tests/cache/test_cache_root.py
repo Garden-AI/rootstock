@@ -32,6 +32,7 @@ _PER_USER_VARS = (
     "PYTHONPYCACHEPREFIX",
     "XDG_CONFIG_HOME",
     "MPLCONFIGDIR",
+    "CACHED_PATH_CACHE_ROOT",
 )
 
 # ---------- get_model_cache_env: pure function ----------------------------
