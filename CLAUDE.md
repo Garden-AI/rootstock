@@ -30,6 +30,9 @@ rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--json]
 # Show status (per-checkpoint verified/stale grid; --json for machine-readable)
 rootstock status [--root <path>] [--json]
 
+# Read-only permission check of install/cache roots + ancestors (exit 1 on issues)
+rootstock check-perms [<root>] [--cluster <name>] [--group <group>] [--json]
+
 # List environments
 rootstock list --root <path>
 ```

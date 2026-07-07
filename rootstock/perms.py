@@ -9,7 +9,9 @@ should be able to use it. Maintainer secrets live in the maintainer's
 This module is the single source of truth for what "correct permissions" means.
 ``render_commands`` produces the recipe the ``setup-perms`` command renders or
 applies; ``check_permissions`` is the bounded, non-recursive verification that
-``rootstock install`` runs up front to warn when a root looks misconfigured.
+``rootstock install`` runs up front to warn when a root looks misconfigured,
+and that ``rootstock check-perms`` exposes as a standalone command (with
+ancestor-directory checks added).
 
 The recipe:
 
@@ -112,6 +114,37 @@ class PermIssue:
 def _world_readable_traversable(mode: int) -> bool:
     """True if ``other`` has both read and execute (traverse) bits."""
     return (mode & 0o5) == 0o5
+
+
+def _check_ancestors(path: Path) -> list[PermIssue]:
+    """Flag ancestor directories that block world traversal to ``path``.
+
+    A perfectly world-readable install is unreachable if any directory above
+    it lacks ``o+x`` (e.g., a project parent directory that was created
+    group-only). One stat per path component — cheap on HPC filesystems.
+    """
+    issues: list[PermIssue] = []
+    for ancestor in reversed(path.resolve().parents):
+        if ancestor == Path("/"):
+            continue
+        try:
+            mode = ancestor.stat().st_mode
+        except FileNotFoundError:
+            break  # the missing-root issue is reported by _check_root
+        except PermissionError:
+            issues.append(
+                PermIssue(ancestor, "cannot stat ancestor (permission denied for you, too)")
+            )
+            break
+        if not (mode & 0o1):
+            issues.append(
+                PermIssue(
+                    ancestor,
+                    "ancestor not world-traversable (other lacks x); "
+                    "users outside the project group cannot reach the install",
+                )
+            )
+    return issues
 
 
 def _has_setgid(mode: int) -> bool:
@@ -259,17 +292,30 @@ def check_permissions(
     cache_root: Path | str | None = None,
     *,
     group: str | None = None,
+    include_ancestors: bool = False,
 ) -> list[PermIssue]:
     """Best-effort, bounded permission check for an install (and cache) root.
 
-    Touches only the root directories themselves — never recurses — so it is
-    cheap even on slow HPC filesystems. Returns a (possibly empty) list of
-    issues; callers treat these as warnings, not errors.
+    Touches only the root directories themselves — never recurses downward —
+    so it is cheap even on slow HPC filesystems. Returns a (possibly empty)
+    list of issues; callers treat these as warnings, not errors.
+
+    ``include_ancestors`` additionally checks that every directory above each
+    root grants world traverse (``o+x``). Off by default: dev installs under a
+    ``700`` home directory are legitimate, so only the explicit pre-launch
+    check (``rootstock check-perms``) opts in.
     """
     install_root = Path(install_root)
-    issues = _check_root(install_root, kind="install", group=group, require_group_acl=True)
+    issues: list[PermIssue] = []
+    if include_ancestors:
+        issues += _check_ancestors(install_root)
+    issues += _check_root(install_root, kind="install", group=group, require_group_acl=True)
 
     if cache_root is not None and Path(cache_root) != install_root:
-        issues += _check_root(Path(cache_root), kind="cache", group=group, require_group_acl=False)
+        cache_root = Path(cache_root)
+        if include_ancestors:
+            seen = {issue.path for issue in issues}
+            issues += [i for i in _check_ancestors(cache_root) if i.path not in seen]
+        issues += _check_root(cache_root, kind="cache", group=group, require_group_acl=False)
 
     return issues

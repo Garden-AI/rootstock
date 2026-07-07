@@ -146,3 +146,47 @@ def test_check_acl_flags_missing_default_and_mask_clamp(tmp_path: Path, monkeypa
     problems = " ".join(i.problem for i in issues)
     assert "no default ACL" in problems
     assert "mask clamps" in problems
+
+
+# --------------------------------------------------------------------------- #
+# ancestor traversal
+# --------------------------------------------------------------------------- #
+
+
+def test_ancestor_lacking_world_x_flagged(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(perms, "_run_getfacl", lambda path: None)
+    parent = tmp_path / "project"
+    root = parent / "rootstock"
+    root.mkdir(parents=True)
+    os.chmod(root, 0o2775)
+    os.chmod(parent, 0o750)  # the ALCF failure mode: project dir blocks outsiders
+
+    issues = check_permissions(root, include_ancestors=True)
+    assert any(i.path == parent.resolve() and "not world-traversable" in i.problem for i in issues)
+
+
+def test_ancestors_not_checked_by_default(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(perms, "_run_getfacl", lambda path: None)
+    parent = tmp_path / "project"
+    root = parent / "rootstock"
+    root.mkdir(parents=True)
+    os.chmod(root, 0o2775)
+    os.chmod(parent, 0o750)
+
+    assert check_permissions(root) == []
+
+
+def test_shared_ancestors_reported_once_for_split_cache(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(perms, "_run_getfacl", lambda path: None)
+    parent = tmp_path / "project"
+    install = parent / "rootstock"
+    cache = parent / "rootstock-cache"
+    install.mkdir(parents=True)
+    cache.mkdir()
+    os.chmod(install, 0o2775)
+    os.chmod(cache, 0o2755)
+    os.chmod(parent, 0o750)
+
+    issues = check_permissions(install, cache, include_ancestors=True)
+    flagged = [i for i in issues if i.path == parent.resolve()]
+    assert len(flagged) == 1

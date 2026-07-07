@@ -94,7 +94,15 @@ After `rootstock init` runs, verify ACLs landed correctly with `getfacl` on a fr
 
 ### Verifying world-readability before launch
 
-Two scripts in `scripts/` check the world-readable contract end-to-end. Neither needs rootstock installed in the caller's own Python.
+**Quick check (first line).** `rootstock check-perms` runs the same read-only verification that `rootstock install` performs up front, as a standalone command — plus an ancestor walk, so a restricted project parent directory (which no `chmod` inside the install can fix) shows up too. It stats only the roots and their ancestors, so it is safe and fast on login nodes:
+
+```bash
+rootstock check-perms --cluster perlmutter --group m4845
+```
+
+Exit code 0 means the roots look right; 1 means issues were printed (pass `--json` for machine-readable output). It checks only the root directories, not the tree beneath them — for that, use the scripts below.
+
+**Deep checks.** Two scripts in `scripts/` check the world-readable contract end-to-end. Neither needs rootstock installed in the caller's own Python.
 
 **Functional test (the ground truth).** Have a colleague — someone who does *not* own the install and is *not* in the project group — run, on a login node:
 
