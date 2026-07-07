@@ -68,7 +68,9 @@ def cmd_check_perms(args) -> int:
             "install_root": str(install_root),
             "cache_root": str(cache_root) if separate_cache else str(install_root),
             "ok": not issues,
-            "issues": [{"path": str(i.path), "problem": i.problem} for i in issues],
+            "issues": [
+                {"path": str(i.path), "problem": i.problem, "ancestor": i.ancestor} for i in issues
+            ],
         }
         print(json.dumps(payload, indent=2))
         return 1 if issues else 0
@@ -84,11 +86,16 @@ def cmd_check_perms(args) -> int:
     print(f"\nFound {len(issues)} issue(s):")
     for issue in issues:
         print(f"  - {issue.path}: {issue.problem}")
-    print(
-        "\nRoot-level issues: rootstock setup-perms --group <project-group> --apply"
-        " (add --retrofit for existing files)."
-        "\nAncestor-directory issues are outside the install — fixing them takes"
-        " the directory's owner or a facilities ticket."
-        "\nFor a full-tree audit, run scripts/check_world_readable.sh <root>."
-    )
+
+    print()
+    if any(not i.ancestor for i in issues):
+        print(
+            "Fix root-level issues with: rootstock setup-perms --group <project-group>"
+            " --apply (add --retrofit for existing files)."
+        )
+    if any(i.ancestor for i in issues):
+        print(
+            "Ancestor-directory issues are outside the install — fixing them takes"
+            " the directory's owner or a facilities ticket."
+        )
     return 1

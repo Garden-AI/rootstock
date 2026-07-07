@@ -74,6 +74,10 @@ def get_model_cache_env(root: Path, cache_root: Path | None = None) -> dict[str,
         "TORCHINDUCTOR_CACHE_DIR": user_cache / "torchinductor",
         "TORCH_EXTENSIONS_DIR": user_cache / "torch_extensions",
         "CUDA_CACHE_PATH": user_cache / "nv" / "ComputeCache",
+        # NVIDIA Warp (a dep of nvalchemi-toolkit-ops, used by the tensornet
+        # env) compiles kernels into $XDG_CACHE_HOME/warp — i.e. the shared
+        # cache — unless WARP_CACHE_PATH points elsewhere.
+        "WARP_CACHE_PATH": user_cache / "warp",
         "PYTHONPYCACHEPREFIX": user_cache / "pycache",
         "XDG_CONFIG_HOME": user_cache / "config",
         "MPLCONFIGDIR": user_cache / "matplotlib",
@@ -316,19 +320,13 @@ def parse_checkpoints_dict(env_source_path: Path) -> dict[str, str]:
         ):
             continue
         if not isinstance(value, ast.Dict):
-            raise ValueError(
-                f"{env_source_path}: CHECKPOINTS must be a dict literal."
-            )
+            raise ValueError(f"{env_source_path}: CHECKPOINTS must be a dict literal.")
         result: dict[str, str] = {}
         for k_node, v_node in zip(value.keys, value.values):
             if not (isinstance(k_node, ast.Constant) and isinstance(k_node.value, str)):
-                raise ValueError(
-                    f"{env_source_path}: CHECKPOINTS keys must be string literals."
-                )
+                raise ValueError(f"{env_source_path}: CHECKPOINTS keys must be string literals.")
             if not (isinstance(v_node, ast.Constant) and isinstance(v_node.value, str)):
-                raise ValueError(
-                    f"{env_source_path}: CHECKPOINTS values must be string literals."
-                )
+                raise ValueError(f"{env_source_path}: CHECKPOINTS values must be string literals.")
             result[k_node.value] = v_node.value
         return result
     raise ValueError(
@@ -364,9 +362,7 @@ def list_declared_checkpoints(root: Path | str) -> dict[str, dict[str, str]]:
     return declared
 
 
-def find_env_for_checkpoint(
-    root: Path | str, checkpoint_id: str
-) -> tuple[str, dict[str, str]]:
+def find_env_for_checkpoint(root: Path | str, checkpoint_id: str) -> tuple[str, dict[str, str]]:
     """
     Return ``(env_name, CHECKPOINTS)`` for the installed env that declares
     ``checkpoint_id``.
@@ -383,8 +379,7 @@ def find_env_for_checkpoint(
 
     if declared:
         listing = "\n".join(
-            f"  {env}: {', '.join(ids) if ids else '(none)'}"
-            for env, ids in declared.items()
+            f"  {env}: {', '.join(ids) if ids else '(none)'}" for env, ids in declared.items()
         )
         msg = (
             f"No installed env declares checkpoint '{checkpoint_id}'.\n"

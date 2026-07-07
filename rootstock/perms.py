@@ -105,10 +105,16 @@ def format_command(argv: list[str]) -> str:
 
 @dataclass(frozen=True)
 class PermIssue:
-    """A single thing that looks wrong about a root's permissions."""
+    """A single thing that looks wrong about a root's permissions.
+
+    ``ancestor`` distinguishes issues on directories *above* a root (fixable
+    only by whoever owns them) from issues on the root itself (fixable with
+    ``rootstock setup-perms``), so callers can give the right advice.
+    """
 
     path: Path
     problem: str
+    ancestor: bool = False
 
 
 def _world_readable_traversable(mode: int) -> bool:
@@ -124,24 +130,29 @@ def _check_ancestors(path: Path) -> list[PermIssue]:
     group-only). One stat per path component — cheap on HPC filesystems.
     """
     issues: list[PermIssue] = []
-    for ancestor in reversed(path.resolve().parents):
-        if ancestor == Path("/"):
+    for parent in reversed(path.resolve().parents):
+        if parent == Path("/"):
             continue
         try:
-            mode = ancestor.stat().st_mode
+            mode = parent.stat().st_mode
         except FileNotFoundError:
             break  # the missing-root issue is reported by _check_root
         except PermissionError:
             issues.append(
-                PermIssue(ancestor, "cannot stat ancestor (permission denied for you, too)")
+                PermIssue(
+                    parent,
+                    "cannot stat ancestor (permission denied for you, too)",
+                    ancestor=True,
+                )
             )
             break
         if not (mode & 0o1):
             issues.append(
                 PermIssue(
-                    ancestor,
+                    parent,
                     "ancestor not world-traversable (other lacks x); "
                     "users outside the project group cannot reach the install",
+                    ancestor=True,
                 )
             )
     return issues
