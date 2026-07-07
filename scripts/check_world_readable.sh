@@ -11,7 +11,8 @@
 #
 # This complements (does not replace) a functional test as a different uid:
 # static checks catch owner-bit masking that "try it yourself" never can.
-# See scripts/test_as_outsider.sh for the functional half.
+# The functional half is a real run by a user who is neither the owner nor in
+# the project group.
 #
 # Usage:
 #   check_world_readable.sh TREE [--no-acl] [--no-prefix]

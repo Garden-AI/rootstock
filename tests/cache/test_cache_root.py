@@ -29,6 +29,7 @@ _PER_USER_VARS = (
     "TORCHINDUCTOR_CACHE_DIR",
     "TORCH_EXTENSIONS_DIR",
     "CUDA_CACHE_PATH",
+    "WARP_CACHE_PATH",
     "PYTHONPYCACHEPREFIX",
     "XDG_CONFIG_HOME",
     "MPLCONFIGDIR",
@@ -258,7 +259,9 @@ def test_calculator_explicit_cache_root_overrides_cluster_default(fake_pm_root):
     override = install.parent / "override_cache"
     override.mkdir()
     calc = RootstockCalculator(
-        checkpoint="mace-mp-0-medium", cluster="_test_split", cache_root=override,
+        checkpoint="mace-mp-0-medium",
+        cluster="_test_split",
+        cache_root=override,
     )
     assert calc.cache_root == override
 
@@ -278,7 +281,9 @@ def test_calculator_with_root_and_explicit_cache_root(tmp_path: Path):
     cache.mkdir()
 
     calc = RootstockCalculator(
-        checkpoint="mace-mp-0-medium", root=install, cache_root=cache,
+        checkpoint="mace-mp-0-medium",
+        root=install,
+        cache_root=cache,
     )
     assert calc.root == install
     assert calc.cache_root == cache

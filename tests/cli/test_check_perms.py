@@ -58,6 +58,8 @@ def test_issues_exit_one_and_are_listed(tmp_path: Path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "not world-readable" in out
     assert "setup-perms" in out
+    # No ancestor issues, so no ancestor advice.
+    assert "facilities ticket" not in out
 
 
 def test_restricted_ancestor_is_flagged(tmp_path: Path, monkeypatch, capsys):
@@ -70,7 +72,9 @@ def test_restricted_ancestor_is_flagged(tmp_path: Path, monkeypatch, capsys):
 
     rc = cmd_check_perms(_args(root=str(root)))
     assert rc == 1
-    assert "not world-traversable" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "not world-traversable" in out
+    assert "facilities ticket" in out
 
 
 def test_json_report(tmp_path: Path, monkeypatch, capsys):

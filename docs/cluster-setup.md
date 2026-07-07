@@ -94,34 +94,25 @@ After `rootstock init` runs, verify ACLs landed correctly with `getfacl` on a fr
 
 ### Verifying world-readability before launch
 
+Per-cluster step-by-step runbooks live in `scripts/runbooks/` — they sequence the checks below and record which findings are known-benign. The pieces:
+
 **Quick check (first line).** `rootstock check-perms` runs the same read-only verification that `rootstock install` performs up front, as a standalone command — plus an ancestor walk, so a restricted project parent directory (which no `chmod` inside the install can fix) shows up too. It stats only the roots and their ancestors, so it is safe and fast on login nodes:
 
 ```bash
 rootstock check-perms --cluster perlmutter --group m4845
 ```
 
-Exit code 0 means the roots look right; 1 means issues were printed (pass `--json` for machine-readable output). It checks only the root directories, not the tree beneath them — for that, use the scripts below.
+Exit code 0 means the roots look right; 1 means issues were printed (pass `--json` for machine-readable output). It checks only the root directories, not the tree beneath them — for that, use the audit below.
 
-**Deep checks.** Two scripts in `scripts/` check the world-readable contract end-to-end. Neither needs rootstock installed in the caller's own Python.
-
-**Functional test (the ground truth).** Have a colleague — someone who does *not* own the install and is *not* in the project group — run, on a login node:
-
-```bash
-./scripts/test_as_outsider.sh /global/cfs/cdirs/m4845/rootstock \
-    --cache-root /pscratch/sd/w/wengler/rootstock-cache
-```
-
-The account matters, and there is no way to fake it: owner bits mask everything for whoever built the tree, group bits/ACLs mask everything for project-group members, and user namespaces (`unshare`) hide group membership without dropping it. The script detects masked configurations and warns; a group-masked run still usefully tests owner bits and runtime write-back, but only a true outsider run proves the world-readable contract.
-
-The script loads every fetched checkpoint of every built env through the real `RootstockCalculator` path, runs one forward pass, and prints PASS/FAIL per checkpoint with permission errors called out explicitly.
-
-**Static audit (diagnosis).** When the functional test fails — or to check the full tree without loading models — run:
+**Static audit (full tree).** `scripts/check_world_readable.sh` checks the world-readable contract across the whole tree without needing rootstock in the caller's Python:
 
 ```bash
 ./scripts/check_world_readable.sh /global/cfs/cdirs/m4845/rootstock
 ```
 
 It walks the ancestor directories (every one needs `o+x` — if the project parent on CFS lacks it, that's a facilities ticket, not a chmod), checks other-bits on every file and directory, resolves symlink targets, and scans for per-user ACL entries and mask clamps that `ls -l` won't show. It prints actionable per-path fixes and exits nonzero on any violation.
+
+**Functional test (the ground truth).** Static checks can't prove the contract for the person who matters: have someone who does *not* own the install and is *not* in the project group load a model end-to-end through `RootstockCalculator`. The account matters, and there is no way to fake it: owner bits mask everything for whoever built the tree, group bits/ACLs mask everything for project-group members, and user namespaces (`unshare`) hide group membership without dropping it.
 
 ### Initial setup
 
