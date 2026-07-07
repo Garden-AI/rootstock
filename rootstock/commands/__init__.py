@@ -2,6 +2,7 @@
 
 from .add import cmd_add
 from .benchmark import cmd_benchmark
+from .check_perms import cmd_check_perms
 from .create import cmd_new_env
 from .init import cmd_init
 from .install import cmd_install
@@ -15,6 +16,7 @@ from .status import cmd_list, cmd_status
 __all__ = [
     "cmd_add",
     "cmd_benchmark",
+    "cmd_check_perms",
     "cmd_init",
     "cmd_install",
     "cmd_list",

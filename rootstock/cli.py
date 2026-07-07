@@ -39,6 +39,12 @@ Commands:
         Render (dry-run) or apply the world-readable shared-install permission
         recipe for an install root (and split cache root):
             rootstock setup-perms --cluster perlmutter --group m4845 --apply
+
+    rootstock check-perms [<root>] [--cluster <name>] [--group <group>] [--json]
+        Read-only check that the install root, split cache root, and their
+        ancestor directories satisfy the shared-install permission recipe.
+        Exits 0 when clean, 1 when issues are found:
+            rootstock check-perms --cluster perlmutter --group m4845
 """
 
 import argparse
@@ -49,6 +55,7 @@ from . import __version__
 from .commands import (
     cmd_add,
     cmd_benchmark,
+    cmd_check_perms,
     cmd_init,
     cmd_install,
     cmd_list,
@@ -226,9 +233,7 @@ def main():
         ),
     )
     smoke_parser.add_argument("--env", help="Filter to a single environment")
-    smoke_parser.add_argument(
-        "--checkpoint", help="Filter to a single checkpoint (requires --env)"
-    )
+    smoke_parser.add_argument("--checkpoint", help="Filter to a single checkpoint (requires --env)")
     smoke_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
     smoke_parser.add_argument("--json", action="store_true", help="Emit a JSON summary")
     smoke_parser.add_argument(
@@ -324,6 +329,46 @@ def main():
         help="Also apply recursively so existing files become world-readable",
     )
     setup_perms_parser.set_defaults(func=cmd_setup_perms)
+
+    # check-perms command
+    check_perms_parser = subparsers.add_parser(
+        "check-perms",
+        help="Check shared-install permissions (read-only)",
+        description=(
+            "Read-only check that the install root, split cache root, and their "
+            "ancestor directories satisfy the shared-install permission recipe "
+            "(world read+traverse, setgid, default ACLs, co-maintainer group ACL, "
+            "no mask clamp). Never modifies anything. "
+            "Exit codes: 0 = clean, 1 = issues found, 2 = usage error."
+        ),
+    )
+    check_perms_parser.add_argument(
+        "root",
+        nargs="?",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Install root path (default: ${ROOTSTOCK_ROOT_ENV}; or use --cluster)",
+    )
+    check_perms_parser.add_argument(
+        "--cache-root",
+        help="Cache root path, when on a separate filesystem from the install root",
+    )
+    check_perms_parser.add_argument(
+        "--cluster",
+        help="Resolve install and cache roots from the cluster registry",
+    )
+    check_perms_parser.add_argument(
+        "--group",
+        help=(
+            "Project group expected in the co-maintainer ACL "
+            "(default: the install root's owning group)"
+        ),
+    )
+    check_perms_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a machine-readable JSON report",
+    )
+    check_perms_parser.set_defaults(func=cmd_check_perms)
 
     # serve command
     serve_parser = subparsers.add_parser(
