@@ -395,13 +395,20 @@ def main(argv=None) -> int:
     if not (args.root or args.cluster):
         p.error("one of --root or --cluster is required")
 
-    # Resolve root path (needed even with --cluster, for env discovery).
-    if args.cluster and not args.root:
+    # Resolve root and cache_root (needed even with --cluster: the in-env arm
+    # builds its cache env from these paths directly, never going through
+    # RootstockCalculator's cluster resolution — so a registered split
+    # cache_root (e.g. Perlmutter's PSCRATCH) must be threaded through here or
+    # that arm looks for weights under `root`).
+    cluster_info = None
+    if args.cluster:
         from rootstock.clusters import get_cluster
-        root = Path(get_cluster(args.cluster).root)
+        cluster_info = get_cluster(args.cluster)
+    root = Path(args.root) if args.root else Path(cluster_info.root)
+    if args.cache_root:
+        cache_root = Path(args.cache_root)
     else:
-        root = Path(args.root)
-    cache_root = Path(args.cache_root) if args.cache_root else None
+        cache_root = cluster_info.cache_root if cluster_info else None
 
     if args.list:
         return list_available(root)
