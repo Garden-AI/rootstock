@@ -98,6 +98,13 @@ def get_model_cache_env(root: Path, cache_root: Path | None = None) -> dict[str,
     }
     for var, default in per_user_defaults.items():
         env[var] = os.environ.get(var) or str(default)
+
+    # Preserve HuggingFace authentication tokens from the caller's environment.
+    # These allow access to gated models.
+    for auth_var in ("HF_TOKEN", "HF_USER_ACCESS_TOKEN"):
+        if auth_var in os.environ:
+            env[auth_var] = os.environ[auth_var]
+
     return env
 
 

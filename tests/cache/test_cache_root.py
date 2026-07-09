@@ -110,6 +110,29 @@ def test_shared_read_redirects_unaffected_by_user_cache(monkeypatch, tmp_path: P
     assert out["HF_HUB_CACHE"] == "/cache/cache/huggingface/hub"
 
 
+def test_hf_token_preserved_from_environment(monkeypatch):
+    """HF_TOKEN is preserved to allow access to gated models."""
+    monkeypatch.setenv("HF_TOKEN", "hf_fake_token_12345")
+    out = get_model_cache_env(Path("/install"))
+    assert out["HF_TOKEN"] == "hf_fake_token_12345"
+
+
+def test_hf_user_access_token_preserved_from_environment(monkeypatch):
+    """HF_USER_ACCESS_TOKEN is preserved for authentication."""
+    monkeypatch.setenv("HF_USER_ACCESS_TOKEN", "hf_user_token_67890")
+    out = get_model_cache_env(Path("/install"))
+    assert out["HF_USER_ACCESS_TOKEN"] == "hf_user_token_67890"
+
+
+def test_hf_tokens_not_added_when_not_set(monkeypatch):
+    """HF tokens are not added if not already in the environment."""
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HF_USER_ACCESS_TOKEN", raising=False)
+    out = get_model_cache_env(Path("/install"))
+    assert "HF_TOKEN" not in out
+    assert "HF_USER_ACCESS_TOKEN" not in out
+
+
 # ---------- Cluster registry ---------------------------------------------
 
 
