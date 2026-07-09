@@ -25,6 +25,11 @@ mace = [
     "mace-torch>=0.3",
     "torch>=2.0",
 ]
+# MLIPx integration (rootstock.mlipx.RootstockModel)
+mlipx = [
+    "mlipx>=0.1",
+    "zntrack>=0.8",
+]
 
 [project.scripts]
 rootstock = "rootstock.cli:main"
