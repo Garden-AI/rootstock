@@ -14,16 +14,16 @@ Requires the optional ``mlipx`` extra::
 
 Usage inside an MLIPx recipe's ``models.py``::
 
-    from rootstock.mlipx import RootstockModel
+    from rootstock.integrations.mlipx import RootstockMLIPxModel
 
     MODELS = {
-        "mace":  RootstockModel(checkpoint="mace-mp-0-medium", cluster="sophia", device="cuda"),
-        "uma":   RootstockModel(checkpoint="uma-s-1p1",        cluster="sophia", device="cuda"),
+        "mace":  RootstockMLIPxModel(checkpoint="mace-mp-0-medium", cluster="sophia", device="cuda"),
+        "uma":   RootstockMLIPxModel(checkpoint="uma-s-1p1",        cluster="sophia", device="cuda"),
     }
 
 Locally (no cluster), point at an install root instead::
 
-    RootstockModel(checkpoint="mace-mp-0-medium", root="/path/to/rootstock", device="cpu")
+    RootstockMLIPxModel(checkpoint="mace-mp-0-medium", root="/path/to/rootstock", device="cpu")
 
 The target environment must already be built with ``rootstock install``.
 """
@@ -36,16 +36,16 @@ try:
     import zntrack
 except ModuleNotFoundError as exc:  # pragma: no cover
     raise ModuleNotFoundError(
-        "RootstockModel requires the optional 'mlipx' extra. "
+        "RootstockMLIPxModel requires the optional 'mlipx' extra. "
         'Install it with: pip install "rootstock[mlipx]"'
     ) from exc
 
 from ase.calculators.calculator import Calculator
 
-from .calculator import RootstockCalculator
+from ..calculator import RootstockCalculator
 
 
-class RootstockModel(zntrack.Node):
+class RootstockMLIPxModel(zntrack.Node):
     """A Rootstock-hosted checkpoint, usable anywhere MLIPx expects a model.
 
     Satisfies MLIPx's ``NodeWithCalculator`` protocol. Unlike a bare
@@ -99,8 +99,8 @@ class RootstockModel(zntrack.Node):
             "device": self.device,
         }
         try:
-            from .clusters import get_root_for_cluster
-            from .environment import find_env_for_checkpoint
+            from ..clusters import get_root_for_cluster
+            from ..environment import find_env_for_checkpoint
 
             root = get_root_for_cluster(self.cluster) if self.cluster else self.root
             if root is not None:

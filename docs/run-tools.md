@@ -14,29 +14,14 @@ Install the extra:
 pip install "rootstock[mlipx]"
 ```
 
-**Zero-code option.** MLIPx's `GenericASECalculator` loads any calculator by import path. In a recipe's `models.py`:
+Add a `RootstockMLIPxModel` to a recipe's `models.py`. It records its parameters with zntrack and reports metadata to MLIPx's comparison tables:
 
 ```python
-import mlipx
+from rootstock.integrations.mlipx import RootstockMLIPxModel
 
 MODELS = {
-    "mace": mlipx.GenericASECalculator(
-        module="rootstock",
-        class_name="RootstockCalculator",
-        kwargs={"checkpoint": "mace-mp-0-medium", "cluster": "sophia"},
-        device="cuda",
-    ),
-}
-```
-
-**Tracked node (recommended).** `RootstockModel` records its parameters with zntrack and reports metadata to MLIPx's comparison tables:
-
-```python
-from rootstock.mlipx import RootstockModel
-
-MODELS = {
-    "mace": RootstockModel(checkpoint="mace-mp-0-medium", cluster="sophia", device="cuda"),
-    "uma":  RootstockModel(checkpoint="uma-s-1p1",        cluster="sophia", device="cuda"),
+    "mace": RootstockMLIPxModel(checkpoint="mace-mp-0-medium", cluster="sophia", device="cuda"),
+    "uma":  RootstockMLIPxModel(checkpoint="uma-s-1p1",        cluster="sophia", device="cuda"),
 }
 ```
 
