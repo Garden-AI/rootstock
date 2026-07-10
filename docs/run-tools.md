@@ -2,13 +2,32 @@
 
 `RootstockCalculator` is a standard ASE calculator. Any tool that accepts an ASE calculator can use a Rootstock-hosted model in its place, without that tool needing the model's Python dependencies. You point the tool at a `RootstockCalculator` for a given `(cluster, checkpoint)` pair, and it talks to the isolated model environment through Rootstock.
 
-The integrations below are planned. This page is a stub and will grow as each one is built out and documented.
+MLIPx is documented below. The remaining integrations are planned and will grow as each one is built out.
 
 ## MLIPx
 
-[MLIPx](https://github.com/basf/mlipx) provides recipes for benchmarking and comparing machine-learned interatomic potentials. Because it operates on ASE calculators, Rootstock can supply the calculator for a given checkpoint, letting you run MLIPx comparisons against models installed on a cluster.
+[MLIPx](https://github.com/basf/mlipx) provides recipes for benchmarking and comparing machine-learned interatomic potentials. It evaluates any model that exposes an ASE calculator and does not bundle model code itself, so a Rootstock-hosted checkpoint plugs in the same way MLIPx's other models do.
 
-Status: planned / not yet documented.
+Install the extra:
+
+```bash
+pip install "rootstock[mlipx]"
+```
+
+Add a `RootstockMLIPxModel` to a recipe's `models.py`. It records its parameters with zntrack and reports metadata to MLIPx's comparison tables:
+
+```python
+from rootstock.integrations.mlipx import RootstockMLIPxModel
+
+MODELS = {
+    "mace": RootstockMLIPxModel(checkpoint="mace-mp-0-medium", cluster="sophia", device="cuda"),
+    "uma":  RootstockMLIPxModel(checkpoint="uma-s-1p1",        cluster="sophia", device="cuda"),
+}
+```
+
+Pass `cluster=` for a registered cluster, or `root="/path/to/rootstock"` for a local install (not both). `device` defaults to `cpu`; set `cuda` on GPU nodes. The target environment must already be built with `rootstock install`.
+
+**Cleanup.** Rootstock keeps a worker subprocess alive per calculator and releases it on `close()`. MLIPx does not call `close()`, so for a single model the worker is reaped when the calculator is garbage-collected. For large multi-model comparisons, close calculators explicitly to avoid accumulating workers.
 
 ## quacc
 
