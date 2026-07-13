@@ -373,8 +373,15 @@ def main():
     # serve command
     serve_parser = subparsers.add_parser(
         "serve",
-        help="Start a worker for an external i-PI server",
-        description="Start a rootstock worker that connects to a Unix socket.",
+        help="Start a worker for a server speaking the rootstock i-PI dialect",
+        description=(
+            "Start a rootstock worker that connects to a Unix socket. The peer "
+            "must speak the rootstock i-PI dialect (JSON INIT payload, re-sent "
+            "every force cycle) — a standard i-PI server cannot drive it; see "
+            "the 'Deviations from standard i-PI' section of the architecture "
+            "docs. Known dialect peers: RootstockCalculator and the LAMMPS "
+            "fix_rootstock."
+        ),
     )
     serve_parser.add_argument(
         "checkpoint",
