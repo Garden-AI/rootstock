@@ -30,6 +30,16 @@ mlipx = [
     "mlipx>=0.1",
     "zntrack>=0.8",
 ]
+# atomate2 integration (rootstock.integrations.atomate2)
+# atomate2 requires Python >=3.11 while rootstock supports >=3.10, so the extra is
+# marker-gated rather than narrowing rootstock's own requires-python. On 3.10 the
+# extra installs nothing and the module raises a clear ModuleNotFoundError.
+# torch is a driver-env requirement: atomate2's ForceFieldMixin._run_ase_safe calls
+# revert_default_dtype(), which imports torch at call time.
+atomate2 = [
+    "atomate2>=0.1.4; python_version >= '3.11'",
+    "torch>=2.0; python_version >= '3.11'",
+]
 
 [project.scripts]
 rootstock = "rootstock.cli:main"
