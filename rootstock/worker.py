@@ -22,7 +22,6 @@ from .protocol import (
     IPIProtocol,
     SocketClosed,
     connect_unix_socket,
-    create_unix_socket_path,
 )
 from .worker_config import get_worker_config
 
@@ -46,25 +45,19 @@ class MLIPWorker:
 
     def __init__(
         self,
-        socket_name: str,
         calculator: "Calculator",
+        socket_path: str,
         log=None,
-        socket_path: str | None = None,
     ):
         """
         Initialize the worker.
 
         Args:
-            socket_name: Name of Unix socket to connect to (used if socket_path not given)
             calculator: Pre-loaded ASE calculator
+            socket_path: Full Unix socket path to connect to
             log: Optional file object for logging
-            socket_path: Full Unix socket path (overrides socket_name if provided)
         """
-        self.socket_name = socket_name
-        if socket_path is not None:
-            self.socket_path = socket_path
-        else:
-            self.socket_path = create_unix_socket_path(socket_name)
+        self.socket_path = socket_path
         self.log = log
 
         self._calculator = calculator
@@ -346,9 +339,8 @@ def run_worker(
         print(f"[Worker] Calculator loaded: {type(calculator).__name__}", file=log, flush=True)
 
     worker = MLIPWorker(
-        socket_name="rootstock",
         calculator=calculator,
-        log=log,
         socket_path=socket_path,
+        log=log,
     )
     worker.run()
