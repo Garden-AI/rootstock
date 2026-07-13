@@ -32,27 +32,21 @@ You should see `rootstock` listed under fix styles.
 
 ## Usage
 
-### 1. Start the rootstock worker
-
-In a separate terminal (or as a background job):
-
-```bash
-rootstock serve mace --root /scratch/gpfs/SHARED/rootstock \
-    --socket /tmp/rootstock_test.sock \
-    --model medium \
-    --device cuda
-```
-
-### 2. Run LAMMPS
+The fix spawns the worker itself via `rootstock serve`, so there is no separate
+worker to start. `rootstock` must be installed and on `PATH`.
 
 ```
 units           metal
 atom_style      atomic
 boundary        p p p
 
+pair_style      zero 6.0
+pair_coeff      * *
+
 read_data       structure.data
 
-fix             mlip all rootstock /tmp/rootstock_test.sock elements Cu
+fix             mlip all rootstock cluster della checkpoint mace-mp-0-medium \
+                device cuda elements Cu
 
 # Energy is available via f_mlip
 thermo_style    custom step temp pe f_mlip
@@ -61,12 +55,16 @@ thermo          10
 run             100
 ```
 
+`checkpoint` is a canonical checkpoint id, the same one used by
+`RootstockCalculator` and the CLI. The environment providing it must already be
+built on that cluster (`rootstock install`).
+
 ### Notes
 
-- The worker must be started **before** LAMMPS runs (the fix waits up to 60 seconds
-  for a connection).
+- The fix waits up to `timeout` seconds (default 120) for the worker it spawned
+  to connect back.
 - The `elements` keyword maps LAMMPS atom types to element symbols in order
-  (type 1 = first element, type 2 = second, etc.).
+  (type 1 = first element, type 2 = second, etc.) and must come last.
 - Forces are added to existing forces (`+=`), so do not use another pair style
   unless you intend to combine potentials.
 - Requires `units metal` (eV, Angstrom, ps).
