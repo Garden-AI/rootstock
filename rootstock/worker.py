@@ -90,11 +90,21 @@ class MLIPWorker:
         Create or update ASE Atoms object.
 
         On first call, creates a new Atoms object.
-        On subsequent calls, updates positions and cell in place.
+        On subsequent calls, updates positions and cell in place — unless the
+        INIT-supplied species or PBC no longer match the cached Atoms, in
+        which case the object is rebuilt. Comparing against the cached values
+        (not just the atom count) matters: the server re-sends INIT every
+        cycle, so a same-count composition or PBC change must not silently
+        reuse the old system.
         """
         from ase import Atoms
 
-        if self._atoms is None or len(self._atoms) != len(positions):
+        pbc = self._pbc if self._pbc is not None else [True, True, True]
+        if (
+            self._atoms is None
+            or not np.array_equal(self._atoms.numbers, self._atomic_numbers)
+            or not np.array_equal(self._atoms.pbc, pbc)
+        ):
             # Need to create new Atoms object
             if self._atomic_numbers is None:
                 raise RuntimeError(
@@ -105,7 +115,7 @@ class MLIPWorker:
                 numbers=self._atomic_numbers,
                 positions=positions,
                 cell=cell,
-                pbc=self._pbc if self._pbc is not None else [True, True, True],
+                pbc=pbc,
             )
             self._atoms.calc = self._calculator
         else:
