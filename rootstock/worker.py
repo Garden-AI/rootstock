@@ -24,6 +24,7 @@ from .protocol import (
     connect_unix_socket,
     create_unix_socket_path,
 )
+from .worker_config import get_worker_config
 
 if TYPE_CHECKING:
     from ase.calculators.calculator import Calculator
@@ -80,9 +81,18 @@ class MLIPWorker:
             print(f"[Worker] {msg}", file=self.log, flush=True)
 
     def _connect(self):
-        """Connect to the server."""
-        self._log(f"Connecting to {self.socket_path}")
-        self._socket = connect_unix_socket(self.socket_path)
+        """Connect to the server, with the retry window from WorkerConfig."""
+        config = get_worker_config()
+        self._log(
+            f"Connecting to {self.socket_path} "
+            f"(max_retries={config.connect_retries}, "
+            f"retry_delay={config.connect_retry_delay})"
+        )
+        self._socket = connect_unix_socket(
+            self.socket_path,
+            max_retries=config.connect_retries,
+            retry_delay=config.connect_retry_delay,
+        )
         self._protocol = IPIProtocol(self._socket, log=self.log)
         self._log("Connected")
 
@@ -293,11 +303,28 @@ def run_worker(
         device: Device string to pass to setup_fn
         socket_path: Full Unix socket path to connect to
         setup_kwargs: Extra keyword arguments forwarded to setup_fn
-        log: Optional logging file object
+        log: Optional logging file object. When None, the
+            ROOTSTOCK_WORKER_LOG env var may name a destination
+            ("stderr", "stdout", or a file path).
         **_ignored: Unknown options are ignored. Workers are frozen inside
             built envs, so a newer client passing a new option must not
             TypeError against an already-deployed worker.
+
+    Environment variables are read once at startup into the frozen
+    WorkerConfig singleton (see worker_config.py) — the config channel that
+    reaches workers frozen inside already-built envs:
+        ROOTSTOCK_WORKER_CONNECT_RETRIES: connection attempts (default 50)
+        ROOTSTOCK_WORKER_CONNECT_RETRY_DELAY: seconds between attempts
+            (default 0.1)
+        ROOTSTOCK_WORKER_LOG: log destination when the client didn't
+            attach one
     """
+    config = get_worker_config()
+    if log is None:
+        log = config.open_log()
+    for warning in config.warnings:
+        if log:
+            print(f"[Worker] {warning}", file=log, flush=True)
     setup_kwargs = setup_kwargs or {}
     if _ignored and log:
         print(
