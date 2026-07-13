@@ -22,6 +22,25 @@ from .protocol import (
 )
 
 
+def _worker_error_from_extra(extra: bytes) -> str | None:
+    """Extract an in-band worker error from the FORCEREADY extra field.
+
+    Workers (1.0+) report calculation failures as a JSON object
+    {"error": "<traceback>"} in the otherwise-unused extra payload. Anything
+    that isn't such an object — the b"\\x00" padding byte, empty bytes, or a
+    future non-error use of the field — is not an error.
+    """
+    if not extra or not extra.startswith(b"{"):
+        return None
+    try:
+        payload = json.loads(extra.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if isinstance(payload, dict):
+        return payload.get("error")
+    return None
+
+
 class RootstockServer:
     """
     Server that communicates with an MLIP worker process via i-PI protocol.
@@ -268,6 +287,10 @@ class RootstockServer:
         # Get results
         self._protocol.send_getforce()
         energy, forces, virial, extra = self._protocol.recv_forceready()
+
+        error = _worker_error_from_extra(extra)
+        if error is not None:
+            raise RuntimeError(f"Worker calculation failed:\n{error}")
 
         return energy, forces, virial
 
