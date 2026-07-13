@@ -14,7 +14,7 @@ from rootstock.worker import MLIPWorker
 
 
 def _make_worker(numbers: list[int] | None, pbc: list[bool] | None = None) -> MLIPWorker:
-    worker = MLIPWorker(socket_name="test", calculator=None)
+    worker = MLIPWorker(calculator=None, socket_path="/tmp/unused")
     worker._atomic_numbers = numbers
     worker._pbc = pbc
     return worker

@@ -38,7 +38,7 @@ class StubCalculator:
 def _run_one_force_call(calculator) -> tuple[float, np.ndarray, np.ndarray, bytes]:
     """Drive a worker through INIT -> POSDATA -> GETFORCE -> EXIT."""
     server_sock, worker_sock = socket.socketpair()
-    worker = MLIPWorker(socket_name="test", calculator=calculator)
+    worker = MLIPWorker(calculator=calculator, socket_path="/tmp/unused")
     worker._socket = worker_sock
     worker._protocol = IPIProtocol(worker_sock)
     worker._connect = lambda: None
@@ -88,7 +88,7 @@ def test_worker_survives_a_failed_calculation():
 
     calc.get_potential_energy = flaky_energy
 
-    worker = MLIPWorker(socket_name="test", calculator=calc)
+    worker = MLIPWorker(calculator=calc, socket_path="/tmp/unused")
     worker._socket = worker_sock
     worker._protocol = IPIProtocol(worker_sock)
     worker._connect = lambda: None

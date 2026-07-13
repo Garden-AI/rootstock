@@ -18,7 +18,7 @@ from rootstock.worker import MLIPWorker
 def _wired_worker() -> tuple[MLIPWorker, IPIProtocol]:
     """Worker pre-wired to one end of a socketpair; no real connect."""
     server_sock, worker_sock = socket.socketpair()
-    worker = MLIPWorker(socket_name="test", calculator=None)
+    worker = MLIPWorker(calculator=None, socket_path="/tmp/unused")
     worker._socket = worker_sock
     worker._protocol = IPIProtocol(worker_sock)
     worker._connect = lambda: None
