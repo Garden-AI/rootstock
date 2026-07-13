@@ -72,11 +72,14 @@ Consequences:
 
 ## Worker environment variables
 
-The worker process reads a few `ROOTSTOCK_*` environment variables at
-startup. Because every built env pins its own copy of rootstock, the worker
-code inside an env cannot be updated without a rebuild — environment
-variables set at spawn are the one configuration channel that always reaches
-already-deployed workers.
+The worker process reads a few `ROOTSTOCK_*` environment variables once at
+startup, into a frozen config object (`rootstock/worker_config.py`).
+Because every built env pins its own copy of rootstock, the worker code
+inside an env cannot be updated without a rebuild — environment variables
+set at spawn are the one configuration channel that always reaches
+already-deployed workers, and `worker_config.py` is deliberately small,
+stdlib-only, and never-fatal on bad input, since it freezes along with the
+rest of the worker surface.
 
 | Variable | Default | Description |
 |---|---|---|
