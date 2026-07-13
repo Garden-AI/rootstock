@@ -229,7 +229,15 @@ class MLIPWorker:
                     state = "NEEDINIT"
 
                 else:
-                    self._log(f"Unknown message: {msg}")
+                    # The wire format is untagged 12-byte headers followed by
+                    # raw payloads; an unrecognized message means the stream
+                    # is desynced and every subsequent read would be garbage.
+                    self._log(f"Unknown message: {msg!r}, aborting")
+                    raise RuntimeError(
+                        f"Unknown protocol message {msg!r}: the i-PI byte stream is "
+                        "desynced (or the peer speaks a newer protocol); aborting "
+                        "rather than reading garbage."
+                    )
 
         finally:
             if self._socket:
