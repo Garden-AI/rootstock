@@ -5,11 +5,11 @@ import pytest
 pytest.importorskip("atomate2")
 
 from rootstock.integrations.atomate2 import (  # noqa: E402
-    RootstockRelaxMaker,
-    RootstockStaticMaker,
+    RootstockAtomate2RelaxMaker,
+    RootstockAtomate2StaticMaker,
 )
 
-MAKERS = [RootstockRelaxMaker, RootstockStaticMaker]
+MAKERS = [RootstockAtomate2RelaxMaker, RootstockAtomate2StaticMaker]
 
 
 @pytest.mark.parametrize("maker_cls", MAKERS)

@@ -8,7 +8,8 @@ atomate2-side change is needed. What this module adds is ergonomics, worker
 lifecycle handling, and provenance. atomate2 caches the calculator on the Maker
 and never calls ``close()``, so the i-PI worker would otherwise outlive the job.
 
-Requires the optional ``atomate2`` extra::
+Requires the optional ``atomate2`` extra (Python 3.11+, since atomate2 does not
+support 3.10)::
 
     pip install "rootstock[atomate2]"
 
@@ -16,9 +17,9 @@ Usage::
 
     from jobflow import run_locally
 
-    from rootstock.integrations.atomate2 import RootstockRelaxMaker
+    from rootstock.integrations.atomate2 import RootstockAtomate2RelaxMaker
 
-    maker = RootstockRelaxMaker(
+    maker = RootstockAtomate2RelaxMaker(
         checkpoint="mace-mp-0-medium",
         cluster="sophia",
         device="cuda",
@@ -27,7 +28,7 @@ Usage::
 
 Locally (no cluster), point at an install root instead::
 
-    RootstockRelaxMaker(
+    RootstockAtomate2RelaxMaker(
         checkpoint="mace-mp-0-medium",
         root="/path/to/rootstock",
         device="cpu",
@@ -38,8 +39,8 @@ or ``ForceFieldStaticMaker`` (phonons, elastic, EOS, QHA, and so on)::
 
     from atomate2.forcefields.flows.phonons import PhononMaker
 
-    relax = RootstockRelaxMaker(checkpoint="mace-mp-0-medium", cluster="sophia")
-    static = RootstockStaticMaker(checkpoint="mace-mp-0-medium", cluster="sophia")
+    relax = RootstockAtomate2RelaxMaker(checkpoint="mace-mp-0-medium", cluster="sophia")
+    static = RootstockAtomate2StaticMaker(checkpoint="mace-mp-0-medium", cluster="sophia")
 
     PhononMaker(
         bulk_relax_maker=relax,
@@ -86,7 +87,7 @@ _CALCULATOR_META = "rootstock.calculator.RootstockCalculator"
 
 
 @dataclass
-class _RootstockMakerMixin:
+class _RootstockAtomate2Mixin:
     """Shared Rootstock wiring for the atomate2 force-field Makers."""
 
     checkpoint: str = ""
@@ -151,7 +152,7 @@ class _RootstockMakerMixin:
 
 
 @dataclass
-class RootstockRelaxMaker(_RootstockMakerMixin, ForceFieldRelaxMaker):
+class RootstockAtomate2RelaxMaker(_RootstockAtomate2Mixin, ForceFieldRelaxMaker):
     """Relax a structure or molecule with a Rootstock-hosted MLIP."""
 
     name: str = "Rootstock relax"
@@ -159,7 +160,7 @@ class RootstockRelaxMaker(_RootstockMakerMixin, ForceFieldRelaxMaker):
 
 
 @dataclass
-class RootstockStaticMaker(_RootstockMakerMixin, ForceFieldStaticMaker):
+class RootstockAtomate2StaticMaker(_RootstockAtomate2Mixin, ForceFieldStaticMaker):
     """Single-point energy, forces, and stress from a Rootstock-hosted MLIP."""
 
     name: str = "Rootstock static"
