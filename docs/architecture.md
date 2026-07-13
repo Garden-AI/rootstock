@@ -27,4 +27,45 @@ Rootstock uses the [i-PI protocol](http://ipi-code.org/) for communication betwe
 3. Worker sends back energy, forces, and stress
 4. Main process receives results and returns them to ASE
 
-The protocol is text-based and designed for interoperability between simulation codes.
+Commands are 12-byte ASCII strings; payloads are raw numpy buffers in
+atomic units, following ASE's `ase.calculators.socketio` implementation.
+
+### Deviations from standard i-PI
+
+**Rootstock speaks a private dialect of the i-PI protocol.** The wire
+framing is standard, but the semantics deviate in two load-bearing ways.
+Read this before trying to point any other i-PI implementation at a
+rootstock worker.
+
+**The INIT payload is required, and it is JSON.** Standard i-PI transmits
+only geometry (cell and positions); a force engine is expected to already
+know its chemical species from its own input. A rootstock worker hosts a
+generic ASE calculator and knows nothing about the system at spawn time, so
+the server packs the species into the INIT message's free-form init string
+as UTF-8 JSON:
+
+```json
+{"numbers": [1, 1, 8], "pbc": [true, true, true]}
+```
+
+A worker that has not received this payload fails at the first POSDATA.
+Unknown keys in the JSON object are ignored, which makes new keys a
+sanctioned forward-compatible extension channel.
+
+**The worker demands INIT before every force evaluation.** After each
+FORCEREADY the worker returns to NEEDINIT rather than READY, and the server
+re-sends the JSON INIT every cycle. This is how composition and PBC changes
+propagate mid-run (e.g. LAMMPS `fix gcmc` alongside `fix rootstock`).
+
+Consequences:
+
+- A standard i-PI server — i-PI itself, ASE's `SocketIOCalculator`, or any
+  other implementation — **cannot drive a rootstock worker**: it won't send
+  the JSON INIT payload, so the worker aborts at the first force request.
+- The supported protocol peers are exactly `RootstockServer` (the ASE
+  calculator path and `rootstock serve`'s counterpart) and
+  `lammps/fix_rootstock.cpp` (which implements the dialect natively,
+  including the per-cycle INIT).
+- This is a deliberate, documented limitation of 1.0. The worker side of the
+  protocol is frozen inside every built environment, so the requirement
+  cannot be relaxed for environments that have already been deployed.
