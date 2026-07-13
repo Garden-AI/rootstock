@@ -244,6 +244,7 @@ def run_worker(
     socket_path: str,
     setup_kwargs: dict | None = None,
     log=None,
+    **_ignored,
 ):
     """
     Run worker with a provided setup function.
@@ -260,8 +261,17 @@ def run_worker(
         socket_path: Full Unix socket path to connect to
         setup_kwargs: Extra keyword arguments forwarded to setup_fn
         log: Optional logging file object
+        **_ignored: Unknown options are ignored. Workers are frozen inside
+            built envs, so a newer client passing a new option must not
+            TypeError against an already-deployed worker.
     """
     setup_kwargs = setup_kwargs or {}
+    if _ignored and log:
+        print(
+            f"[Worker] Ignoring unknown run_worker options: {sorted(_ignored)}",
+            file=log,
+            flush=True,
+        )
     if log:
         print(
             f"[Worker] Calling setup({checkpoint!r}, {device!r}, **{setup_kwargs!r})",
