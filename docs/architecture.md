@@ -69,3 +69,19 @@ Consequences:
 - This is a deliberate, documented limitation of 1.0. The worker side of the
   protocol is frozen inside every built environment, so the requirement
   cannot be relaxed for environments that have already been deployed.
+
+## Worker environment variables
+
+The worker process reads a few `ROOTSTOCK_*` environment variables at
+startup. Because every built env pins its own copy of rootstock, the worker
+code inside an env cannot be updated without a rebuild — environment
+variables set at spawn are the one configuration channel that always reaches
+already-deployed workers.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ROOTSTOCK_WORKER_CONNECT_RETRIES` | `50` | Connection attempts to the server socket |
+| `ROOTSTOCK_WORKER_CONNECT_RETRY_DELAY` | `0.1` | Seconds between connection attempts |
+| `ROOTSTOCK_WORKER_LOG` | unset | Worker log destination when the client didn't attach one: `stderr`, `stdout`, or a file path (appended) |
+
+Invalid values fall back to the defaults rather than killing the worker.

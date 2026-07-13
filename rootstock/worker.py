@@ -12,6 +12,8 @@ The worker is spawned via a generated wrapper script that calls run_worker().
 """
 
 import json
+import os
+import sys
 import traceback
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -27,6 +29,56 @@ from .protocol import (
 
 if TYPE_CHECKING:
     from ase.calculators.calculator import Calculator
+
+# Env-var knobs, read at worker startup. Workers are frozen inside built
+# envs, so environment variables set at spawn are the one config channel a
+# newer client (or an operator) can always reach an old worker through.
+# Invalid values fall back to the defaults rather than killing the worker.
+CONNECT_RETRIES_ENV = "ROOTSTOCK_WORKER_CONNECT_RETRIES"
+CONNECT_RETRY_DELAY_ENV = "ROOTSTOCK_WORKER_CONNECT_RETRY_DELAY"
+WORKER_LOG_ENV = "ROOTSTOCK_WORKER_LOG"
+
+DEFAULT_CONNECT_RETRIES = 50
+DEFAULT_CONNECT_RETRY_DELAY = 0.1
+
+
+def _env_number(name: str, default, cast, log=None):
+    """Read a numeric env var, falling back to default on bad values."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = cast(raw)
+    except ValueError:
+        if log:
+            print(
+                f"[Worker] Ignoring invalid {name}={raw!r} (expected {cast.__name__}), "
+                f"using {default}",
+                file=log,
+                flush=True,
+            )
+        return default
+    return value
+
+
+def _log_from_env():
+    """Resolve ROOTSTOCK_WORKER_LOG into a writable file object (or None).
+
+    Accepts "stderr", "stdout", or a file path (opened in append mode,
+    line-buffered). Unopenable paths are ignored — a bad log destination
+    must never kill a frozen worker.
+    """
+    target = os.environ.get(WORKER_LOG_ENV)
+    if not target:
+        return None
+    if target == "stderr":
+        return sys.stderr
+    if target == "stdout":
+        return sys.stdout
+    try:
+        return open(target, "a", buffering=1)
+    except OSError:
+        return None
 
 
 class MLIPWorker:
@@ -80,9 +132,18 @@ class MLIPWorker:
             print(f"[Worker] {msg}", file=self.log, flush=True)
 
     def _connect(self):
-        """Connect to the server."""
-        self._log(f"Connecting to {self.socket_path}")
-        self._socket = connect_unix_socket(self.socket_path)
+        """Connect to the server, with the retry window taken from env vars."""
+        max_retries = _env_number(CONNECT_RETRIES_ENV, DEFAULT_CONNECT_RETRIES, int, log=self.log)
+        retry_delay = _env_number(
+            CONNECT_RETRY_DELAY_ENV, DEFAULT_CONNECT_RETRY_DELAY, float, log=self.log
+        )
+        self._log(
+            f"Connecting to {self.socket_path} "
+            f"(max_retries={max_retries}, retry_delay={retry_delay})"
+        )
+        self._socket = connect_unix_socket(
+            self.socket_path, max_retries=max_retries, retry_delay=retry_delay
+        )
         self._protocol = IPIProtocol(self._socket, log=self.log)
         self._log("Connected")
 
@@ -293,11 +354,23 @@ def run_worker(
         device: Device string to pass to setup_fn
         socket_path: Full Unix socket path to connect to
         setup_kwargs: Extra keyword arguments forwarded to setup_fn
-        log: Optional logging file object
+        log: Optional logging file object. When None, the
+            ROOTSTOCK_WORKER_LOG env var may name a destination
+            ("stderr", "stdout", or a file path).
         **_ignored: Unknown options are ignored. Workers are frozen inside
             built envs, so a newer client passing a new option must not
             TypeError against an already-deployed worker.
+
+    Environment variables (read at startup; the config channel that reaches
+    workers frozen inside already-built envs):
+        ROOTSTOCK_WORKER_CONNECT_RETRIES: connection attempts (default 50)
+        ROOTSTOCK_WORKER_CONNECT_RETRY_DELAY: seconds between attempts
+            (default 0.1)
+        ROOTSTOCK_WORKER_LOG: log destination when the client didn't
+            attach one
     """
+    if log is None:
+        log = _log_from_env()
     setup_kwargs = setup_kwargs or {}
     if _ignored and log:
         print(
