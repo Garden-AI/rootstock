@@ -40,10 +40,12 @@ rootstock/
 
 ## Worker compatibility policy
 
-Every built environment pins its own copy of rootstock, and only two of its
-modules actually execute inside the env at runtime: `worker.py` and
-`protocol.py` (entered through the `run_worker()` call in the generated
-wrapper script). Fixing anything on that path after release means rebuilding
+Every built environment pins its own copy of rootstock, and only the
+modules on the worker path actually execute inside the env at runtime:
+`worker.py`, `protocol.py`, and `worker_config.py` (entered through the
+`run_worker()` call in the generated wrapper script). Everything else in
+the pinned package is dead code inside an env. Fixing anything on the
+worker path after release means rebuilding
 every environment on every cluster — so treat the worker side as a
 **versioned internal ABI, frozen at 1.0**:
 
