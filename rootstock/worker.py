@@ -12,6 +12,7 @@ The worker is spawned via a generated wrapper script that calls run_worker().
 """
 
 import json
+import traceback
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -168,6 +169,7 @@ class MLIPWorker:
         energy = None
         forces = None
         virial = None
+        extra = b""
 
         self._log("Entering main loop")
 
@@ -222,9 +224,22 @@ class MLIPWorker:
                     cell, positions = self._protocol.recv_posdata()
                     self._log(f"Received POSDATA: {len(positions)} atoms")
 
-                    # Calculate energy and forces
-                    energy, forces, virial = self._calculate(positions, cell)
-                    self._log(f"Calculated: E={energy:.6f} eV")
+                    # Calculate energy and forces. A failure (bad structure,
+                    # GPU OOM, ...) must not kill the worker with the
+                    # traceback stranded in a stderr tempfile: report it
+                    # in-band via the FORCEREADY extra field, which servers
+                    # that predate this convention simply discard.
+                    try:
+                        energy, forces, virial = self._calculate(positions, cell)
+                        extra = b""
+                        self._log(f"Calculated: E={energy:.6f} eV")
+                    except Exception:
+                        tb = traceback.format_exc()
+                        self._log(f"Calculation failed:\n{tb}")
+                        energy = 0.0
+                        forces = np.zeros((len(positions), 3))
+                        virial = np.zeros((3, 3))
+                        extra = json.dumps({"error": tb}).encode("utf-8")
 
                     state = "HAVEDATA"
 
@@ -233,7 +248,7 @@ class MLIPWorker:
                     if state != "HAVEDATA":
                         raise RuntimeError(f"GETFORCE in state {state}")
 
-                    self._protocol.send_forceready(energy, forces, virial)
+                    self._protocol.send_forceready(energy, forces, virial, extra)
                     self._log("Sent FORCEREADY")
 
                     state = "NEEDINIT"
