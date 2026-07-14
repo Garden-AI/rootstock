@@ -376,7 +376,7 @@ def create_manifest(
 
     Args:
         root: Rootstock root directory
-        cluster: Cluster name (e.g., "della", "modal")
+        cluster: Cluster name (e.g., "delta", "perlmuter")
         config: User config with maintainer info
 
     Returns:

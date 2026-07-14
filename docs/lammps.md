@@ -31,7 +31,7 @@ fix <id> <group> rootstock cluster <name> checkpoint <ckpt> \
 
 | Keyword | Required | Default | Description |
 |---------|----------|---------|-------------|
-| `cluster` | yes | — | Cluster name (e.g., `della`) |
+| `cluster` | yes | — | Cluster name (e.g., `delta`) |
 | `checkpoint` | yes | — | Canonical checkpoint id (e.g., `mace-mp-0-medium`) |
 | `device` | no | `cuda` | `cuda` or `cpu` |
 | `timeout` | no | `120` | Seconds to wait for worker startup |
@@ -46,7 +46,7 @@ units metal
 pair_style zero 6.0
 pair_coeff * *
 
-fix mlip all rootstock cluster della checkpoint mace-mp-0-medium device cuda elements Cu
+fix mlip all rootstock cluster delta checkpoint mace-mp-0-medium device cuda elements Cu
 
 thermo_style custom step temp pe f_mlip press
 ```

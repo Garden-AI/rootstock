@@ -45,7 +45,7 @@ pair_coeff      * *
 
 read_data       structure.data
 
-fix             mlip all rootstock cluster della checkpoint mace-mp-0-medium \
+fix             mlip all rootstock cluster delta checkpoint mace-mp-0-medium \
                 device cuda elements Cu
 
 # Energy is available via f_mlip

@@ -1,6 +1,6 @@
 # Run — from other tools
 
-`RootstockCalculator` is a standard ASE calculator. Any tool that accepts an ASE calculator can use a Rootstock-hosted model in its place, without that tool needing the model's Python dependencies. You point the tool at a `RootstockCalculator` for a given `(cluster, checkpoint)` pair, and it talks to the isolated model environment through Rootstock.
+`RootstockCalculator` is a standard ASE calculator. Most tools that accept an ASE calculator can use a Rootstock-hosted model in its place, without that tool needing the model's Python dependencies. You point the tool at a `RootstockCalculator` for a given `(cluster, checkpoint)` pair, and it talks to the isolated model environment through Rootstock.
 
 MLIPx is documented below. The remaining integrations are planned and will grow as each one is built out.
 

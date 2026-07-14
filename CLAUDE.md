@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Rootstock is a proof-of-concept for running MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments, communicating via the i-PI protocol over Unix sockets.
+Rootstock runs MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments on HPC clusters, communicating via the i-PI protocol over Unix sockets.
 
 **Current version: v0.8** - Manifest schema v3; canonical-checkpoint-id API.
 
@@ -116,7 +116,7 @@ Most clusters use the same path for both.
 ```python
 # v0.8: single canonical checkpoint id; env is resolved automatically.
 with RootstockCalculator(
-    cluster="della",
+    cluster="delta",
     checkpoint="mace-mp-0-medium",
     device="cuda",
 ) as calc:
@@ -126,7 +126,7 @@ with RootstockCalculator(
 # Forward extra kwargs to the env's setup() function. Cannot contain
 # "checkpoint" or "device" — those are passed at the top level.
 with RootstockCalculator(
-    cluster="della",
+    cluster="delta",
     checkpoint="uma-s-1p1",
     setup_kwargs={"task": "omol"},
 ) as calc:
