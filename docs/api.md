@@ -179,17 +179,23 @@ rootstock install ./mace.py
 # Install all environments from a directory
 rootstock install ./environments/
 
-# Rebuild an existing environment
+# Rebuild an existing environment (honors the env's lockfile)
 rootstock install mace --force
+
+# Rebuild and re-resolve dependencies to the latest allowed versions
+rootstock install mace --force --upgrade
 
 # Install without pushing manifest to backend
 rootstock install mace.py --no-push
 ```
 
+The first build resolves the env file's version ranges and writes a uv lockfile (`environments/<name>.py.lock`); later rebuilds install exactly the locked versions unless `--upgrade` is passed. See [Lockfiles and reproducible rebuilds](environments.md#lockfiles-and-reproducible-rebuilds).
+
 Options:
 
 - `--root <path>`: Specify root directory (or use `$ROOTSTOCK_ROOT`)
 - `--force`: Update registration and rebuild if environment exists
+- `--upgrade`: Re-resolve dependencies to the latest allowed versions instead of honoring the lockfile
 - `--verbose`, `-v`: Verbose output
 - `--no-push`: Skip pushing manifest to backend
 

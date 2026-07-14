@@ -66,6 +66,20 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 When a user runs `rootstock add mace-mp-0-medium`, Rootstock walks every installed env's `env_source.py`, AST-parses the `CHECKPOINTS` literal, and finds the env that declares the id. A typo errors immediately ("no installed env declares ..."), instead of failing inside `setup()`.
 
+## Lockfiles and reproducible rebuilds
+
+The PEP 723 block declares version *ranges*; the exact package set is resolved once, at build time. `rootstock install` records that resolution in a uv lockfile so a rebuild reproduces the env instead of re-resolving whatever the ranges allow that day:
+
+- `{root}/environments/<name>.py.lock` — the working lockfile, next to the registered source. `uv lock --script` writes it on first build and keeps its pins on later builds.
+- `{root}/envs/<name>/env_source.py.lock` — a copy stored inside the built env, recording exactly what that build was resolved from. Its hash is tracked in the manifest as `lock_hash`.
+
+Rebuilds (`rootstock install <name> --force`) install exactly the locked versions by default. This is what makes "roll out a small fix and rebuild" safe: the rebuilt env has the same dependency stack that was already qualified on the cluster. Two things change the resolution:
+
+- **Editing the env source.** Changed constraints re-resolve minimally; pins that still satisfy the ranges are kept.
+- **`rootstock install <name> --force --upgrade`.** Re-resolves everything to the latest allowed versions. Use this when you deliberately want a fresh stack — and expect to re-verify checkpoints afterwards.
+
+If you keep env files in a git repo, commit the `.py.lock` next to the `.py`: `rootstock install ./mace.py` carries an adjacent lockfile along and builds from it. Envs built before lockfiles existed (manifest `lock_hash: null`) can only be re-resolved, not faithfully rebuilt.
+
 ## Required elements
 
 ### PEP 723 metadata block
@@ -192,6 +206,8 @@ def setup(checkpoint: str, device: str = "cuda"):
 # Avoid: unpinned
 # dependencies = ["mace-torch", "torch"]
 ```
+
+Ranges bound what a *fresh* resolution may pick; the build-time lockfile (see [Lockfiles and reproducible rebuilds](#lockfiles-and-reproducible-rebuilds)) is what pins a given install's rebuilds exactly.
 
 ### Match canonical ids to the Almanac
 

@@ -141,6 +141,11 @@ def _refresh_manifest_environments(
         source_hash = compute_source_hash(source_file)
         source_content = source_file.read_text()
 
+        # Hash the build's lockfile if the env has one (envs built before
+        # lockfiles existed won't)
+        lock_file = env_path / "env_source.py.lock"
+        lock_hash = compute_source_hash(lock_file) if lock_file.exists() else None
+
         # Get python requires from source
         python_requires = get_requires_python(source_file) or ">=3.11"
 
@@ -171,6 +176,7 @@ def _refresh_manifest_environments(
             python_requires=python_requires,
             dependencies=dependencies,
             checkpoints=checkpoints,
+            lock_hash=lock_hash,
         )
 
     return manifest
@@ -217,6 +223,8 @@ def cmd_manifest_show(args) -> int:
             print(f"    {name}:")
             print(f"      Built at:     {env.built_at}")
             print(f"      Source hash:  {env.source_hash[:20]}...")
+            lock_desc = f"{env.lock_hash[:20]}..." if env.lock_hash else "none (pre-lockfile build)"
+            print(f"      Lockfile:     {lock_desc}")
             print(f"      Dependencies: {len(env.dependencies)} packages")
             if env.checkpoints:
                 print(f"      Checkpoints:  {', '.join(env.checkpoints.keys())}")

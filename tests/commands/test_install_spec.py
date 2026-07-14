@@ -209,7 +209,7 @@ def test_dependencies_installed_via_uv_sync_script(tmp_path, monkeypatch, capsys
         f"expected exactly one 'uv sync' call, got: {[c for c, _ in captured_calls]!r}"
     )
     cmd, kwargs = sync_calls[0]
-    assert cmd == ["uv", "sync", "--script", str(env_source), "--active"]
+    assert cmd == ["uv", "sync", "--script", str(env_source), "--active", "--frozen"]
     assert kwargs["env"]["VIRTUAL_ENV"] == env_target
 
     # The dependency must NOT be installed through the `uv pip` interface,

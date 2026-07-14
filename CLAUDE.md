@@ -18,8 +18,9 @@ uv pip install -e ".[dev]"
 
 ### CLI Commands
 ```bash
-# Build a pre-built environment (venv only — no model weights)
-rootstock install <env_source.py> [--root <path>] [--force]
+# Build a pre-built environment (venv only — no model weights). First build
+# writes environments/<name>.py.lock; rebuilds honor it unless --upgrade.
+rootstock install <env_source.py> [--root <path>] [--force] [--upgrade]
 
 # Download + verify a checkpoint by canonical id (idempotent). Use --no-verify on login nodes.
 rootstock add <checkpoint-id> [--kwarg key=val ...] [--device cuda] [--no-verify]
@@ -79,13 +80,15 @@ Main Process                          Worker Process (subprocess)
 │   └── cpython-3.11.9-linux-x86_64-gnu/
 ├── environments/           # Environment SOURCE files (*.py with PEP 723 + CHECKPOINTS)
 │   ├── mace.py
+│   ├── mace.py.lock        # uv lockfile — rebuilds resolve from this
 │   ├── uma.py
 │   └── tensornet.py
 ├── envs/                   # Pre-built virtual environments
 │   ├── mace/
 │   │   ├── bin/python      # Symlinks to .python/
 │   │   ├── lib/python3.11/site-packages/
-│   │   └── env_source.py   # Copy of source for imports
+│   │   ├── env_source.py   # Copy of source for imports
+│   │   └── env_source.py.lock  # what this build was resolved from
 │   └── uma/
 └── cache/                  # XDG_CACHE_HOME for model weights
     ├── mace/

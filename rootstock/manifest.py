@@ -201,6 +201,11 @@ class EnvironmentInfo:
     python_requires: str  # ">=3.11"
     dependencies: dict[str, str]  # {"mace-torch": "0.3.6"}
     checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
+    # sha256 of the env's uv lockfile (envs/<name>/env_source.py.lock).
+    # None means the env was built without one — either by a pre-lockfile
+    # rootstock or because the env defeats universal resolution — and can
+    # only be re-resolved, not faithfully rebuilt.
+    lock_hash: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -209,6 +214,7 @@ class EnvironmentInfo:
             "source": self.source,
             "python_requires": self.python_requires,
             "dependencies": self.dependencies,
+            "lock_hash": self.lock_hash,
             "checkpoints": {name: ckpt.to_dict() for name, ckpt in self.checkpoints.items()},
         }
 
@@ -226,6 +232,7 @@ class EnvironmentInfo:
             python_requires=data["python_requires"],
             dependencies=data["dependencies"],
             checkpoints=checkpoints,
+            lock_hash=data.get("lock_hash"),
         )
 
 
