@@ -310,8 +310,10 @@ def _install_single_environment(
 
     print(f"\nBuilt environment: {env_target}")
 
-    # Update manifest (quiet=True to avoid cluttering build output)
-    update_and_push_manifest(root, quiet=False, push=not no_push)
+    # Update manifest (quiet=True to avoid cluttering build output).
+    # built_env stamps this env's built_at to now — the one moment the true
+    # build time is known.
+    update_and_push_manifest(root, quiet=False, push=not no_push, built_env=env_name)
 
     return 0
 

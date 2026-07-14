@@ -132,25 +132,26 @@ def _ensure_manifest_entry(
 
     env = manifest.environments.get(env_name)
     if env is None:
-        # The env directory must exist for the operation to make sense, but if
-        # the manifest hasn't been refreshed yet we'll synthesize a minimal
-        # entry. update_and_push_manifest() will fill in the rest on save.
+        # The manifest hasn't been refreshed since this env was built. Refresh
+        # from disk rather than synthesizing a placeholder — a fabricated
+        # built_at=now would fake freshness into the verified_at > built_at
+        # staleness comparison, and an empty source_hash would record nothing.
         env_dir = root / "envs" / env_name
         if not (env_dir / "bin" / "python").exists():
             raise RuntimeError(
                 f"environment '{env_name}' is not built at {env_dir}.\n"
                 f"Run: rootstock install <path-to-{env_name}.py> --root {root}"
             )
-        env = EnvironmentInfo(
-            status="ready",
-            built_at=now_iso(),
-            source_hash="",
-            source="",
-            python_requires=">=3.10",
-            dependencies={},
-            checkpoints={},
-        )
-        manifest.environments[env_name] = env
+        from .manifest import _refresh_manifest_environments
+
+        manifest = _refresh_manifest_environments(manifest, root)
+        env = manifest.environments.get(env_name)
+        if env is None:
+            raise RuntimeError(
+                f"environment '{env_name}' is built at {env_dir} but has no "
+                f"env_source.py — rebuild it: rootstock install {env_name} "
+                f"--root {root} --force"
+            )
 
     if checkpoint not in env.checkpoints:
         env.checkpoints[checkpoint] = CheckpointInfo()
