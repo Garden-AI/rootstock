@@ -10,11 +10,13 @@ The manifest tracks the state of a rootstock installation:
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -23,6 +25,109 @@ from pathlib import Path
 from .config import UserConfig
 
 SCHEMA_VERSION = 3
+
+
+def _migrate_v1_to_v2(data: dict) -> tuple[dict, str | None]:
+    """v1 stored ``checkpoints: list[str]``; v2 stores a dict of CheckpointInfo.
+
+    Each listed checkpoint becomes an empty CheckpointInfo — nothing fetched,
+    nothing verified. (Port of the retired scripts/migrate_manifest_v1_to_v2.py.)
+    """
+    for env in data.get("environments", {}).values():
+        env["checkpoints"] = {
+            name: {
+                "fetched_at": None,
+                "verified_at": None,
+                "verified_device": None,
+                "last_error": None,
+            }
+            for name in (env.get("checkpoints") or [])
+        }
+    data["schema_version"] = 2
+    return data, None
+
+
+def _migrate_v2_to_v3(data: dict) -> tuple[dict, str | None]:
+    """v3 renamed checkpoint ids to canonical form (e.g. 'mace-mp-0-small').
+
+    v2 checkpoint keys are env-local names that no longer join against any
+    env's CHECKPOINTS table, so the entries are dropped rather than carried
+    with untrustworthy ids. Environments survive; model weights stay cached.
+    """
+    environments = data.get("environments", {})
+    dropped = sum(len(env.get("checkpoints") or {}) for env in environments.values())
+    for env in environments.values():
+        env["checkpoints"] = {}
+    data["schema_version"] = 3
+
+    note = None
+    if dropped:
+        note = (
+            f"dropped {dropped} checkpoint record(s): v3 switched to canonical "
+            f"checkpoint ids, so v2 ids can't be trusted. Re-run "
+            f"`rootstock add <checkpoint-id>` to re-verify (weights stay cached)."
+        )
+    return data, note
+
+
+# One entry per historical schema version, upgrading one step. A schema bump
+# without a migration here strands every deployed manifest of that vintage —
+# add the migration in the same change as the bump.
+MIGRATIONS = {
+    1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
+}
+
+
+def migrate_manifest_data(data: dict) -> tuple[dict, list[str]]:
+    """Upgrade a raw manifest dict to SCHEMA_VERSION, one step at a time.
+
+    Returns the upgraded dict and human-readable notes about lossy steps
+    (empty when the manifest was already current). Raises RuntimeError for
+    manifests from a *newer* rootstock or with no migration path.
+    """
+    version = data.get("schema_version")
+    if isinstance(version, str) and version.isdigit():
+        version = int(version)  # v1 wrote schema_version as a string
+
+    if not isinstance(version, int):
+        raise RuntimeError(
+            f"manifest has invalid schema_version={data.get('schema_version')!r}; "
+            f"expected an integer <= {SCHEMA_VERSION}."
+        )
+
+    if version > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"manifest is schema_version={version}, but this rootstock only "
+            f"understands up to {SCHEMA_VERSION}. It was written by a newer "
+            f"rootstock — upgrade this client (`pip install -U rootstock`)."
+        )
+
+    if version == SCHEMA_VERSION:
+        if data["schema_version"] != version:  # normalize a coerced string
+            data = {**data, "schema_version": version}
+        return data, []
+
+    # Migrations mutate freely; the caller's dict stays untouched.
+    data = copy.deepcopy(data)
+    data["schema_version"] = version
+
+    notes: list[str] = []
+    while version < SCHEMA_VERSION:
+        migrate = MIGRATIONS.get(version)
+        if migrate is None:
+            raise RuntimeError(
+                f"manifest is schema_version={version} and no migration path "
+                f"to {SCHEMA_VERSION} exists."
+            )
+        data, note = migrate(data)
+        notes.append(
+            f"migrated manifest schema v{version} -> v{data['schema_version']}"
+            + (f": {note}" if note else "")
+        )
+        version = data["schema_version"]
+
+    return data, notes
 
 
 @dataclass
@@ -147,21 +252,14 @@ class Manifest:
 
     @classmethod
     def from_dict(cls, data: dict) -> Manifest:
-        version = data.get("schema_version")
-        if version != SCHEMA_VERSION:
-            raise RuntimeError(
-                f"manifest is schema_version={version!r}, expected {SCHEMA_VERSION}.\n"
-                f"Older manifests are not auto-migrated. Reinstall environments with "
-                f"`rootstock install <env-file>` and re-add checkpoints with "
-                f"`rootstock add <checkpoint-id>`."
-            )
+        data, _ = migrate_manifest_data(data)
 
         environments = {}
         for name, env_data in data.get("environments", {}).items():
             environments[name] = EnvironmentInfo.from_dict(env_data)
 
         return cls(
-            schema_version=version,
+            schema_version=data["schema_version"],
             cluster=data["cluster"],
             root=data["root"],
             maintainer=Maintainer.from_dict(data["maintainer"]),
@@ -322,6 +420,15 @@ def load_manifest(root: Path) -> Manifest | None:
     try:
         with open(manifest_path) as f:
             data = json.load(f)
+        data, notes = migrate_manifest_data(data)
+        if notes:
+            for note in notes:
+                print(f"Note: {note}", file=sys.stderr)
+            print(
+                "Note: the migrated manifest is written back on the next "
+                "state-changing command (install/add/smoke-test).",
+                file=sys.stderr,
+            )
         return Manifest.from_dict(data)
     except (json.JSONDecodeError, KeyError):
         # Invalid manifest - could log warning here
