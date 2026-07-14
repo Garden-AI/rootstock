@@ -75,6 +75,7 @@ Main Process                          Worker Process (subprocess)
 
 ```
 {root}/
+├── layout.json             # on-disk layout version (clients refuse newer layouts)
 ├── .python/                # uv-managed Python interpreters (portable)
 │   └── cpython-3.10.19-linux-x86_64-gnu/
 ├── environments/           # Environment SOURCE files (*.py with PEP 723 + CHECKPOINTS)

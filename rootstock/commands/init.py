@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..clusters import CLUSTER_REGISTRY, get_cluster_for_root
 from ..config import DEFAULT_CONFIG_FILE, load_config, save_config
+from ..layout import write_layout_marker
 from ..manifest import create_manifest, save_manifest
 from .common import ROOTSTOCK_ROOT_ENV
 from .manifest import _refresh_manifest_environments
@@ -143,6 +144,12 @@ def cmd_init(args) -> int:
                     print(f"  Skipped (no permission): {dir_path}")
             else:
                 print(f"  Exists:  {dir_path}")
+
+        try:
+            write_layout_marker(root)
+            print(f"  Created: {root / 'layout.json'}")
+        except PermissionError:
+            print(f"  Skipped (no permission): {root / 'layout.json'}")
 
     # Initialize manifest if we have a cluster
     if cluster and not args.skip_manifest:

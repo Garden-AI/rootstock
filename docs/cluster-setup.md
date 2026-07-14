@@ -246,6 +246,7 @@ After setup, the Rootstock root directory will look like this:
 
 ```
 {root}/
+├── layout.json             # on-disk layout version (future clients check this)
 ├── .python/                # uv-managed Python interpreters
 ├── environments/           # Environment source files (*.py with PEP 723 metadata)
 │   ├── mace.py

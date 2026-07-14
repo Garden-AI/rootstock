@@ -15,6 +15,7 @@ from ase.stress import full_3x3_to_voigt_6_stress
 
 from .clusters import get_cluster
 from .environment import find_env_for_checkpoint
+from .layout import ensure_layout_compatible
 from .server import RootstockServer
 
 
@@ -123,6 +124,11 @@ class RootstockCalculator(Calculator):
             self.cache_root = Path(cache_root) if cache_root is not None else self.root
         else:
             raise ValueError("Must specify either 'cluster' or 'root'")
+
+        # A root laid out by a newer rootstock may not be readable by this
+        # client's conventions — fail with "upgrade rootstock", not a
+        # misleading resolution error.
+        ensure_layout_compatible(self.root)
 
         # Resolve env name from the canonical checkpoint id by walking the
         # installed envs at self.root. Raises CheckpointNotFoundError with a
