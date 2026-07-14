@@ -16,14 +16,9 @@ from __future__ import annotations
 
 import ast
 import re
-import sys
 from pathlib import Path
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
-
+import tomllib
 
 # Pattern to match PEP 723 metadata block
 # Matches: # /// script\n...# ///
