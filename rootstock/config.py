@@ -17,14 +17,10 @@ Config file format:
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
+import tomllib
 
 # Environment variable names
 ROOTSTOCK_API_KEY_ENV = "ROOTSTOCK_API_KEY"
