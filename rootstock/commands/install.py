@@ -110,8 +110,7 @@ def _install_single_environment(
     Returns 0 on success, 1 on failure.
     """
     from ..environment import parse_checkpoints_dict
-    from ..pep723 import parse_pep723_metadata, validate_environment_file
-    from .manifest import update_and_push_manifest
+    from ..pep723 import validate_environment_file
 
     source_path = Path(source)
 
@@ -178,19 +177,59 @@ def _install_single_environment(
 
     env_target = root / "envs" / env_name
 
-    # Check if venv already exists
-    if env_target.exists():
-        if force:
-            print(f"Removing existing environment: {env_target}")
-            shutil.rmtree(env_target)
-        else:
-            print(f"Error: Environment already built: {env_target}", file=sys.stderr)
-            print("Use --force to rebuild", file=sys.stderr)
-            return 1
+    # Check if venv already exists. A --force rebuild does NOT delete the live
+    # env here — the new env is built in {root}/.build and swapped in at the
+    # end, so worker spawns on a shared install keep working for the whole
+    # (slow) build, and a failed rebuild leaves the old env untouched.
+    if env_target.exists() and not force:
+        print(f"Error: Environment already built: {env_target}", file=sys.stderr)
+        print("Use --force to rebuild", file=sys.stderr)
+        return 1
+
+    build_root = root / ".build"
+    build_root.mkdir(parents=True, exist_ok=True)
+    # Clear leftovers from earlier crashed/killed builds of this env.
+    for stale in build_root.glob(f"{env_name}.*"):
+        shutil.rmtree(stale, ignore_errors=True)
+    build_dir = build_root / f"{env_name}.{os.getpid()}"
 
     print(f"Building environment: {env_name}")
     print(f"  Source: {env_source}")
     print(f"  Target: {env_target}")
+    if env_target.exists():
+        print(f"  (building in {build_dir}; the live env is swapped out only when done)")
+
+    try:
+        return _build_and_swap(
+            root=root,
+            env_name=env_name,
+            env_source=env_source,
+            env_target=env_target,
+            build_dir=build_dir,
+            verbose=verbose,
+            no_push=no_push,
+            upgrade=upgrade,
+        )
+    finally:
+        # Gone already on success (renamed into place); left behind on any
+        # failure path or exception.
+        if build_dir.exists():
+            shutil.rmtree(build_dir, ignore_errors=True)
+
+
+def _build_and_swap(
+    root: Path,
+    env_name: str,
+    env_source: Path,
+    env_target: Path,
+    build_dir: Path,
+    verbose: bool,
+    no_push: bool,
+    upgrade: bool,
+) -> int:
+    """Build the venv into build_dir, then atomically swap it into env_target."""
+    from ..pep723 import parse_pep723_metadata
+    from .manifest import update_and_push_manifest
 
     # Parse PEP 723 metadata
     content = env_source.read_text()
@@ -263,8 +302,11 @@ def _install_single_environment(
     uv_env["UV_PYTHON_INSTALL_DIR"] = str(python_install_dir)
     uv_env["UV_CACHE_DIR"] = str(uv_cache_dir)
 
+    # --relocatable keeps script shebangs path-independent so the venv built
+    # in {root}/.build works unchanged after the rename into envs/. (The
+    # interpreter itself lives in {root}/.python and is unaffected either way.)
     result = subprocess.run(
-        ["uv", "venv", str(env_target), "--python", python_version],
+        ["uv", "venv", str(build_dir), "--relocatable", "--python", python_version],
         capture_output=True,
         text=True,
         env=uv_env,
@@ -273,7 +315,7 @@ def _install_single_environment(
         print(f"Error creating venv: {result.stderr}", file=sys.stderr)
         return 1
 
-    env_python = env_target / "bin" / "python"
+    env_python = build_dir / "bin" / "python"
 
     # Resolve the dependency lockfile. A build is only as reproducible as its
     # resolution: without a lockfile, a rebuild months later re-resolves the
@@ -337,7 +379,7 @@ def _install_single_environment(
         if lock_path.exists():
             sync_cmd.append("--frozen")
         sync_env = dict(uv_env)
-        sync_env["VIRTUAL_ENV"] = str(env_target)
+        sync_env["VIRTUAL_ENV"] = str(build_dir)
         result = subprocess.run(
             sync_cmd,
             capture_output=not verbose,
@@ -372,11 +414,30 @@ def _install_single_environment(
     # Copy environment source file (and its lockfile, so the built env records
     # exactly what it was resolved from)
     print("5. Copying environment source...")
-    shutil.copy(env_source, env_target / "env_source.py")
+    shutil.copy(env_source, build_dir / "env_source.py")
     if dependencies and lock_path.exists():
-        shutil.copy(lock_path, env_target / "env_source.py.lock")
+        shutil.copy(lock_path, build_dir / "env_source.py.lock")
 
-    print("6. Pre-compiling bytecode...")
+    # Swap the finished build into place. Two renames (same filesystem, so
+    # each is atomic) shrink the unavailable window from the whole build to
+    # microseconds; a failure before this point never touched the live env.
+    print("6. Swapping new environment into place...")
+    if env_target.exists():
+        displaced = build_dir.parent / f"{env_name}.old.{os.getpid()}"
+        env_target.rename(displaced)
+        try:
+            build_dir.rename(env_target)
+        except OSError:
+            displaced.rename(env_target)  # put the old env back
+            raise
+        shutil.rmtree(displaced, ignore_errors=True)
+    else:
+        env_target.parent.mkdir(parents=True, exist_ok=True)
+        build_dir.rename(env_target)
+
+    env_python = env_target / "bin" / "python"
+
+    print("7. Pre-compiling bytecode...")
     _precompile_environment(env_python, env_target)
 
     print(f"\nBuilt environment: {env_target}")
