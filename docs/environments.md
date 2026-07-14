@@ -207,6 +207,8 @@ The same model rarely drops onto every cluster unchanged. Driver and CUDA versio
 
 When an entire hardware class needs a different dependency stack (a non-NVIDIA GPU, say), that belongs in its own sample folder alongside `nvidia_configs/`, rather than as a one-off edit to an existing file.
 
+A `setup()`-only fix to an env that is already deployed does not require a rebuild at all — see [Hotfixing `setup()` without a rebuild](cluster-setup.md#hotfixing-setup-without-a-rebuild).
+
 ## Testing your environment
 
 ```bash
