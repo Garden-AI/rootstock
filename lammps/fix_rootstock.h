@@ -19,8 +19,11 @@
    The worker is auto-spawned via `rootstock serve`.
 
    Usage:
-     fix <id> <group> rootstock cluster <name> model <model> \
-         checkpoint <ckpt> device <dev> elements <e1> <e2> ...
+     fix <id> <group> rootstock cluster <name> checkpoint <ckpt> \
+         device <dev> elements <e1> <e2> ...
+
+   `checkpoint` is a canonical checkpoint id (e.g. 'mace-mp-0-medium'), the
+   same id used by RootstockCalculator and the `rootstock` CLI.
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
@@ -53,7 +56,6 @@ public:
 private:
   // User-facing keywords
   std::string cluster_name_;
-  std::string model_;
   std::string checkpoint_;
   std::string device_;
   int timeout_;

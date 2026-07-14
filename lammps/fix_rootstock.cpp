@@ -15,8 +15,8 @@
    fix rootstock - MLIP calculator via i-PI protocol over Unix sockets
 
    Usage:
-     fix <id> <group> rootstock cluster <name> model <model> \
-         checkpoint <ckpt> device <dev> elements <e1> <e2> ...
+     fix <id> <group> rootstock cluster <name> checkpoint <ckpt> \
+         device <dev> elements <e1> <e2> ...
 
    The worker is auto-spawned via `rootstock serve`.
 ------------------------------------------------------------------------- */
@@ -75,12 +75,12 @@ int FixRootstock::element_to_z(const std::string &symbol) {
 
 // ---------------------------------------------------------------------------
 // Constructor — parse keyword arguments
-//   fix <id> <group> rootstock cluster <name> model <model> checkpoint <ckpt>
+//   fix <id> <group> rootstock cluster <name> checkpoint <ckpt>
 //       device <dev> timeout <sec> elements <e1> <e2> ...
 // ---------------------------------------------------------------------------
 FixRootstock::FixRootstock(LAMMPS *lmp, int narg, char **arg)
     : Fix(lmp, narg, arg), server_fd_(-1), client_fd_(-1), worker_pid_(-1),
-      energy_(0.0), device_("cuda"), checkpoint_("default"), timeout_(120) {
+      energy_(0.0), device_("cuda"), timeout_(120) {
 
   if (narg < 4)
     error->all(FLERR, "fix rootstock: not enough arguments");
@@ -94,8 +94,6 @@ FixRootstock::FixRootstock(LAMMPS *lmp, int narg, char **arg)
 
     if (key == "cluster" && iarg + 1 < narg) {
       cluster_name_ = arg[++iarg];
-    } else if (key == "model" && iarg + 1 < narg) {
-      model_ = arg[++iarg];
     } else if (key == "checkpoint" && iarg + 1 < narg) {
       checkpoint_ = arg[++iarg];
     } else if (key == "device" && iarg + 1 < narg) {
@@ -115,8 +113,9 @@ FixRootstock::FixRootstock(LAMMPS *lmp, int narg, char **arg)
   // Validate required keywords
   if (cluster_name_.empty())
     error->all(FLERR, "fix rootstock: 'cluster' keyword is required");
-  if (model_.empty())
-    error->all(FLERR, "fix rootstock: 'model' keyword is required");
+  if (checkpoint_.empty())
+    error->all(FLERR, "fix rootstock: 'checkpoint' keyword is required "
+                      "(canonical id, e.g. 'mace-mp-0-medium')");
   if (!found_elements)
     error->all(FLERR, "fix rootstock: 'elements' keyword is required");
 
@@ -236,9 +235,9 @@ pid_t FixRootstock::spawn_worker(const std::string &root) {
 
   if (pid == 0) {
     // Child: exec rootstock serve
-    execlp("rootstock", "rootstock", "serve", model_.c_str(), "--root",
-           root.c_str(), "--socket", socket_path_.c_str(), "--checkpoint",
-           checkpoint_.c_str(), "--device", device_.c_str(), nullptr);
+    execlp("rootstock", "rootstock", "serve", checkpoint_.c_str(), "--root",
+           root.c_str(), "--socket", socket_path_.c_str(), "--device",
+           device_.c_str(), nullptr);
     // If exec fails, exit immediately
     _exit(127);
   }
@@ -301,9 +300,9 @@ void FixRootstock::init() {
   if (sel <= 0)
     error->all(FLERR,
                "fix rootstock: no worker connected within {} seconds. "
-               "Worker may have failed to start — check that the '{}' "
-               "environment is built.",
-               timeout_, model_);
+               "Worker may have failed to start. Check that an environment "
+               "providing checkpoint '{}' is built on this cluster.",
+               timeout_, checkpoint_);
 
   client_fd_ = ::accept(server_fd_, nullptr, nullptr);
   if (client_fd_ < 0)
