@@ -118,7 +118,7 @@ def test_connect_uses_config_values(monkeypatch):
     recorder = _ConnectRecorder()
     monkeypatch.setattr(worker_module, "connect_unix_socket", recorder)
 
-    worker = MLIPWorker(socket_name="test", calculator=None)
+    worker = MLIPWorker(calculator=None, socket_path="test")
     with pytest.raises(SystemExit):
         worker._connect()
 
