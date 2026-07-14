@@ -261,6 +261,8 @@ After setup, the Rootstock root directory will look like this:
 │   │   ├── env_source.py
 │   │   └── env_source.py.lock   # what this build was resolved from
 │   └── ...
+├── wheels/                 # Vendored rootstock wheels (rebuilds install from here,
+│                           # so they don't depend on PyPI still serving the release)
 ├── home/                   # Redirected HOME for not-well-behaved libraries
 │   ├── .cache/fairchem/
 │   └── .matgl/

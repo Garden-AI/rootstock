@@ -113,6 +113,11 @@ def test_install_command_passes_helper_spec_as_final_arg(tmp_path, monkeypatch, 
 
     monkeypatch.setattr("rootstock.commands.install.subprocess.run", fake_run)
     monkeypatch.setattr("rootstock.commands.install.shutil.copy", lambda *a, **k: None)
+    # No vendored wheel available: force the index-spec fallback (also keeps
+    # the test off the network).
+    monkeypatch.setattr(
+        "rootstock.commands.install._vendor_rootstock_wheel", lambda root: None
+    )
     monkeypatch.setattr(
         "rootstock.commands.install._precompile_environment", lambda *a, **k: None
     )
@@ -194,6 +199,11 @@ def test_dependencies_installed_via_uv_sync_script(tmp_path, monkeypatch, capsys
     monkeypatch.setattr("rootstock.commands.install.shutil.copy", lambda *a, **k: None)
     monkeypatch.setattr(
         "rootstock.commands.install._precompile_environment", lambda *a, **k: None
+    )
+    # No vendored wheel available: force the index-spec fallback (also keeps
+    # the test off the network).
+    monkeypatch.setattr(
+        "rootstock.commands.install._vendor_rootstock_wheel", lambda root: None
     )
     monkeypatch.setattr(
         "rootstock.commands.manifest.update_and_push_manifest",
