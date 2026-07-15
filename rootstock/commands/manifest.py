@@ -13,7 +13,6 @@ from ..manifest import (
     EnvironmentInfo,
     Manifest,
     built_at_estimate,
-    compute_source_hash,
     create_manifest,
     get_installed_versions,
     load_manifest,
@@ -114,7 +113,9 @@ def _refresh_manifest_environments(
     """
     Update manifest with current environment state.
 
-    Scans built environments and updates their info in the manifest.
+    Reads the installation through the InstallState reader: the filesystem
+    decides which envs the manifest records, and records for envs no longer
+    on disk are dropped.
 
     built_at semantics: `built_env` (the env the calling command just built)
     is stamped now; envs already in the manifest keep their recorded time; an
@@ -123,61 +124,61 @@ def _refresh_manifest_environments(
     `verified_at > built_at` staleness comparison.
     """
     from .. import __version__
-    from ..environment import list_built_environments
+    from ..install_state import read_install_state
 
     # Update rootstock version
     manifest.rootstock_version = __version__
 
-    # Get current built environments
-    built = list_built_environments(root)
+    state = read_install_state(root, manifest=manifest)
 
-    for env_name, env_path in built:
-        # Check if env_source.py exists
-        source_file = env_path / "env_source.py"
-        if not source_file.exists():
+    for env_name, env in state.envs.items():
+        if env.source_file is None:
+            # Built but missing env_source.py — nothing derivable to record;
+            # keep whatever record already exists.
             continue
 
-        # Get source hash and content
-        source_hash = compute_source_hash(source_file)
-        source_content = source_file.read_text()
-
-        # Hash the build's lockfile if the env has one (envs built before
-        # lockfiles existed won't)
-        lock_file = env_path / "env_source.py.lock"
-        lock_hash = compute_source_hash(lock_file) if lock_file.exists() else None
+        source_content = env.source_file.read_text()
 
         # Get python requires from source
-        python_requires = get_requires_python(source_file) or ">=3.11"
+        python_requires = get_requires_python(env.source_file) or ">=3.11"
 
         # Get direct dependencies from source
-        direct_deps = get_dependencies(source_file)
+        direct_deps = get_dependencies(env.source_file)
         # Always track rootstock itself
         if "rootstock" not in [d.lower() for d in direct_deps]:
             direct_deps.append("rootstock")
 
         # Get installed package versions (filtered to direct dependencies)
-        dependencies = get_installed_versions(env_path, only_packages=direct_deps)
+        dependencies = get_installed_versions(env.path, only_packages=direct_deps)
 
         # Get checkpoints (from existing manifest if available)
-        existing_env = manifest.environments.get(env_name)
-        checkpoints = existing_env.checkpoints if existing_env else {}
+        checkpoints = env.record.checkpoints if env.record else {}
 
         if env_name == built_env:
             built_at = now_iso()
-        elif existing_env:
-            built_at = existing_env.built_at
+        elif env.record:
+            built_at = env.record.built_at
         else:
-            built_at = built_at_estimate(env_path)
+            built_at = built_at_estimate(env.path)
 
         manifest.environments[env_name] = EnvironmentInfo(
             built_at=built_at,
-            source_hash=source_hash,
+            source_hash=env.source_hash,
             source=source_content,
             python_requires=python_requires,
             dependencies=dependencies,
             checkpoints=checkpoints,
-            lock_hash=lock_hash,
+            lock_hash=env.lock_hash,
         )
+
+    # The filesystem is the truth for what's installed: a record whose env
+    # is gone from disk describes nothing and must not reach the push payload.
+    for env_name in sorted(state.manifest_only_envs):
+        print(
+            f"Note: dropping manifest record for '{env_name}' — env no longer on disk",
+            file=sys.stderr,
+        )
+        del manifest.environments[env_name]
 
     return manifest
 

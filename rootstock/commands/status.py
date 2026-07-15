@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 
 from ..config import DEFAULT_CONFIG_FILE
-from ..manifest import is_verified, load_manifest
+from ..install_state import InstallState, read_install_state
+from ..manifest import is_verified
 from .common import get_root_or_exit, resolve_cache_root
 
 
@@ -42,46 +43,50 @@ def _checkpoint_line(env, ckpt_name: str, ckpt) -> str:
 
 def cmd_status(args) -> int:
     """Show status of rootstock installation."""
-    from ..environment import list_built_environments, list_environments
-
     root = get_root_or_exit(args)
-    manifest = load_manifest(root)
+    state = read_install_state(root)
 
     if getattr(args, "json", False):
-        return _cmd_status_json(root, manifest)
+        return _cmd_status_json(state)
 
     print(f"Rootstock root: {root}")
 
     # List environment sources
     print("\nEnvironment sources:")
-    sources = list_environments(root)
-    if not sources:
+    if not state.sources:
         print("  (none)")
     else:
-        for name, path in sources:
+        for name, path in state.sources:
             print(f"  {name}")
 
     # List built environments + per-checkpoint verification state
     print("\nBuilt environments:")
-    built = list_built_environments(root)
-    if not built:
+    if not state.envs and not state.manifest_only_envs:
         print("  (none)")
     else:
-        for name, path in built:
-            has_source = (path / "env_source.py").exists()
-            status = "ready" if has_source else "incomplete"
+        for name, env in state.envs.items():
+            status = "ready" if env.source_file is not None else "incomplete"
             print(f"  {name:<20} [{status}]")
 
-            env = manifest.environments.get(name) if manifest else None
-            if env is None:
+            if env.source_hash_drifted:
+                print(
+                    "    ⚠ env_source.py on disk differs from the manifest "
+                    "(in-place hotfix?) — run 'rootstock smoke-test' to re-record"
+                )
+
+            if env.record is None:
                 continue
-            if not env.checkpoints:
+            if not env.record.checkpoints:
                 print("    (no checkpoints — run 'rootstock add <checkpoint-id>')")
                 continue
-            print(f"    Built: {env.built_at}")
-            print(f"    Checkpoints ({len(env.checkpoints)}):")
-            for ckpt_name, ckpt in env.checkpoints.items():
-                print(_checkpoint_line(env, ckpt_name, ckpt))
+            print(f"    Built: {env.record.built_at}")
+            print(f"    Checkpoints ({len(env.record.checkpoints)}):")
+            for ckpt_name, ckpt in env.record.checkpoints.items():
+                print(_checkpoint_line(env.record, ckpt_name, ckpt))
+
+        # Records the manifest still carries for envs that are gone from disk.
+        for name in sorted(state.manifest_only_envs):
+            print(f"  {name:<20} [manifest only — not on disk]")
 
     # Show cache sizes. Cache may live under the install root or under a
     # separate cluster-registered cache_root. Some libraries respect
@@ -117,18 +122,45 @@ def cmd_status(args) -> int:
     return 0
 
 
-def _cmd_status_json(root, manifest) -> int:
-    """Emit raw manifest data plus computed verified_current per checkpoint."""
-    if manifest is None:
-        print(json.dumps({"root": str(root), "manifest": None}))
-        return 0
+def _cmd_status_json(state: InstallState) -> int:
+    """Emit the merged install state as JSON.
 
-    data = manifest.to_dict()
-    for env_name, env in manifest.environments.items():
-        env_data = data["environments"][env_name]
-        for ckpt_name, ckpt in env.checkpoints.items():
-            env_data["checkpoints"][ckpt_name]["verified_current"] = is_verified(env, ckpt)
-    print(json.dumps({"root": str(root), "manifest": data}, indent=2))
+    Environments are enumerated from the filesystem (the truth for what's
+    installed); manifest metadata (built_at, checkpoint fetch/verify state)
+    is joined in where it exists. Manifest records for envs no longer on
+    disk are listed separately rather than passed off as installed.
+    """
+    environments = {}
+    for name, env in state.envs.items():
+        checkpoints = {}
+        if env.record is not None:
+            for ckpt_name, ckpt in env.record.checkpoints.items():
+                ckpt_data = ckpt.to_dict()
+                ckpt_data["verified_current"] = is_verified(env.record, ckpt)
+                checkpoints[ckpt_name] = ckpt_data
+        environments[name] = {
+            "has_source": env.source_file is not None,
+            "source_hash": env.source_hash,
+            "lock_hash": env.lock_hash,
+            "declared_checkpoints": sorted(env.declared_checkpoints or {}),
+            "in_manifest": env.record is not None,
+            "built_at": env.record.built_at if env.record else None,
+            "manifest_source_hash": env.record.source_hash if env.record else None,
+            "checkpoints": checkpoints,
+        }
+
+    manifest = state.manifest
+    payload = {
+        "root": str(state.root),
+        "cluster": manifest.cluster if manifest else None,
+        "maintainer": manifest.maintainer.to_dict() if manifest else None,
+        "rootstock_version": manifest.rootstock_version if manifest else None,
+        "last_updated": manifest.last_updated if manifest else None,
+        "sources": [name for name, _ in state.sources],
+        "environments": environments,
+        "manifest_only_environments": sorted(state.manifest_only_envs),
+    }
+    print(json.dumps(payload, indent=2))
     return 0
 
 
