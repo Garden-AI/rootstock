@@ -87,7 +87,11 @@ def test_manifest_round_trip_preserves_checkpoint_metadata():
     assert ckpts["mace-mp-0-small"].fetched_at is None
 
 
-def test_from_dict_rejects_v2():
+def test_from_dict_migrates_v2():
+    """Old manifests load via migration instead of demanding a reinstall.
+
+    (Migration specifics are covered in test_migrations.py.)
+    """
     v2 = {
         "schema_version": 2,
         "cluster": "x",
@@ -97,12 +101,13 @@ def test_from_dict_rejects_v2():
         "python_version": "0",
         "last_updated": "0",
     }
-    with pytest.raises(RuntimeError, match="schema_version"):
-        Manifest.from_dict(v2)
+    manifest = Manifest.from_dict(v2)
+    assert manifest.schema_version == SCHEMA_VERSION
 
 
-def test_from_dict_rejects_string_version():
-    bogus = {
+def test_from_dict_coerces_digit_string_version():
+    """v1-era writers stored schema_version as a string; tolerate that."""
+    stringly = {
         "schema_version": "3",
         "cluster": "x",
         "root": "/",
@@ -111,8 +116,7 @@ def test_from_dict_rejects_string_version():
         "python_version": "0",
         "last_updated": "0",
     }
-    with pytest.raises(RuntimeError, match="schema_version"):
-        Manifest.from_dict(bogus)
+    assert Manifest.from_dict(stringly).schema_version == SCHEMA_VERSION
 
 
 def test_from_dict_rejects_missing_schema_version():
