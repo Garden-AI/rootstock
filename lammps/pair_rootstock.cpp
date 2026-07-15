@@ -12,42 +12,58 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   fix rootstock - MLIP forces added via i-PI protocol over Unix sockets
+   pair_style rootstock - MLIP as a genuine pair style via i-PI sockets
 
    Usage:
-     fix <id> <group> rootstock cluster <name> checkpoint <ckpt> \
-         device <dev> elements <e1> <e2> ...
+     pair_style rootstock cluster <name> checkpoint <ckpt> \
+                [device <dev>] [timeout <sec>] [cutoff <r>]
+     pair_coeff * * <e1> <e2> ...
 
    The worker is auto-spawned via `rootstock serve`. Protocol lives in
-   RootstockIPI (rootstock_ipi.cpp), shared with pair_style rootstock.
+   RootstockIPI (rootstock_ipi.cpp), shared with fix rootstock.
 ------------------------------------------------------------------------- */
 
-#include "fix_rootstock.h"
+#include "pair_rootstock.h"
 
 #include "atom.h"
 #include "comm.h"
 #include "domain.h"
 #include "error.h"
+#include "memory.h"
+#include "neighbor.h"
 #include "update.h"
 
 #include <cstdlib>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 
 // ---------------------------------------------------------------------------
-// Constructor — parse keyword arguments
-//   fix <id> <group> rootstock cluster <name> checkpoint <ckpt>
-//       device <dev> timeout <sec> elements <e1> <e2> ...
+// Constructor / destructor
 // ---------------------------------------------------------------------------
-FixRootstock::FixRootstock(LAMMPS *lmp, int narg, char **arg)
-    : Fix(lmp, narg, arg), client_(lmp->error), energy_(0.0) {
+PairRootstock::PairRootstock(LAMMPS *lmp)
+    : Pair(lmp), client_(lmp->error), cut_comm_(1.0) {
+  single_enable = 0;      // no pairwise decomposition exists
+  restartinfo = 0;        // nothing to write to restart files
+  one_coeff = 1;          // single pair_coeff * * line
+  manybody_flag = 1;
+  no_virial_fdotr_compute = 1;    // virial comes whole from the worker
+}
 
-  if (narg < 4) error->all(FLERR, "fix rootstock: not enough arguments");
+PairRootstock::~PairRootstock() {
+  if (allocated) {
+    memory->destroy(setflag);
+    memory->destroy(cutsq);
+  }
+}
 
-  // Parse keyword arguments starting from arg[3]
-  int iarg = 3;
-  bool found_elements = false;
-
+// ---------------------------------------------------------------------------
+// settings — parse pair_style arguments
+//   pair_style rootstock cluster <name> checkpoint <ckpt>
+//              [device <dev>] [timeout <sec>] [cutoff <r>]
+// ---------------------------------------------------------------------------
+void PairRootstock::settings(int narg, char **arg) {
+  int iarg = 0;
   while (iarg < narg) {
     std::string key = arg[iarg];
 
@@ -59,61 +75,69 @@ FixRootstock::FixRootstock(LAMMPS *lmp, int narg, char **arg)
       client_.device = arg[++iarg];
     } else if (key == "timeout" && iarg + 1 < narg) {
       client_.timeout = std::atoi(arg[++iarg]);
-    } else if (key == "elements") {
-      found_elements = true;
-      iarg++;
-      break;
+    } else if (key == "cutoff" && iarg + 1 < narg) {
+      cut_comm_ = std::atof(arg[++iarg]);
+      if (cut_comm_ <= 0.0)
+        error->all(FLERR, "pair_style rootstock: cutoff must be positive");
     } else {
-      error->all(FLERR, "fix rootstock: unknown keyword '{}'", key);
+      error->all(FLERR, "pair_style rootstock: unknown keyword '{}'", key);
     }
     iarg++;
   }
 
-  // Validate required keywords
   if (client_.cluster.empty())
-    error->all(FLERR, "fix rootstock: 'cluster' keyword is required");
+    error->all(FLERR, "pair_style rootstock: 'cluster' keyword is required");
   if (client_.checkpoint.empty())
-    error->all(FLERR, "fix rootstock: 'checkpoint' keyword is required "
-                      "(canonical id, e.g. 'mace-mp-0-medium')");
-  if (!found_elements)
-    error->all(FLERR, "fix rootstock: 'elements' keyword is required");
-
-  // Parse element list (remaining args after 'elements')
-  int ntypes = atom->ntypes;
-  int nelem = narg - iarg;
-  if (nelem != ntypes)
     error->all(FLERR,
-               "fix rootstock: {} elements given but {} atom types defined",
-               nelem, ntypes);
-
-  elements_.resize(ntypes);
-  for (int i = 0; i < ntypes; i++) {
-    std::string sym = arg[iarg + i];
-    if (RootstockIPI::element_to_z(sym) < 0)
-      error->all(FLERR, "fix rootstock: unknown element '{}'", sym);
-    elements_[i] = sym;
-  }
-
-  // Enable thermo output: energy via compute_scalar()
-  scalar_flag = 1;
-  global_freq = 1;
-  energy_global_flag = 1;
-  extscalar = 1;
-
-  // Enable virial contribution for NPT
-  virial_global_flag = 1;
-  thermo_virial = 1;
+               "pair_style rootstock: 'checkpoint' keyword is required "
+               "(canonical id, e.g. 'mace-mp-0-medium')");
 }
 
 // ---------------------------------------------------------------------------
-// setmask — we operate in post_force
+// coeff — parse pair_coeff * * <e1> <e2> ...
 // ---------------------------------------------------------------------------
-int FixRootstock::setmask() { return FixConst::POST_FORCE; }
+void PairRootstock::coeff(int narg, char **arg) {
+  if (!allocated) allocate();
+
+  int ntypes = atom->ntypes;
+  if (narg != 2 + ntypes)
+    error->all(FLERR,
+               "pair_coeff rootstock: expected '* * <{} element symbols>', "
+               "got {} arguments",
+               ntypes, narg);
+  if (std::strcmp(arg[0], "*") != 0 || std::strcmp(arg[1], "*") != 0)
+    error->all(FLERR, "pair_coeff rootstock: only '* *' is supported");
+
+  elements_.resize(ntypes);
+  for (int i = 0; i < ntypes; i++) {
+    std::string sym = arg[2 + i];
+    if (RootstockIPI::element_to_z(sym) < 0)
+      error->all(FLERR, "pair_coeff rootstock: unknown element '{}'", sym);
+    elements_[i] = sym;
+  }
+
+  for (int i = 1; i <= ntypes; i++)
+    for (int j = i; j <= ntypes; j++) setflag[i][j] = 1;
+}
+
+// ---------------------------------------------------------------------------
+// allocate — standard Pair arrays
+// ---------------------------------------------------------------------------
+void PairRootstock::allocate() {
+  allocated = 1;
+  int n = atom->ntypes + 1;
+
+  memory->create(setflag, n, n, "pair:setflag");
+  for (int i = 1; i < n; i++)
+    for (int j = i; j < n; j++) setflag[i][j] = 0;
+
+  memory->create(cutsq, n, n, "pair:cutsq");
+}
 
 // ---------------------------------------------------------------------------
 // refresh_atomic_numbers — rebuild the type -> Z mapping for local atoms
 // ---------------------------------------------------------------------------
-void FixRootstock::refresh_atomic_numbers() {
+void PairRootstock::refresh_atomic_numbers() {
   int nlocal = atom->nlocal;
   int *type = atom->type;
   numbers_.resize(nlocal);
@@ -123,22 +147,29 @@ void FixRootstock::refresh_atomic_numbers() {
 }
 
 // ---------------------------------------------------------------------------
-// init — start the worker on first call
+// init_style — validate, request a (nominal) neighbor list, start worker
 // ---------------------------------------------------------------------------
-void FixRootstock::init() {
-  // Validate units
+void PairRootstock::init_style() {
   if (std::string(update->unit_style) != "metal")
-    error->all(FLERR, "fix rootstock requires 'units metal'");
+    error->all(FLERR, "pair_style rootstock requires 'units metal'");
 
   // The worker sees all atoms and computes its own neighborhoods; there is
   // no force decomposition across ranks.
   if (comm->nprocs > 1)
     error->all(FLERR,
-               "fix rootstock requires a single MPI rank (run with "
+               "pair_style rootstock requires a single MPI rank (run with "
                "'mpirun -np 1')");
 
+  if (elements_.empty())
+    error->all(FLERR,
+               "pair_style rootstock: pair_coeff * * <elements> is required");
+
+  // The list is never read — the worker builds its own neighborhoods — but
+  // LAMMPS's neighbor machinery expects every pair style to hold one.
+  neighbor->add_request(this);
+
   // Only do socket/worker setup on first call.
-  // LAMMPS calls init() at the start of every `run` command.
+  // LAMMPS calls init_style() at the start of every `run` command.
   if (client_.running()) return;
 
   // Warn about atom types with zero atoms
@@ -149,23 +180,25 @@ void FixRootstock::init() {
     for (int i = 0; i < nlocal; i++)
       if (type[i] == t) count++;
     if (count == 0)
-      error->warning(FLERR, "fix rootstock: atom type {} ({}) has no atoms", t,
-                     elements_[t - 1]);
+      error->warning(FLERR, "pair_style rootstock: atom type {} ({}) has no atoms",
+                     t, elements_[t - 1]);
   }
 
   refresh_atomic_numbers();
-  client_.start("fix rootstock", std::string(id));
+  client_.start("pair_style rootstock", "pair");
 }
 
 // ---------------------------------------------------------------------------
-// setup — delegate to post_force (LAMMPS calls this for initial forces)
+// init_one — nominal cutoff for neighbor/comm bookkeeping only
 // ---------------------------------------------------------------------------
-void FixRootstock::setup(int vflag) { post_force(vflag); }
+double PairRootstock::init_one(int /* i */, int /* j */) { return cut_comm_; }
 
 // ---------------------------------------------------------------------------
-// post_force — every timestep: send positions, receive forces
+// compute — every timestep: send positions, receive energy/forces/virial
 // ---------------------------------------------------------------------------
-void FixRootstock::post_force(int /* vflag */) {
+void PairRootstock::compute(int eflag, int vflag) {
+  ev_init(eflag, vflag);
+
   int nlocal = atom->nlocal;
 
   // Refresh every call: atom sorting reorders local atoms without changing
@@ -186,8 +219,9 @@ void FixRootstock::post_force(int /* vflag */) {
     pos_[3 * i + 2] = x[i][2];
   }
 
+  double energy;
   double v6[6];
-  client_.exchange(cell, pos_.data(), nlocal, energy_, frc_.data(), v6);
+  client_.exchange(cell, pos_.data(), nlocal, energy, frc_.data(), v6);
 
   double **f = atom->f;
   for (int i = 0; i < nlocal; i++) {
@@ -196,10 +230,7 @@ void FixRootstock::post_force(int /* vflag */) {
     f[i][2] += frc_[3 * i + 2];
   }
 
-  for (int k = 0; k < 6; k++) virial[k] = v6[k];
+  if (eflag_global) eng_vdwl += energy;
+  if (vflag_global)
+    for (int k = 0; k < 6; k++) virial[k] += v6[k];
 }
-
-// ---------------------------------------------------------------------------
-// compute_scalar — return cached energy for thermo output
-// ---------------------------------------------------------------------------
-double FixRootstock::compute_scalar() { return energy_; }

@@ -12,35 +12,44 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   fix rootstock - MLIP forces added via i-PI protocol over Unix sockets
+   pair_style rootstock - MLIP as a genuine pair style via i-PI sockets
 
    Communicates with a rootstock worker process that runs an MLIP model
    (MACE, CHGNet, UMA, TensorNet, etc.) in an isolated Python environment.
    The worker is auto-spawned via `rootstock serve`.
 
-   Forces are ADDED to existing forces, so the MLIP can be combined with
-   a real pair style. When the MLIP is the only potential, prefer
-   pair_style rootstock: it contributes to thermo `pe` and `compute pair`
-   natively and composes with pair_style hybrid/scaled.
+   As a pair style, the MLIP participates natively in thermo `pe`,
+   `compute pair`, pressure, and pair_style hybrid/scaled — which is what
+   pair-style-assuming drivers (e.g. calphy) require. This is the
+   recommended integration when the MLIP is the only potential; use
+   fix rootstock to ADD MLIP forces on top of another potential.
 
    Usage:
-     fix <id> <group> rootstock cluster <name> checkpoint <ckpt> \
-         device <dev> elements <e1> <e2> ...
+     pair_style rootstock cluster <name> checkpoint <ckpt> \
+                [device <dev>] [timeout <sec>] [cutoff <r>]
+     pair_coeff * * <e1> <e2> ...
 
    `checkpoint` is a canonical checkpoint id (e.g. 'mace-mp-0-medium'), the
-   same id used by RootstockCalculator and the `rootstock` CLI.
+   same id used by RootstockCalculator and the `rootstock` CLI. The
+   elements on pair_coeff map atom types in order (type 1 = e1, ...).
+
+   `cutoff` only sizes LAMMPS's neighbor/communication bookkeeping — the
+   worker computes its own neighborhoods from the full cell. Default 1.0.
+
+   Per-atom energy and per-atom stress (compute pe/atom, stress/atom) are
+   not provided; the worker reports global quantities only.
 ------------------------------------------------------------------------- */
 
-#ifdef FIX_CLASS
+#ifdef PAIR_CLASS
 // clang-format off
-FixStyle(rootstock, FixRootstock)
+PairStyle(rootstock, PairRootstock)
 // clang-format on
 #else
 
-#ifndef LMP_FIX_ROOTSTOCK_H
-#define LMP_FIX_ROOTSTOCK_H
+#ifndef LMP_PAIR_ROOTSTOCK_H
+#define LMP_PAIR_ROOTSTOCK_H
 
-#include "fix.h"
+#include "pair.h"
 #include "rootstock_ipi.h"
 
 #include <string>
@@ -48,28 +57,28 @@ FixStyle(rootstock, FixRootstock)
 
 namespace LAMMPS_NS {
 
-class FixRootstock : public Fix {
+class PairRootstock : public Pair {
  public:
-  FixRootstock(class LAMMPS *, int, char **);
+  PairRootstock(class LAMMPS *);
+  ~PairRootstock() override;
 
-  int setmask() override;
-  void init() override;
-  void post_force(int) override;
-  void setup(int) override;
-  double compute_scalar() override;
+  void compute(int, int) override;
+  void settings(int, char **) override;
+  void coeff(int, char **) override;
+  void init_style() override;
+  double init_one(int, int) override;
 
  private:
   RootstockIPI client_;
   std::vector<std::string> elements_;    // per atom type, 0-indexed
-
-  // Cached energy for thermo output
-  double energy_;
+  double cut_comm_;
 
   // Per-call scratch buffers
   std::vector<int> numbers_;
   std::vector<double> pos_;
   std::vector<double> frc_;
 
+  void allocate();
   void refresh_atomic_numbers();
 };
 
