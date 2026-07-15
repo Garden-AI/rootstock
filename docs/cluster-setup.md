@@ -6,7 +6,7 @@ This guide is for administrators setting up Rootstock on a new cluster. Run all 
 
 - SSH access to the cluster
 - Write access to a shared filesystem location
-- Python 3.10 or later
+- Python 3.11 or later
 - `uv` package manager (Rootstock uses it internally)
 
 ## Step 1: Install Rootstock

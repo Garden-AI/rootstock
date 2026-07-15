@@ -5,7 +5,7 @@ PEP 723 defines a standard format for embedding metadata in Python scripts
 using a TOML block in comments:
 
     # /// script
-    # requires-python = ">=3.10"
+    # requires-python = ">=3.11"
     # dependencies = ["numpy", "ase"]
     # ///
 

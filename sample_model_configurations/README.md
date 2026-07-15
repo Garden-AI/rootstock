@@ -40,6 +40,14 @@ Other hardware targets (AMD, Apple Silicon, CPU-only) would each get their
 own `*_configs/` subfolder when needed. The `_agent/` tooling is
 hardware-agnostic.
 
+> **Python floor caveat.** rootstock itself requires Python >=3.11, and the
+> worker inside a built env runs rootstock — so every config's
+> `requires-python` must admit 3.11. The fairchem-core 1.x configs (dimenet,
+> equiformer, escn, gemnet, painn, schnet, scn) pin a single minor
+> (`>=3.11,<3.12`) because their torch-scatter/sparse/cluster wheels come
+> prebuilt per Python minor from the pinned PyG index; bump the pin in
+> lockstep if rootstock's floor moves again.
+
 ## What `modal_app.py` is for
 
 It is a **workshop**, not a validator. The artifact we ship is the config
@@ -85,7 +93,7 @@ Each probe is ~5 lines:
 @probe_image(
     "mlip.py",                          # config file in nvidia_configs/
     ["torch>=2.0", "ase>=3.22", "mlip-pkg"],# uv pip install deps
-    python_version="3.11",                  # optional (default: "3.10")
+    python_version="3.11",                  # optional (default: "3.11")
     find_links="https://data.pyg.org/...",  # optional PyG wheel index
     apt_packages=["git"],                   # optional apt packages
     no_deps=["pkg @ git+https://..."],      # optional --no-deps installs

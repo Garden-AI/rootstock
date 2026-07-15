@@ -8,7 +8,7 @@ You install only the lightweight `rootstock` package — it carries the `Rootsto
 
 **Requirements**
 
-- Python 3.10 or later
+- Python 3.11 or later
 - Access to a cluster where Rootstock is deployed, or a custom install root
 
 ```bash
