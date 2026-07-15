@@ -296,6 +296,23 @@ rootstock manifest push
 
 Rebuilding an env invalidates prior verifications (the venv changed; weights in `cache/` are unaffected). `rootstock status` will show those checkpoints as **stale** until you re-run `add` or `smoke-test`.
 
+### Hotfixing `setup()` without a rebuild
+
+`envs/<name>/env_source.py` is re-read at runtime on both sides of the socket: every worker spawn imports `setup()` from it, and every client resolution AST-parses its `CHECKPOINTS` table. Nothing caches it across runs — which means a maintainer can fix a bug in `setup()` (or adjust a `CHECKPOINTS` entry) by **editing that file in place on the shared filesystem, with no rebuild**. The next worker spawn picks it up. This is the one cheap lever into already-built envs, and it is a supported procedure:
+
+1. **Edit a copy, then move it into place** (an in-progress edit with a syntax error breaks every new worker spawn on the cluster):
+   ```bash
+   cp {root}/envs/mace/env_source.py /tmp/env_source.py
+   $EDITOR /tmp/env_source.py
+   # umask 002 so the result stays world-readable
+   mv /tmp/env_source.py {root}/envs/mace/env_source.py
+   ```
+2. **Apply the same edit to the registered source** `{root}/environments/mace.py` — that file is what rebuilds build from, so skipping this step means the next `install --force` silently reverts your hotfix.
+3. **Verify and refresh the manifest**: `rootstock smoke-test --env mace` (or `rootstock add <id>`) exercises the fixed `setup()` and pushes an updated manifest. Until this runs, the manifest's `source_hash` for the env is stale — it still hashes the pre-hotfix source.
+4. **Contribute the fix back** to the sample env file in the repo so the next cluster doesn't need the same hotfix.
+
+**What a hotfix can and cannot reach.** In-place edits can change anything `setup()` does (model loading logic, upstream URLs/paths, `CHECKPOINTS` values, new optional kwargs) — but they cannot change the env's **dependencies** (the venv is already built; dependency changes need `install --force`) and cannot fix **worker/protocol code** (that's the rootstock pinned inside the venv; only a rebuild replaces it).
+
 ## Troubleshooting
 
 ### Environment build fails
