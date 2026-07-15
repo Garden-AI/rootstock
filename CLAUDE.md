@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rootstock is a proof-of-concept for running MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments, communicating via the i-PI protocol over Unix sockets.
 
-**Current version: v0.8** - Manifest schema v3; canonical-checkpoint-id API.
+**Current version: v0.8** - Manifest schema v4 (older schemas migrate in place on load); canonical-checkpoint-id API.
 
 ## Commands
 

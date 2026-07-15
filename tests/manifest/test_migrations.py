@@ -72,7 +72,10 @@ def test_v2_environments_survive_checkpoints_dropped():
 
 def test_v2_without_checkpoints_migrates_quietly():
     _, notes = migrate_manifest_data(_base(2, {"mace": _v2_env()}))
-    assert notes == ["migrated manifest schema v2 -> v3"]
+    assert notes == [
+        "migrated manifest schema v2 -> v3",
+        "migrated manifest schema v3 -> v4",
+    ]
 
 
 def test_v2_loads_via_from_dict():
@@ -81,7 +84,28 @@ def test_v2_loads_via_from_dict():
     assert "mace" in manifest.environments
 
 
-# --- v1 -> v3 (full chain) --------------------------------------------------
+# --- v3 -> v4 -------------------------------------------------------------
+
+
+def test_v3_drops_dead_status_fields():
+    """v4 removed EnvironmentInfo.status/error_message (nothing ever wrote
+    values other than the defaults)."""
+    env = _v2_env({"mace-mp-0-medium": {"fetched_at": "2026-01-02T00:00:00Z"}})
+    env["error_message"] = None
+    data = _base(3, {"mace": env})
+
+    migrated, notes = migrate_manifest_data(data)
+
+    assert migrated["schema_version"] == SCHEMA_VERSION
+    assert "status" not in migrated["environments"]["mace"]
+    assert "error_message" not in migrated["environments"]["mace"]
+    # v3 checkpoint ids are already canonical — they survive
+    assert "mace-mp-0-medium" in migrated["environments"]["mace"]["checkpoints"]
+    assert notes == ["migrated manifest schema v3 -> v4"]
+    assert "mace" in Manifest.from_dict(migrated).environments
+
+
+# --- v1 -> v4 (full chain) --------------------------------------------------
 
 
 def test_v1_chain_migrates_to_current():
@@ -92,7 +116,7 @@ def test_v1_chain_migrates_to_current():
     assert migrated["schema_version"] == SCHEMA_VERSION
     # v1->v2 mints empty CheckpointInfo dicts; v2->v3 then drops them
     assert migrated["environments"]["mace"]["checkpoints"] == {}
-    assert len(notes) == 2
+    assert len(notes) == 3
     assert Manifest.from_dict(migrated).environments["mace"].source_hash == "sha256:abc"
 
 

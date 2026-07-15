@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .config import UserConfig
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _migrate_v1_to_v2(data: dict) -> tuple[dict, str | None]:
@@ -70,12 +70,26 @@ def _migrate_v2_to_v3(data: dict) -> tuple[dict, str | None]:
     return data, note
 
 
+def _migrate_v3_to_v4(data: dict) -> tuple[dict, str | None]:
+    """v4 dropped EnvironmentInfo.status and .error_message.
+
+    Nothing ever wrote a status other than "ready" or set an error message,
+    so removing the keys loses no information.
+    """
+    for env in data.get("environments", {}).values():
+        env.pop("status", None)
+        env.pop("error_message", None)
+    data["schema_version"] = 4
+    return data, None
+
+
 # One entry per historical schema version, upgrading one step. A schema bump
 # without a migration here strands every deployed manifest of that vintage —
 # add the migration in the same change as the bump.
 MIGRATIONS = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
+    3: _migrate_v3_to_v4,
 }
 
 
@@ -174,20 +188,22 @@ class CheckpointInfo:
 
 @dataclass
 class EnvironmentInfo:
-    """Metadata for a single built environment."""
+    """Metadata for a single built environment.
 
-    status: str  # "ready", "building", "error"
+    An entry exists iff the env is built on disk — there is no status field.
+    A failed build leaves no env directory, so the manifest never has anything
+    to say about it.
+    """
+
     built_at: str  # ISO 8601 timestamp
     source_hash: str  # "sha256:abc123..."
     source: str  # Full source code of the environment file
     python_requires: str  # ">=3.11"
     dependencies: dict[str, str]  # {"mace-torch": "0.3.6"}
     checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
-    error_message: str | None = None
 
     def to_dict(self) -> dict:
-        d = {
-            "status": self.status,
+        return {
             "built_at": self.built_at,
             "source_hash": self.source_hash,
             "source": self.source,
@@ -195,9 +211,6 @@ class EnvironmentInfo:
             "dependencies": self.dependencies,
             "checkpoints": {name: ckpt.to_dict() for name, ckpt in self.checkpoints.items()},
         }
-        if self.error_message:
-            d["error_message"] = self.error_message
-        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> EnvironmentInfo:
@@ -207,14 +220,12 @@ class EnvironmentInfo:
             for name, ckpt_data in checkpoints_data.items()
         }
         return cls(
-            status=data["status"],
             built_at=data["built_at"],
             source_hash=data["source_hash"],
             source=data.get("source", ""),
             python_requires=data["python_requires"],
             dependencies=data["dependencies"],
             checkpoints=checkpoints,
-            error_message=data.get("error_message"),
         )
 
 
@@ -288,12 +299,6 @@ class Manifest:
         if not self.maintainer.email:
             return False, "Missing maintainer email"
 
-        # Validate environment status values
-        valid_statuses = {"ready", "building", "error"}
-        for env_name, env_info in self.environments.items():
-            if env_info.status not in valid_statuses:
-                return False, f"Invalid status '{env_info.status}' for {env_name}"
-
         return True, "OK"
 
 
@@ -346,7 +351,7 @@ def get_installed_versions(
 
             if result.returncode == 0:
                 packages_data = json.loads(result.stdout)
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError):
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, OSError):
             pass
 
     # Fallback to python -m pip list
@@ -361,7 +366,7 @@ def get_installed_versions(
 
             if result.returncode == 0:
                 packages_data = json.loads(result.stdout)
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError):
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, OSError):
             pass
 
     if not packages_data:
@@ -401,6 +406,19 @@ def detect_python_version(root: Path) -> str:
 def now_iso() -> str:
     """Return current UTC time as ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def built_at_estimate(env_path: Path) -> str:
+    """Best-effort build time for an env the manifest doesn't know about.
+
+    The env directory's mtime is set when the build wrote its last top-level
+    entry, so it approximates the true build time. Only ``install`` knows the
+    exact moment; everything else discovering an already-built env must not
+    fabricate ``built_at=now``, which would poison the
+    ``verified_at > built_at`` staleness comparison.
+    """
+    ts = env_path.stat().st_mtime
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
 def load_manifest(root: Path) -> Manifest | None:

@@ -12,6 +12,7 @@ from ..config import load_config
 from ..manifest import (
     EnvironmentInfo,
     Manifest,
+    built_at_estimate,
     compute_source_hash,
     create_manifest,
     get_installed_versions,
@@ -28,6 +29,7 @@ def update_and_push_manifest(
     cluster: str | None = None,
     quiet: bool = False,
     push: bool = True,
+    built_env: str | None = None,
 ) -> bool:
     """
     Update manifest with current state and optionally push to backend.
@@ -39,6 +41,8 @@ def update_and_push_manifest(
         cluster: Cluster name (optional, will try to detect)
         quiet: Suppress output
         push: Whether to push to backend (default True)
+        built_env: Env name that was (re)built by the calling command, if any;
+            its built_at is stamped to now
 
     Returns:
         True if push succeeded or was skipped (no API key), False on error
@@ -70,7 +74,7 @@ def update_and_push_manifest(
         manifest = create_manifest(root, cluster, config)
 
     # Refresh environment info from current state
-    manifest = _refresh_manifest_environments(manifest, root)
+    manifest = _refresh_manifest_environments(manifest, root, built_env=built_env)
 
     # Save locally
     save_manifest(manifest, root)
@@ -104,11 +108,19 @@ def update_and_push_manifest(
     return True  # Not maintainer or no API key = skip push (not an error)
 
 
-def _refresh_manifest_environments(manifest: Manifest, root: Path) -> Manifest:
+def _refresh_manifest_environments(
+    manifest: Manifest, root: Path, built_env: str | None = None
+) -> Manifest:
     """
     Update manifest with current environment state.
 
     Scans built environments and updates their info in the manifest.
+
+    built_at semantics: `built_env` (the env the calling command just built)
+    is stamped now; envs already in the manifest keep their recorded time; an
+    env the manifest has never seen gets the env directory's mtime as a
+    best-effort estimate — never `now`, which would fake freshness into the
+    `verified_at > built_at` staleness comparison.
     """
     from .. import __version__
     from ..environment import list_built_environments
@@ -145,9 +157,15 @@ def _refresh_manifest_environments(manifest: Manifest, root: Path) -> Manifest:
         existing_env = manifest.environments.get(env_name)
         checkpoints = existing_env.checkpoints if existing_env else {}
 
+        if env_name == built_env:
+            built_at = now_iso()
+        elif existing_env:
+            built_at = existing_env.built_at
+        else:
+            built_at = built_at_estimate(env_path)
+
         manifest.environments[env_name] = EnvironmentInfo(
-            status="ready",
-            built_at=existing_env.built_at if existing_env else now_iso(),
+            built_at=built_at,
             source_hash=source_hash,
             source=source_content,
             python_requires=python_requires,
@@ -197,7 +215,6 @@ def cmd_manifest_show(args) -> int:
         print(f"  Environments ({len(manifest.environments)}):")
         for name, env in manifest.environments.items():
             print(f"    {name}:")
-            print(f"      Status:       {env.status}")
             print(f"      Built at:     {env.built_at}")
             print(f"      Source hash:  {env.source_hash[:20]}...")
             print(f"      Dependencies: {len(env.dependencies)} packages")

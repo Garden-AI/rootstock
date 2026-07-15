@@ -16,7 +16,6 @@ from rootstock.manifest import (
 
 def _make_env(built_at: str = "2026-01-01T00:00:00Z", **ckpts: CheckpointInfo) -> EnvironmentInfo:
     return EnvironmentInfo(
-        status="ready",
         built_at=built_at,
         source_hash="sha256:abc",
         source="",
@@ -40,7 +39,7 @@ def _make_manifest(envs: dict[str, EnvironmentInfo] | None = None) -> Manifest:
 
 
 def test_schema_version_constant():
-    assert SCHEMA_VERSION == 3
+    assert SCHEMA_VERSION == 4
 
 
 def test_checkpoint_info_round_trip():
