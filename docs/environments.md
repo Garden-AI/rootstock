@@ -41,7 +41,7 @@ The generated file has a placeholder `CHECKPOINTS` dict and a `setup()` skeleton
 
 ```python
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["mace-torch>=0.3.14", "ase>=3.22", "torch>=2.0,<2.10"]
 # ///
 """MACE env — hosts MACE-MP-0 checkpoints."""
@@ -72,7 +72,7 @@ When a user runs `rootstock add mace-mp-0-medium`, Rootstock walks every install
 
 ```python
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #     "mace-torch>=0.3.14",
 #     "ase>=3.22",
@@ -121,7 +121,7 @@ MACE-MP-0 and MACE-OFF23 ship in the same `mace-torch` package, so they share a 
 
 ```python
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.4.0,<2.10"]
 # ///
 """MACE env — hosts MACE-MP-0 and MACE-OFF23 checkpoints."""

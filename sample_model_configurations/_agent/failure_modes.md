@@ -29,12 +29,13 @@ download progress. Not a real failure; just noisy.
 **Signature:** `No solution found ... Because the current Python version
 (3.10.x) does not satisfy Python>=3.11,<3.14 and fairchem-core==2.20.0
 depends on Python>=3.11`.
-**Cause:** fairchem-core 2.20+ dropped Python 3.10. The probe image default
-(`python_version="3.10"`) and a config `requires-python = ">=3.10"` no
-longer resolve.
+**Cause:** fairchem-core 2.20+ dropped Python 3.10; a config declaring an
+older `requires-python` floor (or an old probe image default) no longer
+resolves. The probe image default and all bumpable configs are `>=3.11` as
+of the rootstock 3.11 bump, so this now only bites configs that pin an
+upper bound like `<3.11` (the fairchem-core 1.x stacks).
 **Fix:** Set `python_version="3.11"` on the `@probe_image(...)` and bump the
-config's PEP 723 `requires-python = ">=3.11"`. (eSEN's pinned
-`fairchem-core>=2.0.0` still builds on 3.10; only the 2.20 envs need 3.11.)
+config's PEP 723 `requires-python = ">=3.11"`.
 
 **Signature:** `Failed to download and build '<name> @ git+...'` →
 `Package metadata name '<other-name>' does not match given name '<name>'`.

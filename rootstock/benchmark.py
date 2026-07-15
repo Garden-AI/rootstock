@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["rootstock", "ase>=3.22", "numpy"]
 #
 # [tool.uv]

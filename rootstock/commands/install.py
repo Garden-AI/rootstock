@@ -42,10 +42,10 @@ def extract_minimum_python_version(requires_python: str) -> str:
     Extract minimum Python version from a requires-python specifier.
 
     Handles PEP 440 version specifiers like:
-        ">=3.10"        -> "3.10"
-        ">=3.10,<3.13"  -> "3.10"
-        "~=3.10"        -> "3.10"
-        ">=3.10.0"      -> "3.10"  (normalized for uv)
+        ">=3.11"        -> "3.11"
+        ">=3.11,<3.13"  -> "3.11"
+        "~=3.11"        -> "3.11"
+        ">=3.11.0"      -> "3.11"  (normalized for uv)
 
     Args:
         requires_python: PEP 440 version specifier string
@@ -185,7 +185,7 @@ def _install_single_environment(
         return 1
 
     dependencies = metadata.get("dependencies", [])
-    requires_python = metadata.get("requires-python", ">=3.10")
+    requires_python = metadata.get("requires-python", ">=3.11")
 
     # Extract minimum version properly
     try:

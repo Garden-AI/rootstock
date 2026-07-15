@@ -146,7 +146,7 @@ def _ensure_manifest_entry(
             built_at=now_iso(),
             source_hash="",
             source="",
-            python_requires=">=3.10",
+            python_requires=">=3.11",
             dependencies={},
             checkpoints={},
         )

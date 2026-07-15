@@ -76,7 +76,7 @@ Main Process                          Worker Process (subprocess)
 ```
 {root}/
 ├── .python/                # uv-managed Python interpreters (portable)
-│   └── cpython-3.10.19-linux-x86_64-gnu/
+│   └── cpython-3.11.9-linux-x86_64-gnu/
 ├── environments/           # Environment SOURCE files (*.py with PEP 723 + CHECKPOINTS)
 │   ├── mace.py
 │   ├── uma.py
@@ -149,7 +149,7 @@ with RootstockCalculator(
 # 1. Create environment source file
 cat > environments/mace.py << 'EOF'
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.0"]
 # ///
 

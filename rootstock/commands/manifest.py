@@ -130,7 +130,7 @@ def _refresh_manifest_environments(manifest: Manifest, root: Path) -> Manifest:
         source_content = source_file.read_text()
 
         # Get python requires from source
-        python_requires = get_requires_python(source_file) or ">=3.10"
+        python_requires = get_requires_python(source_file) or ">=3.11"
 
         # Get direct dependencies from source
         direct_deps = get_dependencies(source_file)

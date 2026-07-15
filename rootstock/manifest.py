@@ -75,7 +75,7 @@ class EnvironmentInfo:
     built_at: str  # ISO 8601 timestamp
     source_hash: str  # "sha256:abc123..."
     source: str  # Full source code of the environment file
-    python_requires: str  # ">=3.10"
+    python_requires: str  # ">=3.11"
     dependencies: dict[str, str]  # {"mace-torch": "0.3.6"}
     checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
     error_message: str | None = None

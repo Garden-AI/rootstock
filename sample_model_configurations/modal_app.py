@@ -61,7 +61,7 @@ def probe_image(
     config_file: str,
     deps: list[str],
     *,
-    python_version: str = "3.10",
+    python_version: str = "3.11",
     find_links: str | None = None,
     apt_packages: list[str] | None = None,
     no_deps: list[str] | None = None,
