@@ -80,6 +80,8 @@ Rebuilds (`rootstock install <name> --force`) install exactly the locked version
 
 If you keep env files in a git repo, commit the `.py.lock` next to the `.py`: `rootstock install ./mace.py` carries an adjacent lockfile along and builds from it. Envs built before lockfiles existed (manifest `lock_hash: null`) can only be re-resolved, not faithfully rebuilt.
 
+**Not every env can be locked.** `uv lock` resolves for every platform at once, so an env pulling prebuilt wheels from a platform-specific index — the PyG `find-links` pages used by the fairchem-core 1.x configs ship no macOS wheels — fails universal resolution. `install` warns and builds it without a lockfile (a plain current-platform resolution, exactly the pre-lockfile behavior); such envs stay `lock_hash: null` and re-resolve on every rebuild.
+
 ## Required elements
 
 ### PEP 723 metadata block

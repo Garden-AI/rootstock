@@ -163,7 +163,11 @@ def test_source_adjacent_lockfile_registered(tmp_path, monkeypatch):
     assert stored.read_text() == "carried = true\n"
 
 
-def test_lock_failure_aborts_install(tmp_path, monkeypatch, capsys):
+def test_unlockable_env_builds_without_lockfile(tmp_path, monkeypatch, capsys):
+    """`uv lock` resolves universally, so envs pulling wheels from a
+    platform-specific find-links index (the PyG stacks) cannot be locked.
+    That must not fail the build — sync falls back to a plain
+    current-platform resolution, exactly the pre-lockfile behavior."""
     calls: list[list[str]] = []
     env_file = _write_env(tmp_path)
 
@@ -175,9 +179,37 @@ def test_lock_failure_aborts_install(tmp_path, monkeypatch, capsys):
         fake_run=_fake_uv(calls, fail_on=["uv", "lock"]),
     )
 
-    assert rc == 1
-    assert "Error resolving lockfile" in capsys.readouterr().err
-    assert not [c for c in calls if c[:2] == ["uv", "sync"]]
+    assert rc == 0
+    assert "could not resolve a lockfile" in capsys.readouterr().err
+    (sync_call,) = [c for c in calls if c[:2] == ["uv", "sync"]]
+    assert "--frozen" not in sync_call
+    assert not (tmp_path / "envs" / "probe" / "env_source.py.lock").exists()
+
+
+def test_lock_failure_with_existing_lockfile_freezes_to_it(tmp_path, monkeypatch, capsys):
+    """If a lockfile already exists but re-locking fails, install the
+    existing pins as-is (--frozen) rather than letting sync attempt its own
+    universal re-resolution, which would fail the same way."""
+    calls: list[list[str]] = []
+    canonical = tmp_path / "environments" / "probe.py"
+    canonical.parent.mkdir(parents=True)
+    canonical.write_text(ENV_WITH_DEPS)
+    _lockfile_for(canonical).write_text(FAKE_LOCK)
+
+    rc = _install(
+        tmp_path,
+        monkeypatch,
+        Path("probe"),
+        calls,
+        fake_run=_fake_uv(calls, fail_on=["uv", "lock"]),
+    )
+
+    assert rc == 0
+    assert "Honoring the existing lockfile as-is" in capsys.readouterr().err
+    (sync_call,) = [c for c in calls if c[:2] == ["uv", "sync"]]
+    assert "--frozen" in sync_call
+    stored = tmp_path / "envs" / "probe" / "env_source.py.lock"
+    assert stored.read_text() == FAKE_LOCK
 
 
 def test_no_dependencies_skips_lock(tmp_path, monkeypatch):

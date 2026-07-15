@@ -300,11 +300,24 @@ def _install_single_environment(
             env=uv_env,
         )
         if result.returncode != 0:
+            # `uv lock` resolves for every platform at once; envs that pull
+            # prebuilt wheels from a platform-specific index (e.g. the PyG
+            # find-links pages, which ship no macOS wheels) cannot be locked
+            # at all. That must not fail the build — it just stays as
+            # unreproducible as it was before lockfiles existed.
             print(
-                f"Error resolving lockfile: {result.stderr if not verbose else ''}",
+                "  Warning: could not resolve a lockfile for this env "
+                "(universal resolution failed — common when a find-links "
+                "index lacks wheels for some platform)."
+                + (
+                    " Honoring the existing lockfile as-is."
+                    if lock_path.exists()
+                    else " Building without one; rebuilds of this env will re-resolve."
+                ),
                 file=sys.stderr,
             )
-            return 1
+            if not verbose and result.stderr:
+                print(f"  uv lock said: {result.stderr.strip().splitlines()[-1]}", file=sys.stderr)
     else:
         print("2. Resolving dependency lockfile... (no dependencies, skipped)")
 
@@ -312,15 +325,20 @@ def _install_single_environment(
     # PEP 723 uv config is honored — not just `dependencies`, but
     # `[tool.uv.sources]`, `[[tool.uv.index]]`, and `[tool.uv]` find-links.
     # The `uv pip` interface silently ignores sources/index pins. `--active` +
-    # VIRTUAL_ENV targets the venv we just created. `--frozen` installs
-    # exactly the lockfile we just resolved — sync must never re-resolve.
+    # VIRTUAL_ENV targets the venv we just created. Whenever a lockfile
+    # exists, `--frozen` installs exactly its pins — sync must never
+    # re-resolve on its own. With no lockfile (unlockable env), sync falls
+    # back to a plain current-platform resolution.
     print("3. Installing dependencies...")
 
     if dependencies:
+        sync_cmd = ["uv", "sync", "--script", str(env_source), "--active"]
+        if lock_path.exists():
+            sync_cmd.append("--frozen")
         sync_env = dict(uv_env)
         sync_env["VIRTUAL_ENV"] = str(env_target)
         result = subprocess.run(
-            ["uv", "sync", "--script", str(env_source), "--active", "--frozen"],
+            sync_cmd,
             capture_output=not verbose,
             text=True,
             env=sync_env,
