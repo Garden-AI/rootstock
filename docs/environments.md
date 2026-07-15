@@ -73,14 +73,14 @@ The PEP 723 block declares version *ranges*; the exact package set is resolved o
 - `{root}/environments/<name>.py.lock` — the working lockfile, next to the registered source. `uv lock --script` writes it on first build and keeps its pins on later builds.
 - `{root}/envs/<name>/env_source.py.lock` — a copy stored inside the built env, recording exactly what that build was resolved from. Its hash is tracked in the manifest as `lock_hash`.
 
-Rebuilds (`rootstock install <name> --force`) install exactly the locked versions by default. This is what makes "roll out a small fix and rebuild" safe: the rebuilt env has the same dependency stack that was already qualified on the cluster. Two things change the resolution:
+Rebuilds (`rootstock install <name> --force`) install exactly the locked versions by default. Two things change the resolution:
 
 - **Editing the env source.** Changed constraints re-resolve minimally; pins that still satisfy the ranges are kept.
-- **`rootstock install <name> --force --upgrade`.** Re-resolves everything to the latest allowed versions. Use this when you deliberately want a fresh stack — and expect to re-verify checkpoints afterwards.
+- **`rootstock install <name> --force --upgrade`.** Re-resolves everything to the latest allowed versions. Use this when you deliberately want a fresh stack.
 
-If you keep env files in a git repo, commit the `.py.lock` next to the `.py`: `rootstock install ./mace.py` carries an adjacent lockfile along and builds from it. Envs built before lockfiles existed (manifest `lock_hash: null`) can only be re-resolved, not faithfully rebuilt.
+**Not every env can be locked.** `uv lock` resolves for every platform at once, so an env pulling prebuilt wheels from a platform-specific index (e.g. the PyG `find-links` pages used by the fairchem-core 1.x configs have no macOS wheels) fails universal resolution. `install` warns and builds it without a lockfile. 
 
-**Not every env can be locked.** `uv lock` resolves for every platform at once, so an env pulling prebuilt wheels from a platform-specific index — the PyG `find-links` pages used by the fairchem-core 1.x configs ship no macOS wheels — fails universal resolution. `install` warns and builds it without a lockfile (a plain current-platform resolution, exactly the pre-lockfile behavior); such envs stay `lock_hash: null` and re-resolve on every rebuild.
+**NOTE: rootstock is not included in the lockfile.** The lockfile is only for the dependencies declared in the script metadata, and rootstock itself is installed directly into the env after the env has been (re)built. This means that a `rootstock install --force` (without `--upgrade`) will always install whatever version of rootstock is being used for the install command, NOT the version that was already in the env.
 
 ## Required elements
 
@@ -209,7 +209,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 # dependencies = ["mace-torch", "torch"]
 ```
 
-Ranges bound what a *fresh* resolution may pick; the build-time lockfile (see [Lockfiles and reproducible rebuilds](#lockfiles-and-reproducible-rebuilds)) is what pins a given install's rebuilds exactly.
+Ranges bound what a *fresh* resolution may pick; the lockfile (see [Lockfiles and reproducible rebuilds](#lockfiles-and-reproducible-rebuilds)) pins everything for future rebuilds.
 
 ### Match canonical ids to the Almanac
 
