@@ -38,6 +38,67 @@ def _rootstock_install_spec() -> str:
     return f"rootstock@git+{ROOTSTOCK_GITHUB_URL}@{commit_hash}"
 
 
+def _vendor_rootstock_wheel(root: Path) -> Path | None:
+    """Archive this release's wheel in {root}/wheels/ and return its path.
+
+    Rebuilding an env reinstalls the pinned rootstock, which normally depends
+    on PyPI still serving that exact release, un-yanked, years later. Keeping
+    the wheel inside the install root removes that dependency: rebuilds
+    install rootstock from the vendored file, and the wheel doubles as a
+    bootstrap source if the release ever disappears upstream.
+
+    Returns None (with a warning) when vendoring isn't possible: dev builds
+    have no published wheel (they pin a git sha instead), and a download or
+    checksum failure must not fail the install — it just falls back to the
+    index. The download is verified against PyPI's published sha256.
+    """
+    import hashlib
+    import json as json_module
+    import urllib.error
+    import urllib.request
+
+    from rootstock import __version__
+
+    if "dev" in __version__:
+        return None
+
+    wheels_dir = root / "wheels"
+    existing = sorted(wheels_dir.glob(f"rootstock-{__version__}-*.whl"))
+    if existing:
+        return existing[0]
+
+    try:
+        url = f"https://pypi.org/pypi/rootstock/{__version__}/json"
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            release = json_module.load(resp)
+        wheel_meta = next(
+            entry for entry in release["urls"] if entry["packagetype"] == "bdist_wheel"
+        )
+        with urllib.request.urlopen(wheel_meta["url"], timeout=60) as resp:
+            wheel_bytes = resp.read()
+
+        digest = hashlib.sha256(wheel_bytes).hexdigest()
+        if digest != wheel_meta["digests"]["sha256"]:
+            raise ValueError(
+                f"sha256 mismatch for {wheel_meta['filename']}: "
+                f"got {digest}, PyPI says {wheel_meta['digests']['sha256']}"
+            )
+
+        wheels_dir.mkdir(parents=True, exist_ok=True)
+        wheel_path = wheels_dir / wheel_meta["filename"]
+        tmp_path = wheel_path.with_suffix(".whl.partial")
+        tmp_path.write_bytes(wheel_bytes)
+        tmp_path.rename(wheel_path)
+        return wheel_path
+    except (urllib.error.URLError, OSError, ValueError, KeyError, StopIteration) as exc:
+        print(
+            f"  Warning: could not vendor the rootstock wheel into {wheels_dir} "
+            f"({exc}); this build will install rootstock from the index instead.",
+            file=sys.stderr,
+        )
+        return None
+
+
 def extract_minimum_python_version(requires_python: str) -> str:
     """
     Extract minimum Python version from a requires-python specifier.
@@ -394,10 +455,17 @@ def _build_and_swap(
             )
             return 1
 
-    # Install rootstock
+    # Install rootstock. Prefer the wheel vendored into {root}/wheels/ (this
+    # release's own artifact, archived so rebuilds don't depend on PyPI still
+    # serving it); fall back to the pinned index/git spec.
     print("4. Installing rootstock...")
-    rootstock_spec = _rootstock_install_spec()
-    print(f"  Installing: {rootstock_spec}")
+    vendored_wheel = _vendor_rootstock_wheel(root)
+    if vendored_wheel is not None:
+        rootstock_spec = str(vendored_wheel)
+        print(f"  Installing vendored wheel: {vendored_wheel}")
+    else:
+        rootstock_spec = _rootstock_install_spec()
+        print(f"  Installing: {rootstock_spec}")
 
     result = subprocess.run(
         ["uv", "pip", "install", "--python", str(env_python), rootstock_spec],
