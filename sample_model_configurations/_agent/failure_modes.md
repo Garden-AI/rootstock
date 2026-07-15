@@ -31,9 +31,8 @@ download progress. Not a real failure; just noisy.
 depends on Python>=3.11`.
 **Cause:** fairchem-core 2.20+ dropped Python 3.10; a config declaring an
 older `requires-python` floor (or an old probe image default) no longer
-resolves. The probe image default and all bumpable configs are `>=3.11` as
-of the rootstock 3.11 bump, so this now only bites configs that pin an
-upper bound like `<3.11` (the fairchem-core 1.x stacks).
+resolves. The probe image default and all shipped configs declare `>=3.11`
+as of the rootstock 3.11 bump, so this only bites stale local copies.
 **Fix:** Set `python_version="3.11"` on the `@probe_image(...)` and bump the
 config's PEP 723 `requires-python = ">=3.11"`.
 

@@ -41,11 +41,12 @@ own `*_configs/` subfolder when needed. The `_agent/` tooling is
 hardware-agnostic.
 
 > **Python floor caveat.** rootstock itself requires Python >=3.11, and the
-> worker inside a built env runs rootstock — so an env's `requires-python`
-> must admit 3.11. The fairchem-core 1.x configs (dimenet, equiformer, escn,
-> esen, gemnet, painn, schnet, scn) still pin `>=3.10,<3.11` and therefore
-> **cannot be built by current rootstock**; they need a fairchem-core 2.x
-> migration (see uma.py) or a rootstock <=0.9.x client.
+> worker inside a built env runs rootstock — so every config's
+> `requires-python` must admit 3.11. The fairchem-core 1.x configs (dimenet,
+> equiformer, escn, gemnet, painn, schnet, scn) pin a single minor
+> (`>=3.11,<3.12`) because their torch-scatter/sparse/cluster wheels come
+> prebuilt per Python minor from the pinned PyG index; bump the pin in
+> lockstep if rootstock's floor moves again.
 
 ## What `modal_app.py` is for
 

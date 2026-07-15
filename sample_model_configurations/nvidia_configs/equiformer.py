@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10,<3.11"
+# requires-python = ">=3.11,<3.12"
 # dependencies = [
 #     "torch>=2.4.0",
 #     "fairchem-core>=1.0.0,<2.0.0",
