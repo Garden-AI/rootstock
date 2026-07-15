@@ -86,12 +86,22 @@ def extract_minimum_python_version(requires_python: str) -> str:
     return f"{min_version.major}.{min_version.minor}"
 
 
+def _lockfile_for(env_source: Path) -> Path:
+    """Path of the uv lockfile adjacent to an env source file.
+
+    `uv lock --script foo.py` writes `foo.py.lock` next to the script, and
+    `uv sync --script foo.py` honors it when present.
+    """
+    return env_source.parent / (env_source.name + ".lock")
+
+
 def _install_single_environment(
     root: Path,
     source: str,
     force: bool,
     verbose: bool,
     no_push: bool = False,
+    upgrade: bool = False,
 ) -> int:
     """
     Install a single environment from a file path or environment name.
@@ -125,10 +135,7 @@ def _install_single_environment(
         # If the source file is already the registered file (the natural flow
         # on a shared install: drop file into <root>/environments/ then run
         # install), skip the copy and the "already registered" guard.
-        already_at_canonical = (
-            env_source.exists()
-            and source_path.resolve() == env_source.resolve()
-        )
+        already_at_canonical = env_source.exists() and source_path.resolve() == env_source.resolve()
 
         if env_source.exists() and not force and not already_at_canonical:
             print(
@@ -144,6 +151,13 @@ def _install_single_environment(
         if not already_at_canonical:
             shutil.copy2(source_path, env_source)
             print(f"Registered: {source_path} -> {env_source}")
+            # A lockfile shipped alongside the source (e.g. tracked in a git
+            # repo next to the env file) is authoritative — carry it along so
+            # the build resolves from it instead of from scratch.
+            source_lock = _lockfile_for(source_path)
+            if source_lock.exists():
+                shutil.copy2(source_lock, _lockfile_for(env_source))
+                print(f"Registered lockfile: {source_lock} -> {_lockfile_for(env_source)}")
 
     else:
         # NAME MODE: use existing registered environment
@@ -260,18 +274,71 @@ def _install_single_environment(
 
     env_python = env_target / "bin" / "python"
 
+    # Resolve the dependency lockfile. A build is only as reproducible as its
+    # resolution: without a lockfile, a rebuild months later re-resolves the
+    # env file's version ranges and produces a different env. `uv lock` keeps
+    # the pins in an existing lockfile (re-resolving only what a source edit
+    # forces), creates the lockfile on first build, and re-resolves everything
+    # only with --upgrade.
+    lock_path = _lockfile_for(env_source)
+    if dependencies:
+        print("2. Resolving dependency lockfile...")
+        if upgrade:
+            print(f"  --upgrade: re-resolving all pins in {lock_path.name}")
+        elif lock_path.exists():
+            print(f"  Honoring existing lockfile: {lock_path}")
+        else:
+            print(f"  No lockfile yet; resolving and writing {lock_path}")
+
+        lock_cmd = ["uv", "lock", "--script", str(env_source)]
+        if upgrade:
+            lock_cmd.append("--upgrade")
+        result = subprocess.run(
+            lock_cmd,
+            capture_output=not verbose,
+            text=True,
+            env=uv_env,
+        )
+        if result.returncode != 0:
+            # `uv lock` resolves for every platform at once; envs that pull
+            # prebuilt wheels from a platform-specific index (e.g. the PyG
+            # find-links pages, which ship no macOS wheels) cannot be locked
+            # at all. That must not fail the build — it just stays as
+            # unreproducible as it was before lockfiles existed.
+            print(
+                "  Warning: could not resolve a lockfile for this env "
+                "(universal resolution failed — common when a find-links "
+                "index lacks wheels for some platform)."
+                + (
+                    " Honoring the existing lockfile as-is."
+                    if lock_path.exists()
+                    else " Building without one; rebuilds of this env will re-resolve."
+                ),
+                file=sys.stderr,
+            )
+            if not verbose and result.stderr:
+                print(f"  uv lock said: {result.stderr.strip().splitlines()[-1]}", file=sys.stderr)
+    else:
+        print("2. Resolving dependency lockfile... (no dependencies, skipped)")
+
     # Install dependencies with `uv sync --script` so the env source's full
     # PEP 723 uv config is honored — not just `dependencies`, but
     # `[tool.uv.sources]`, `[[tool.uv.index]]`, and `[tool.uv]` find-links.
     # The `uv pip` interface silently ignores sources/index pins. `--active` +
-    # VIRTUAL_ENV targets the venv we just created 
-    print("2. Installing dependencies...")
+    # VIRTUAL_ENV targets the venv we just created. Whenever a lockfile
+    # exists, `--frozen` installs exactly its pins — sync must never
+    # re-resolve on its own. With no lockfile (unlockable env), sync falls
+    # back to a plain current-platform resolution.
+    print("3. Installing dependencies...")
 
     if dependencies:
+        sync_cmd = ["uv", "sync", "--script", str(env_source), "--active"]
+        if lock_path.exists():
+            sync_cmd.append("--frozen")
         sync_env = dict(uv_env)
         sync_env["VIRTUAL_ENV"] = str(env_target)
         result = subprocess.run(
-            ["uv", "sync", "--script", str(env_source), "--active"],
+            sync_cmd,
             capture_output=not verbose,
             text=True,
             env=sync_env,
@@ -284,7 +351,7 @@ def _install_single_environment(
             return 1
 
     # Install rootstock
-    print("3. Installing rootstock...")
+    print("4. Installing rootstock...")
     rootstock_spec = _rootstock_install_spec()
     print(f"  Installing: {rootstock_spec}")
 
@@ -301,11 +368,14 @@ def _install_single_environment(
         )
         return 1
 
-    # Copy environment source file
-    print("4. Copying environment source...")
+    # Copy environment source file (and its lockfile, so the built env records
+    # exactly what it was resolved from)
+    print("5. Copying environment source...")
     shutil.copy(env_source, env_target / "env_source.py")
+    if dependencies and lock_path.exists():
+        shutil.copy(lock_path, env_target / "env_source.py.lock")
 
-    print("5. Pre-compiling bytecode...")
+    print("6. Pre-compiling bytecode...")
     _precompile_environment(env_python, env_target)
 
     print(f"\nBuilt environment: {env_target}")
@@ -344,11 +414,7 @@ def _precompile_environment(env_python: Path, env_target: Path) -> None:
     )
     if result.returncode != 0:
         # compileall reports errors on stdout; -q suppresses everything else.
-        output = [
-            line
-            for line in (result.stdout + result.stderr).splitlines()
-            if line.strip()
-        ]
+        output = [line for line in (result.stdout + result.stderr).splitlines() if line.strip()]
         shown = "\n".join(f"    {line}" for line in output[:10])
         print(
             "  Warning: some files did not byte-compile (normal for vendored/"
@@ -458,6 +524,7 @@ def cmd_install(args) -> int:
                 force=args.force,
                 verbose=args.verbose,
                 no_push=args.no_push,
+                upgrade=args.upgrade,
             )
 
             if result == 0:
@@ -486,4 +553,5 @@ def cmd_install(args) -> int:
         force=args.force,
         verbose=args.verbose,
         no_push=args.no_push,
+        upgrade=args.upgrade,
     )

@@ -209,7 +209,10 @@ def test_dependencies_installed_via_uv_sync_script(tmp_path, monkeypatch, capsys
         f"expected exactly one 'uv sync' call, got: {[c for c, _ in captured_calls]!r}"
     )
     cmd, kwargs = sync_calls[0]
-    assert cmd == ["uv", "sync", "--script", str(env_source), "--active"]
+    # --frozen presence depends on whether a lockfile was resolvable; that
+    # behavior is pinned in test_install_lockfile.py. Here we only care that
+    # deps go through the script interface into the right venv.
+    assert cmd[:5] == ["uv", "sync", "--script", str(env_source), "--active"]
     assert kwargs["env"]["VIRTUAL_ENV"] == env_target
 
     # The dependency must NOT be installed through the `uv pip` interface,

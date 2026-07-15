@@ -69,6 +69,20 @@ def test_environment_info_with_dict_checkpoints_round_trip():
     assert restored.checkpoints["mace-mp-0-medium"].fetched_at == "2026-01-02T00:00:00Z"
 
 
+def test_environment_info_lock_hash_round_trip():
+    env = _make_env()
+    env.lock_hash = "sha256:def456"
+    restored = EnvironmentInfo.from_dict(env.to_dict())
+    assert restored.lock_hash == "sha256:def456"
+
+
+def test_environment_info_without_lock_hash_loads_as_none():
+    """v3 manifests written before lockfiles existed have no lock_hash key."""
+    data = _make_env().to_dict()
+    del data["lock_hash"]
+    assert EnvironmentInfo.from_dict(data).lock_hash is None
+
+
 def test_manifest_round_trip_preserves_checkpoint_metadata():
     m = _make_manifest({
         "mace": _make_env(**{

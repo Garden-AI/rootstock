@@ -249,13 +249,16 @@ After setup, the Rootstock root directory will look like this:
 ├── .python/                # uv-managed Python interpreters
 ├── environments/           # Environment source files (*.py with PEP 723 metadata)
 │   ├── mace.py
+│   ├── mace.py.lock        # uv lockfile — rebuilds resolve from this
 │   ├── uma.py
+│   ├── uma.py.lock
 │   └── tensornet.py
 ├── envs/                   # Pre-built virtual environments
 │   ├── mace/
 │   │   ├── bin/python
 │   │   ├── lib/python3.11/site-packages/
-│   │   └── env_source.py
+│   │   ├── env_source.py
+│   │   └── env_source.py.lock   # what this build was resolved from
 │   └── ...
 ├── home/                   # Redirected HOME for not-well-behaved libraries
 │   ├── .cache/fairchem/
@@ -271,10 +274,11 @@ Some ML libraries (FAIRChem, MatGL) ignore `XDG_CACHE_HOME` and write to `~/.cac
 
 ## Updating environments
 
-To update an environment with new dependencies:
+Rebuilds honor the env's lockfile by default: `rootstock install mace --force` reproduces the dependency stack that was already qualified on the cluster (this is the safe way to roll out an env-source fix). To deliberately move to newer packages, re-resolve with `--upgrade`:
 
 ```bash
-# Rebuild the venv (drops verification timestamps for that env's checkpoints)
+# Rebuild the venv (drops verification timestamps for that env's checkpoints).
+# Add --upgrade to re-resolve dependencies to the latest allowed versions.
 rootstock install mace.py --force
 
 # Re-verify checkpoints after the rebuild, by canonical id

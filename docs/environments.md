@@ -66,6 +66,22 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 When a user runs `rootstock add mace-mp-0-medium`, Rootstock walks every installed env's `env_source.py`, AST-parses the `CHECKPOINTS` literal, and finds the env that declares the id. A typo errors immediately ("no installed env declares ..."), instead of failing inside `setup()`.
 
+## Lockfiles and reproducible rebuilds
+
+The PEP 723 block declares version *ranges*; the exact package set is resolved once, at build time. `rootstock install` records that resolution in a uv lockfile so a rebuild reproduces the env instead of re-resolving whatever the ranges allow that day:
+
+- `{root}/environments/<name>.py.lock` — the working lockfile, next to the registered source. `uv lock --script` writes it on first build and keeps its pins on later builds.
+- `{root}/envs/<name>/env_source.py.lock` — a copy stored inside the built env, recording exactly what that build was resolved from. Its hash is tracked in the manifest as `lock_hash`.
+
+Rebuilds (`rootstock install <name> --force`) install exactly the locked versions by default. Two things change the resolution:
+
+- **Editing the env source.** Changed constraints re-resolve minimally; pins that still satisfy the ranges are kept.
+- **`rootstock install <name> --force --upgrade`.** Re-resolves everything to the latest allowed versions. Use this when you deliberately want a fresh stack.
+
+**Not every env can be locked.** `uv lock` resolves for every platform at once, so an env pulling prebuilt wheels from a platform-specific index (e.g. the PyG `find-links` pages used by the fairchem-core 1.x configs have no macOS wheels) fails universal resolution. `install` warns and builds it without a lockfile. 
+
+**NOTE: rootstock is not included in the lockfile.** The lockfile is only for the dependencies declared in the script metadata, and rootstock itself is installed directly into the env after the env has been (re)built. This means that a `rootstock install --force` (without `--upgrade`) will always install whatever version of rootstock is being used for the install command, NOT the version that was already in the env.
+
 ## Required elements
 
 ### PEP 723 metadata block
@@ -192,6 +208,8 @@ def setup(checkpoint: str, device: str = "cuda"):
 # Avoid: unpinned
 # dependencies = ["mace-torch", "torch"]
 ```
+
+Ranges bound what a *fresh* resolution may pick; the lockfile (see [Lockfiles and reproducible rebuilds](#lockfiles-and-reproducible-rebuilds)) pins everything for future rebuilds.
 
 ### Match canonical ids to the Almanac
 

@@ -160,6 +160,14 @@ def main():
     install_parser.add_argument(
         "--force", action="store_true", help="Update registration and/or rebuild if exists"
     )
+    install_parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help=(
+            "Re-resolve all dependencies to the latest allowed versions instead of "
+            "honoring the environment's existing lockfile"
+        ),
+    )
     install_parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     install_parser.add_argument(
         "--no-push",
