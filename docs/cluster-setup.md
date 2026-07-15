@@ -296,6 +296,8 @@ rootstock manifest push
 
 Rebuilding an env invalidates prior verifications (the venv changed; weights in `cache/` are unaffected). `rootstock status` will show those checkpoints as **stale** until you re-run `add` or `smoke-test`.
 
+Rebuilds are safe on a live shared install: the new env is built in `{root}/.build/` and swapped into `envs/` only when finished, so users can keep spawning workers from the old env for the whole build, and a **failed** rebuild leaves the old env untouched and working.
+
 ### Hotfixing `setup()` without a rebuild
 
 `envs/<name>/env_source.py` is re-read at runtime on both sides of the socket: every worker spawn imports `setup()` from it, and every client resolution AST-parses its `CHECKPOINTS` table. Nothing caches it across runs — which means a maintainer can fix a bug in `setup()` (or adjust a `CHECKPOINTS` entry) by **editing that file in place on the shared filesystem, with no rebuild**. The next worker spawn picks it up. This is the one cheap lever into already-built envs, and it is a supported procedure:

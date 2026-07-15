@@ -9,6 +9,8 @@ package load time.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -101,6 +103,8 @@ def test_install_command_passes_helper_spec_as_final_arg(tmp_path, monkeypatch, 
 
     def fake_run(cmd, **kwargs):
         captured_calls.append(list(cmd))
+        if cmd[:2] == ["uv", "venv"]:
+            Path(cmd[2]).mkdir(parents=True, exist_ok=True)
         result = MagicMock()
         result.returncode = 0
         result.stderr = ""
@@ -109,6 +113,9 @@ def test_install_command_passes_helper_spec_as_final_arg(tmp_path, monkeypatch, 
 
     monkeypatch.setattr("rootstock.commands.install.subprocess.run", fake_run)
     monkeypatch.setattr("rootstock.commands.install.shutil.copy", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "rootstock.commands.install._precompile_environment", lambda *a, **k: None
+    )
     monkeypatch.setattr(
         "rootstock.commands.manifest.update_and_push_manifest",
         lambda *a, **k: None,
@@ -175,6 +182,8 @@ def test_dependencies_installed_via_uv_sync_script(tmp_path, monkeypatch, capsys
 
     def fake_run(cmd, **kwargs):
         captured_calls.append((list(cmd), kwargs))
+        if cmd[:2] == ["uv", "venv"]:
+            Path(cmd[2]).mkdir(parents=True, exist_ok=True)
         result = MagicMock()
         result.returncode = 0
         result.stderr = ""
@@ -183,6 +192,9 @@ def test_dependencies_installed_via_uv_sync_script(tmp_path, monkeypatch, capsys
 
     monkeypatch.setattr("rootstock.commands.install.subprocess.run", fake_run)
     monkeypatch.setattr("rootstock.commands.install.shutil.copy", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "rootstock.commands.install._precompile_environment", lambda *a, **k: None
+    )
     monkeypatch.setattr(
         "rootstock.commands.manifest.update_and_push_manifest",
         lambda *a, **k: None,
@@ -198,7 +210,9 @@ def test_dependencies_installed_via_uv_sync_script(tmp_path, monkeypatch, capsys
     )
     assert rc == 0
 
-    env_target = str(tmp_path / "envs" / "withdeps")
+    # Deps install into the staging build dir, which is swapped into envs/
+    # only once the whole build succeeds.
+    build_dir = str(tmp_path / ".build" / f"withdeps.{os.getpid()}")
 
     sync_calls = [
         (cmd, kwargs)
@@ -213,7 +227,7 @@ def test_dependencies_installed_via_uv_sync_script(tmp_path, monkeypatch, capsys
     # behavior is pinned in test_install_lockfile.py. Here we only care that
     # deps go through the script interface into the right venv.
     assert cmd[:5] == ["uv", "sync", "--script", str(env_source), "--active"]
-    assert kwargs["env"]["VIRTUAL_ENV"] == env_target
+    assert kwargs["env"]["VIRTUAL_ENV"] == build_dir
 
     # The dependency must NOT be installed through the `uv pip` interface,
     # which would ignore the pinned CUDA index.
