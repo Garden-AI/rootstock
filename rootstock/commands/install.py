@@ -9,6 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from ..layout import ensure_layout_compatible, write_layout_marker
 from .common import get_root_or_exit, resolve_cache_root
 
 ROOTSTOCK_GITHUB_URL = "https://github.com/Garden-AI/rootstock.git"
@@ -485,6 +486,13 @@ def cmd_install(args) -> int:
     source = args.source
     source_path = Path(source)
 
+    # Never write into a root laid out by a newer rootstock.
+    try:
+        ensure_layout_compatible(root)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     # Check uv is available
     if not check_uv_available():
         print(
@@ -497,6 +505,9 @@ def cmd_install(args) -> int:
     # Surface permission problems before the (slow) build starts.
     if not getattr(args, "no_perm_check", False):
         _warn_on_permissions(root)
+
+    # Stamp (or backfill, for pre-marker installs) the layout version.
+    write_layout_marker(root)
 
     # DIRECTORY MODE: install all *.py files
     if source_path.is_dir():
