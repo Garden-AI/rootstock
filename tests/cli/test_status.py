@@ -17,7 +17,6 @@ from rootstock.manifest import (
 
 def _env_with_checkpoints(built_at: str, **checkpoints) -> EnvironmentInfo:
     return EnvironmentInfo(
-        status="ready",
         built_at=built_at,
         source_hash="sha256:abc",
         source="",

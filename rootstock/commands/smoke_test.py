@@ -28,8 +28,6 @@ def _select(
     for env_name, env in manifest.environments.items():
         if env_filter is not None and env_name != env_filter:
             continue
-        if env.status != "ready":
-            continue
         for ckpt_name, ckpt in env.checkpoints.items():
             if checkpoint_filter is not None and ckpt_name != checkpoint_filter:
                 continue
