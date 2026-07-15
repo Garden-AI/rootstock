@@ -324,6 +324,7 @@ def _build_and_swap(
     # forces), creates the lockfile on first build, and re-resolves everything
     # only with --upgrade.
     lock_path = _lockfile_for(env_source)
+    locked = False
     if dependencies:
         print("2. Resolving dependency lockfile...")
         if upgrade:
@@ -342,21 +343,19 @@ def _build_and_swap(
             text=True,
             env=uv_env,
         )
-        if result.returncode != 0:
+        locked = result.returncode == 0
+        if not locked:
             # `uv lock` resolves for every platform at once; envs that pull
             # prebuilt wheels from a platform-specific index (e.g. the PyG
             # find-links pages, which ship no macOS wheels) cannot be locked
-            # at all. That must not fail the build — it just stays as
-            # unreproducible as it was before lockfiles existed.
+            # at all. That alone must not fail the build — sync gets to try
+            # below with its own resolution, so a genuinely broken dependency
+            # still fails there, loudly, instead of being masked here.
             print(
                 "  Warning: could not resolve a lockfile for this env "
-                "(universal resolution failed — common when a find-links "
-                "index lacks wheels for some platform)."
-                + (
-                    " Honoring the existing lockfile as-is."
-                    if lock_path.exists()
-                    else " Building without one; rebuilds of this env will re-resolve."
-                ),
+                "(expected for envs whose find-links index lacks wheels for "
+                "some platform; otherwise the dependency error will surface "
+                "in the next step). Falling back to uv sync's own resolution.",
                 file=sys.stderr,
             )
             if not verbose and result.stderr:
@@ -368,15 +367,17 @@ def _build_and_swap(
     # PEP 723 uv config is honored — not just `dependencies`, but
     # `[tool.uv.sources]`, `[[tool.uv.index]]`, and `[tool.uv]` find-links.
     # The `uv pip` interface silently ignores sources/index pins. `--active` +
-    # VIRTUAL_ENV targets the venv we just created. Whenever a lockfile
-    # exists, `--frozen` installs exactly its pins — sync must never
-    # re-resolve on its own. With no lockfile (unlockable env), sync falls
-    # back to a plain current-platform resolution.
+    # VIRTUAL_ENV targets the venv we just created. When the lock step
+    # succeeded, `--frozen` installs exactly its pins — sync must never
+    # re-resolve on its own. When it failed, sync resolves for itself (and a
+    # valid pre-existing lockfile is still validated and used); --frozen here
+    # would silently install stale pins for a source whose real resolution
+    # just failed.
     print("3. Installing dependencies...")
 
     if dependencies:
         sync_cmd = ["uv", "sync", "--script", str(env_source), "--active"]
-        if lock_path.exists():
+        if locked:
             sync_cmd.append("--frozen")
         sync_env = dict(uv_env)
         sync_env["VIRTUAL_ENV"] = str(build_dir)

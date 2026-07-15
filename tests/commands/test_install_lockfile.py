@@ -186,10 +186,12 @@ def test_unlockable_env_builds_without_lockfile(tmp_path, monkeypatch, capsys):
     assert not (tmp_path / "envs" / "probe" / "env_source.py.lock").exists()
 
 
-def test_lock_failure_with_existing_lockfile_freezes_to_it(tmp_path, monkeypatch, capsys):
-    """If a lockfile already exists but re-locking fails, install the
-    existing pins as-is (--frozen) rather than letting sync attempt its own
-    universal re-resolution, which would fail the same way."""
+def test_lock_failure_never_freezes_to_a_possibly_stale_lockfile(tmp_path, monkeypatch, capsys):
+    """If re-locking fails while a lockfile exists, sync must NOT be frozen
+    to it: the source may have drifted from those pins (e.g. a newly added
+    dep that doesn't resolve), and --frozen would silently build the old env
+    while claiming success. Sync validates the lock itself — a still-valid
+    lock is used, a genuinely broken dependency fails there, loudly."""
     calls: list[list[str]] = []
     canonical = tmp_path / "environments" / "probe.py"
     canonical.parent.mkdir(parents=True)
@@ -205,11 +207,9 @@ def test_lock_failure_with_existing_lockfile_freezes_to_it(tmp_path, monkeypatch
     )
 
     assert rc == 0
-    assert "Honoring the existing lockfile as-is" in capsys.readouterr().err
+    assert "could not resolve a lockfile" in capsys.readouterr().err
     (sync_call,) = [c for c in calls if c[:2] == ["uv", "sync"]]
-    assert "--frozen" in sync_call
-    stored = tmp_path / "envs" / "probe" / "env_source.py.lock"
-    assert stored.read_text() == FAKE_LOCK
+    assert "--frozen" not in sync_call
 
 
 def test_no_dependencies_skips_lock(tmp_path, monkeypatch):
