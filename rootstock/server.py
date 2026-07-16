@@ -7,6 +7,7 @@ sending atomic positions and receiving forces from a worker process.
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -17,8 +18,8 @@ import numpy as np
 from .protocol import (
     IPIProtocol,
     SocketClosed,
+    create_private_socket_path,
     create_server_socket,
-    create_unix_socket_path,
 )
 
 
@@ -80,7 +81,9 @@ class RootstockServer:
             env_name: Name of pre-built environment (e.g., "mace")
             checkpoint: Canonical checkpoint id passed to the env's setup()
             device: Device string to pass to setup()
-            socket_name: Name for the Unix socket (will be /tmp/ipi_<name>)
+            socket_name: Name for the Unix socket. The socket is created as
+                ipi_<name> inside a fresh private (0700) temp directory on
+                start(), so it is unreachable by other local users.
             root: Root directory for environments and cache (required)
             log: Optional file object for protocol logging
             timeout: Socket timeout in seconds
@@ -90,7 +93,10 @@ class RootstockServer:
             raise ValueError("root is required for pre-built environments")
 
         self.socket_name = socket_name
-        self.socket_path = create_unix_socket_path(socket_name)
+        # Created by start(): the socket lives in a private per-server temp
+        # directory that stop() removes.
+        self.socket_path: str | None = None
+        self._socket_dir: str | None = None
         self.log = log
         self.timeout = timeout
 
@@ -124,7 +130,9 @@ class RootstockServer:
 
     def start(self):
         """Start the server and launch the worker process."""
-        # Create server socket
+        # Create server socket inside a fresh private (0700) directory
+        self.socket_path = create_private_socket_path(self.socket_name)
+        self._socket_dir = os.path.dirname(self.socket_path)
         self._server_socket = create_server_socket(self.socket_path, timeout=self.timeout)
         self._server_socket.listen(1)
 
@@ -329,9 +337,11 @@ class RootstockServer:
                     pass
                 setattr(self, attr, None)
 
-        # Clean up socket file
-        if os.path.exists(self.socket_path):
-            os.unlink(self.socket_path)
+        # Clean up the socket and its private directory
+        if self._socket_dir is not None:
+            shutil.rmtree(self._socket_dir, ignore_errors=True)
+            self._socket_dir = None
+            self.socket_path = None
 
         # Clean up wrapper script
         if self._wrapper_path is not None:

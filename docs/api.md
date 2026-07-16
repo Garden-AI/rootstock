@@ -249,14 +249,19 @@ Exit code is 0 if all tested checkpoints passed, 1 otherwise.
 Start a worker process for an external i-PI server (advanced usage). Takes a single canonical checkpoint id; the hosting env is resolved from the id.
 
 ```bash
+# Create the socket inside a private directory — a socket directly in /tmp
+# is world-visible and race-able by other users on shared nodes.
+SOCKET_DIR=$(mktemp -d)
 rootstock serve mace-mp-0-medium \
-  --socket /tmp/ipi_socket \
+  --socket "$SOCKET_DIR/ipi.sock" \
   --device cuda
 ```
 
 Options:
 
-- `--socket <path>`: Unix socket path for the i-PI server
+- `--socket <path>`: Unix socket path for the i-PI server. Place it inside a
+  private (0700) directory, e.g. from `mktemp -d` — the LAMMPS styles and
+  `RootstockServer` do this automatically for the sockets they create.
 - `--device <dev>`: Device (default: `cuda`)
 - `--kwarg KEY=VAL`: Repeatable extra kwarg passed to `setup()` (same JSON-decoding as `add`)
 
