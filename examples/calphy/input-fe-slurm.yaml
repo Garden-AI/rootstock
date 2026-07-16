@@ -23,12 +23,11 @@ calculations:
       scheduler: slurm
       cores: 1
       jobname: ti
-      walltime: "02:00:00"
+      walltime: "04:00:00"
       nodes: 1
       options:
         gres: "gpu:1"
         account: rosengroup
-        constraint: "intel&gpu40"
         mem: "32G"
       commands:
         - module purge
@@ -39,4 +38,5 @@ calculations:
     repeat: [5, 5, 5]
     temperature: 100.0
     tolerance:
-      pressure: 1
+      pressure: 50    # bar; the per-cycle mean-pressure noise for 250 atoms is ~20 bar
+

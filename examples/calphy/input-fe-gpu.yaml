@@ -25,4 +25,5 @@ calculations:
     repeat: [5, 5, 5]
     temperature: 100.0
     tolerance:
-      pressure: 1
+      pressure: 50    # bar; the per-cycle mean-pressure noise for 250 atoms is ~20 bar
+

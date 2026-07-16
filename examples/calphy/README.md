@@ -1,8 +1,17 @@
 # calphy + LAMMPS + rootstock on Della
 
 Free-energy calculations with calphy driving a rootstock MLIP through
-`pair_style rootstock`. The example computes the Cu fcc solid free energy at
-1000 K with `mace-mp-0-medium`. Steps 1–3 are one-time per user.
+`pair_style rootstock`. Steps 1–3 are one-time per user.
+
+Inputs in this directory:
+
+- `input.yaml` + `job.slurm` — Cu fcc at 1000 K with `mace-mp-0-medium`,
+  smoke-test scale; submit with `sbatch job.slurm`.
+- `input-fe-gpu.yaml` — Fe bcc at 100 K with `mattersim-v1-0-0-5m`,
+  production-scale steps; run inside a GPU allocation:
+  `(unset $(env | grep -o '^SLURM_[A-Za-z0-9_]*'); calphy -i input-fe-gpu.yaml)`
+- `input-fe-slurm.yaml` — same calculation, but calphy submits its own Slurm
+  job: `calphy -i input-fe-slurm.yaml` from a login node.
 
 ## 1. Python environment
 
@@ -63,7 +72,23 @@ active.
 
 ```bash
 rootstock status --root /scratch/gpfs/ROSENGROUP/common/rootstock
-# mace / mace-mp-0-medium: verified
+# the checkpoint your input names shows as fetched/verified
+```
+
+If a checkpoint is missing, provision it once into the shared root (needs
+rosengroup write access):
+
+```bash
+rootstock install ~/rootstock-src/sample_model_configurations/nvidia_configs/<env>.py \
+    --root /scratch/gpfs/ROSENGROUP/common/rootstock
+rootstock add <checkpoint-id> --root /scratch/gpfs/ROSENGROUP/common/rootstock --no-verify
+```
+
+On a GPU node, before a long run:
+
+```bash
+rootstock smoke-test --checkpoint <checkpoint-id> --device cuda \
+    --root /scratch/gpfs/ROSENGROUP/common/rootstock
 ```
 
 ## 5. Run
@@ -103,6 +128,5 @@ relative to the free energy.
 - "requires a single MPI rank" → set `queue.cores: 1` in `input.yaml`.
 - 30–60 s stall at the start of each calphy stage → each stage is a fresh
   LAMMPS instance and the worker reloads the model. Normal.
-- CUDA errors on MIG slices → keep `--constraint="intel&gpu40"` (full GPU).
 - Run dies with no `report.yaml` → read `fe-*/calphy.log`, then the LAMMPS
   log in the same directory.
