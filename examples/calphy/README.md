@@ -9,13 +9,16 @@ Free-energy calculations with calphy driving a rootstock MLIP through
 On a Della login node:
 
 ```bash
-python3 -m venv ~/envs/calphy
-source ~/envs/calphy/bin/activate
+module purge
+module load anaconda3/2024.10                   # or latest: module avail anaconda3
+module load gcc-toolset/14 openmpi/gcc/4.1.8    # calphy's mpi4py dep builds against real MPI
+conda create -n calphy python=3.12 -y
+conda activate calphy
 pip install calphy rootstock
 ```
 
-Any env manager works (conda is fine); step 3 installs the LAMMPS module into
-whichever env is active.
+Any env manager works; step 3 installs the LAMMPS module into whichever env
+is active.
 
 ## 2. LAMMPS build
 

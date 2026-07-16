@@ -9,8 +9,9 @@
 #SBATCH --time=02:00:00
 
 module purge
+module load anaconda3/2024.10
 module load gcc-toolset/14 openmpi/gcc/4.1.8
 
-source ~/envs/calphy/bin/activate
+conda activate calphy
 
 calphy -i input.yaml
