@@ -1,0 +1,28 @@
+# Collaborator production config (Fe bcc, 100 K) with the MLIP served by
+# rootstock instead of a local mliap checkpoint. Interactive/local variant —
+# run from inside a GPU allocation.
+calculations:
+  - element: Fe
+    lattice: BCC
+    lattice_constant: 2.884
+    mass: 55.845
+    md:
+      barostat_damping: 0.1
+      equilibration_control: nose_hoover
+      thermostat_damping: 0.1
+      timestep: 0.001
+    mode: fe
+    n_equilibration_steps: 10000
+    n_iterations: 1
+    n_switching_steps: 25000
+    pair_coeff: "* * Fe"
+    pair_style: rootstock cluster della checkpoint mattersim-v1-0-0-5m device cuda
+    pressure: 0.0
+    queue:
+      cores: 1
+      scheduler: local
+    reference_phase: solid
+    repeat: [5, 5, 5]
+    temperature: 100.0
+    tolerance:
+      pressure: 1

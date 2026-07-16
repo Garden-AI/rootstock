@@ -18,7 +18,9 @@ pip install calphy rootstock
 ```
 
 Any env manager works; step 3 installs the LAMMPS module into whichever env
-is active.
+is active. `calphy` imports `lammps` at startup, so it won't run (even
+`calphy --help`) until step 3 is done — don't work around that with
+`pip install lammps`; the PyPI wheel has no rootstock styles.
 
 ## 2. LAMMPS build
 
@@ -86,6 +88,15 @@ forward/backward switching error reported in `fe-*/calphy.log` is small
 relative to the free energy.
 
 ## Troubleshooting
+
+- `OPAL ERROR: Unreachable in file ext3x_client.c` / "appears to have been
+  direct launched using srun" → calphy's launcher uses srun inside Slurm
+  allocations, and Della's OpenMPI can't be srun-launched. `job.slurm`
+  already handles it; for interactive runs, prefix with:
+
+  ```bash
+  (unset $(env | grep -o '^SLURM_[A-Za-z0-9_]*'); calphy -i input.yaml)
+  ```
 
 - `make install-python` targets system Python → step 3's `cmake .
   -DPython_EXECUTABLE=$(which python)`, then rerun.

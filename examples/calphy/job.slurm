@@ -14,4 +14,9 @@ module load gcc-toolset/14 openmpi/gcc/4.1.8
 
 conda activate calphy
 
+# calphy's launcher (executorlib) direct-launches via srun when it sees a
+# Slurm allocation; Della's OpenMPI has no srun PMI support. Hide the
+# allocation so it falls back to a local launch.
+unset $(env | grep -o '^SLURM_[A-Za-z0-9_]*')
+
 calphy -i input.yaml

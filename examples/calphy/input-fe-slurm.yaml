@@ -1,0 +1,42 @@
+# Same calculation, but calphy submits its own Slurm job: run
+# `calphy -i input-fe-slurm.yaml` from a login node. The queue.commands block
+# recreates the runtime env inside the job and applies the srun/PMI
+# workaround (see README troubleshooting).
+calculations:
+  - element: Fe
+    lattice: BCC
+    lattice_constant: 2.884
+    mass: 55.845
+    md:
+      barostat_damping: 0.1
+      equilibration_control: nose_hoover
+      thermostat_damping: 0.1
+      timestep: 0.001
+    mode: fe
+    n_equilibration_steps: 10000
+    n_iterations: 1
+    n_switching_steps: 25000
+    pair_coeff: "* * Fe"
+    pair_style: rootstock cluster della checkpoint mattersim-v1-0-0-5m device cuda
+    pressure: 0.0
+    queue:
+      scheduler: slurm
+      cores: 1
+      jobname: ti
+      walltime: "02:00:00"
+      nodes: 1
+      options:
+        gres: "gpu:1"
+        account: rosengroup
+        constraint: "intel&gpu40"
+        mem: "32G"
+      commands:
+        - module purge
+        - module load anaconda3/2024.10 gcc-toolset/14 openmpi/gcc/4.1.8
+        - conda activate calphy
+        - unset $(env | grep -o '^SLURM_[A-Za-z0-9_]*')
+    reference_phase: solid
+    repeat: [5, 5, 5]
+    temperature: 100.0
+    tolerance:
+      pressure: 1
