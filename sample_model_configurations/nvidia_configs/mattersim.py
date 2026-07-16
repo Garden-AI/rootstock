@@ -4,10 +4,12 @@
 #     "mattersim>=1.1.0",
 #     "ase>=3.22",
 #     "torch>=2.0",
+#     "torchvision",
 # ]
 #
 # [tool.uv.sources]
 # torch = { index = "pytorch-cu128" }
+# torchvision = { index = "pytorch-cu128" }
 #
 # [[tool.uv.index]]
 # name = "pytorch-cu128"
