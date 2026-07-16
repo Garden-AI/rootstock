@@ -1,0 +1,30 @@
+# Cu fcc solid free energy with MACE-MP-0 via pair_style rootstock.
+# Smoke-test scale: 256 atoms, short switching. For production, raise
+# n_equilibration_steps / n_switching_steps toward calphy defaults
+# (25000 / 50000) and tighten tolerance.pressure back to 10.
+calculations:
+- element: Cu
+  mass: 63.546
+  mode: fe
+  lattice: fcc
+  lattice_constant: 3.615
+  reference_phase: solid
+  temperature: 1000
+  pressure: 0
+  repeat: [4, 4, 4]
+  n_iterations: 1
+  n_equilibration_steps: 5000
+  n_switching_steps: 10000
+  pair_style: rootstock cluster della checkpoint mace-mp-0-medium device cuda
+  pair_coeff: "* * Cu"
+
+md:
+  timestep: 0.001
+  n_small_steps: 2000
+
+queue:
+  scheduler: local
+  cores: 1          # pair_style rootstock is single-rank only
+
+tolerance:
+  pressure: 50      # bar; loosened for the short smoke run

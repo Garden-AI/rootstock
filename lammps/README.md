@@ -39,6 +39,23 @@ make -j$(nproc)
 
 You should see `rootstock` listed under both pair styles and fix styles.
 
+## Python module (calphy, PyLammps)
+
+`make install-python` installs into the Python that CMake found at configure
+time, not the currently active environment. With the target environment
+activated:
+
+```bash
+cd build
+cmake . -DPython_EXECUTABLE=$(which python)
+make install-python
+python -c "from lammps import lammps; \
+    print(lammps(cmdargs=['-log','none','-screen','none']).has_style('pair','rootstock'))"
+# True
+```
+
+Requires `-DBUILD_SHARED_LIBS=yes` at build time.
+
 ## Usage
 
 Both styles spawn the worker themselves via `rootstock serve`, so there is no
