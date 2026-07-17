@@ -27,6 +27,13 @@ from .config import UserConfig
 SCHEMA_VERSION = 4
 
 
+class ManifestError(RuntimeError):
+    """The manifest exists but cannot be used: corrupt JSON, missing required
+    fields, or a schema this client has no path to. Deliberately NOT treated
+    as "no manifest" — a silent fresh start would let the next save overwrite
+    all fetch/verify history."""
+
+
 def _migrate_v1_to_v2(data: dict) -> tuple[dict, str | None]:
     """v1 stored ``checkpoints: list[str]``; v2 stores a dict of CheckpointInfo.
 
@@ -97,7 +104,7 @@ def migrate_manifest_data(data: dict) -> tuple[dict, list[str]]:
     """Upgrade a raw manifest dict to SCHEMA_VERSION, one step at a time.
 
     Returns the upgraded dict and human-readable notes about lossy steps
-    (empty when the manifest was already current). Raises RuntimeError for
+    (empty when the manifest was already current). Raises ManifestError for
     manifests from a *newer* rootstock or with no migration path.
     """
     version = data.get("schema_version")
@@ -105,13 +112,13 @@ def migrate_manifest_data(data: dict) -> tuple[dict, list[str]]:
         version = int(version)  # v1 wrote schema_version as a string
 
     if not isinstance(version, int):
-        raise RuntimeError(
+        raise ManifestError(
             f"manifest has invalid schema_version={data.get('schema_version')!r}; "
             f"expected an integer <= {SCHEMA_VERSION}."
         )
 
     if version > SCHEMA_VERSION:
-        raise RuntimeError(
+        raise ManifestError(
             f"manifest is schema_version={version}, but this rootstock only "
             f"understands up to {SCHEMA_VERSION}. It was written by a newer "
             f"rootstock — upgrade this client (`pip install -U rootstock`)."
@@ -130,7 +137,7 @@ def migrate_manifest_data(data: dict) -> tuple[dict, list[str]]:
     while version < SCHEMA_VERSION:
         migrate = MIGRATIONS.get(version)
         if migrate is None:
-            raise RuntimeError(
+            raise ManifestError(
                 f"manifest is schema_version={version} and no migration path "
                 f"to {SCHEMA_VERSION} exists."
             )
@@ -436,7 +443,11 @@ def load_manifest(root: Path) -> Manifest | None:
         root: Rootstock root directory
 
     Returns:
-        Manifest object, or None if not found
+        Manifest object, or None when no manifest.json exists.
+
+    Raises:
+        ManifestError: the file exists but is corrupt or unmigratable —
+            never silently treated as missing.
     """
     manifest_path = root / "manifest.json"
     if not manifest_path.exists():
@@ -455,9 +466,15 @@ def load_manifest(root: Path) -> Manifest | None:
                 file=sys.stderr,
             )
         return Manifest.from_dict(data)
-    except (json.JSONDecodeError, KeyError):
-        # Invalid manifest - could log warning here
-        return None
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+        # A manifest that exists but can't be parsed must NOT read as "no
+        # manifest": callers would create a fresh one and the next save would
+        # silently erase all fetch/verify history.
+        raise ManifestError(
+            f"manifest at {manifest_path} is corrupted "
+            f"({type(exc).__name__}: {exc}); refusing to treat it as missing. "
+            f"Fix the file, or move it aside to start fresh deliberately."
+        ) from exc
 
 
 def save_manifest(manifest: Manifest, root: Path) -> None:
