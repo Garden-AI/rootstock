@@ -69,6 +69,7 @@ from .commands import (
 )
 from .commands.common import ROOTSTOCK_ROOT_ENV
 from .config import DEFAULT_CONFIG_FILE
+from .manifest import ManifestError
 
 
 def main():
@@ -492,7 +493,13 @@ def main():
     manifest_init_parser.set_defaults(func=cmd_manifest)
 
     args = parser.parse_args()
-    sys.exit(args.func(args))
+    try:
+        sys.exit(args.func(args))
+    except ManifestError as exc:
+        # A corrupt or incompatible manifest is a data-integrity stop, not a
+        # crash: print the diagnosis cleanly instead of a traceback.
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
