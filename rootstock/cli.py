@@ -59,7 +59,9 @@ from .commands import (
     cmd_init,
     cmd_install,
     cmd_list,
-    cmd_manifest,
+    cmd_manifest_init,
+    cmd_manifest_push,
+    cmd_manifest_show,
     cmd_new_env,
     cmd_resolve,
     cmd_serve,
@@ -73,13 +75,6 @@ from .manifest import ManifestError
 
 
 def main():
-    # `rootstock benchmark ...` forwards everything after the subcommand to the
-    # benchmark's own argument parser. Intercept it before the main parser runs,
-    # since argparse can't cleanly pass arbitrary flags through a subparser.
-    argv = sys.argv[1:]
-    if argv and argv[0] == "benchmark":
-        sys.exit(cmd_benchmark(argv[1:]))
-
     parser = argparse.ArgumentParser(
         prog="rootstock",
         description="Rootstock MLIP environment manager",
@@ -422,10 +417,11 @@ def main():
     )
     serve_parser.set_defaults(func=cmd_serve)
 
-    # benchmark command. Registered only so it appears in `rootstock --help`;
-    # the actual dispatch happens in the early intercept at the top of main(),
-    # which forwards all following args to the benchmark's own parser. (argparse
-    # REMAINDER can't reliably capture leading options, so we bypass it.)
+    # benchmark command. Everything after the subcommand is forwarded to the
+    # benchmark's own parser via the parse_known_args leftovers at the bottom
+    # of main() — argparse.REMAINDER cannot capture leading options (--list as
+    # the first forwarded arg errors), so the subparser declares no arguments
+    # and add_help=False lets --help through to the benchmark parser.
     subparsers.add_parser(
         "benchmark",
         help="Measure i-PI IPC overhead vs. in-env direct calls",
@@ -459,7 +455,7 @@ def main():
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
     )
     manifest_show_parser.add_argument("--json", action="store_true", help="Output as JSON")
-    manifest_show_parser.set_defaults(func=cmd_manifest)
+    manifest_show_parser.set_defaults(func=cmd_manifest_show)
 
     # manifest push
     manifest_push_parser = manifest_subparsers.add_parser(
@@ -471,7 +467,7 @@ def main():
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
     )
-    manifest_push_parser.set_defaults(func=cmd_manifest)
+    manifest_push_parser.set_defaults(func=cmd_manifest_push)
 
     # manifest init
     manifest_init_parser = manifest_subparsers.add_parser(
@@ -498,9 +494,16 @@ def main():
         action="store_true",
         help="Don't push manifest to backend (useful during development)",
     )
-    manifest_init_parser.set_defaults(func=cmd_manifest)
+    manifest_init_parser.set_defaults(func=cmd_manifest_init)
 
-    args = parser.parse_args()
+    # parse_known_args instead of parse_args so `rootstock benchmark ...` can
+    # forward arbitrary flags to the benchmark's own parser. Every other
+    # command keeps strict parsing via the explicit error below.
+    args, extra = parser.parse_known_args()
+    if args.command == "benchmark":
+        sys.exit(cmd_benchmark(extra))
+    if extra:
+        parser.error(f"unrecognized arguments: {' '.join(extra)}")
     try:
         sys.exit(args.func(args))
     except ManifestError as exc:
