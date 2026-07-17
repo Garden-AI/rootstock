@@ -70,6 +70,7 @@ class RootstockIPI {
  private:
   Error *error_;
   std::string style_ = "rootstock";
+  std::string socket_dir_;
   std::string socket_path_;
   int server_fd_ = -1;
   int client_fd_ = -1;

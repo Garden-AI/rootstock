@@ -91,8 +91,9 @@ RootstockIPI::~RootstockIPI() {
     }
   }
 
-  // Clean up socket file
+  // Clean up socket file and its private directory
   if (!socket_path_.empty()) ::unlink(socket_path_.c_str());
+  if (!socket_dir_.empty()) ::rmdir(socket_dir_.c_str());
 }
 
 void RootstockIPI::set_atomic_numbers(std::vector<int> numbers) {
@@ -174,9 +175,15 @@ void RootstockIPI::start(const std::string &style, const std::string &tag) {
   // Resolve cluster root directory
   std::string root = resolve_cluster();
 
-  // Generate unique socket path
-  socket_path_ =
-      "/tmp/rootstock_" + std::to_string(getpid()) + "_" + tag + ".sock";
+  // Create the socket inside a fresh private (0700) directory. A bare
+  // /tmp/<name>.sock is world-visible with umask-derived permissions and
+  // race-able by other local users on shared nodes; a socket inside a
+  // mkdtemp directory is unreachable by anyone else.
+  char dir_template[] = "/tmp/rootstock.XXXXXX";
+  if (::mkdtemp(dir_template) == nullptr)
+    error_->all(FLERR, "{}: mkdtemp() failed for socket directory", style_);
+  socket_dir_ = dir_template;
+  socket_path_ = socket_dir_ + "/ipi_" + tag + ".sock";
 
   // Create Unix domain socket
   server_fd_ = ::socket(AF_UNIX, SOCK_STREAM, 0);
@@ -188,9 +195,6 @@ void RootstockIPI::start(const std::string &style, const std::string &tag) {
   if (socket_path_.size() >= sizeof(addr.sun_path))
     error_->all(FLERR, "{}: socket path too long", style_);
   std::strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
-
-  // Remove stale socket file
-  ::unlink(socket_path_.c_str());
 
   if (::bind(server_fd_, (struct sockaddr *) &addr, sizeof(addr)) < 0)
     error_->all(FLERR, "{}: bind() failed on {}", style_, socket_path_);
