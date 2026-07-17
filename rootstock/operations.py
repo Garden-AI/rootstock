@@ -283,10 +283,10 @@ def update_and_push_manifest(
                     file=sys.stderr,
                 )
         return success
-    elif not config.is_maintainer and not quiet:
-        print("Manifest saved locally (not pushing - you are not the maintainer).")
 
-    return True  # Not maintainer or no API key = skip push (not an error)
+    # Not the configured maintainer (or no API credentials): saving locally
+    # is the normal, expected outcome — nothing to warn about.
+    return True
 
 
 # -----------------------------------------------------------------------------

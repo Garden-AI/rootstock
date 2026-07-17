@@ -143,7 +143,5 @@ def cmd_manifest_init(args) -> int:
         else:
             print(f"Warning: Failed to push manifest: {message}", file=sys.stderr)
             print("Run 'rootstock manifest push' to retry.", file=sys.stderr)
-    elif not config.is_maintainer:
-        print("Manifest saved locally (not pushing - you are not the maintainer).")
 
     return 0

@@ -43,12 +43,10 @@ class RootstockClient:
         if not self.config.api_url:
             return False, "API URL not configured"
 
-        url = f"{self.config.api_url}"
-
         data = json.dumps(manifest.to_dict()).encode("utf-8")
 
         request = Request(
-            url,
+            self.config.api_url,
             data=data,
             headers={
                 "Content-Type": "application/json",
