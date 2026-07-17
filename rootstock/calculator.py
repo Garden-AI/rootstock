@@ -14,9 +14,10 @@ from ase.calculators.calculator import Calculator, all_changes
 from ase.stress import full_3x3_to_voigt_6_stress
 
 from .clusters import get_cluster
+from .config import resolve_default_root
 from .environment import find_env_for_checkpoint
 from .layout import ensure_layout_compatible, resolve_cache_root
-from .server import RootstockServer
+from .server import RootstockServer, WorkerDiedError
 
 
 class RootstockCalculator(Calculator):
@@ -68,6 +69,7 @@ class RootstockCalculator(Calculator):
         cache_root: str | Path | None = None,
         device: str = "cuda",
         setup_kwargs: dict | None = None,
+        timeout: float = 600.0,
         **kwargs,
     ):
         """
@@ -84,7 +86,11 @@ class RootstockCalculator(Calculator):
                         from the installed envs at ``root``.
             cluster: Known cluster name (e.g., "della", "perlmutter"). Mutually
                      exclusive with root; a name -> install-path bootstrap.
-            root: Path to rootstock install directory. Mutually exclusive with cluster.
+            root: Path to rootstock install directory. Mutually exclusive with
+                  cluster. When neither is given, the ROOTSTOCK_ROOT
+                  environment variable and then the ``root`` in
+                  ~/.config/rootstock/config.toml are used — the same
+                  fallback the CLI applies.
             cache_root: Optional override for the model-weight cache and
                         redirected HOME. When omitted, the install's own
                         declaration ({root}/layout.json) decides, falling back
@@ -94,6 +100,11 @@ class RootstockCalculator(Calculator):
             setup_kwargs: Extra keyword arguments forwarded to the env's setup()
                           function. May not contain "checkpoint" or "device" —
                           those are passed at the top level.
+            timeout: Socket timeout in seconds for worker operations. The
+                     default (600 s) matches checkpoint verification, so the
+                     first real force call — which may pay for torch.compile
+                     or large neighbor lists — runs under the same envelope
+                     verification exercised.
             **kwargs: Additional arguments passed to ASE Calculator
         """
         # ASE's Calculator quietly absorbs unknown kwargs as parameters, so a
@@ -119,6 +130,7 @@ class RootstockCalculator(Calculator):
         self.checkpoint = checkpoint
         self.device = device
         self.setup_kwargs = setup_kwargs
+        self.timeout = timeout
 
         # Resolve the install root: the cluster name is only a name -> path
         # bootstrap. Everything else about the install (including where its
@@ -132,7 +144,14 @@ class RootstockCalculator(Calculator):
         elif root is not None:
             self.root = Path(root)
         else:
-            raise ValueError("Must specify either 'cluster' or 'root'")
+            default_root = resolve_default_root()
+            if default_root is None:
+                raise ValueError(
+                    "Must specify 'cluster' or 'root' (or set the "
+                    "ROOTSTOCK_ROOT environment variable, or configure root "
+                    "in ~/.config/rootstock/config.toml)"
+                )
+            self.root = default_root
 
         self.cache_root = resolve_cache_root(self.root, explicit=cache_root)
 
@@ -161,6 +180,7 @@ class RootstockCalculator(Calculator):
                 root=self.root,
                 cache_root=self.cache_root,
                 setup_kwargs=self.setup_kwargs,
+                timeout=self.timeout,
             )
             self._server.start()
 
@@ -185,12 +205,21 @@ class RootstockCalculator(Calculator):
         self._ensure_server()
 
         # Get results from worker
-        energy, forces, virial = self._server.calculate(
-            positions=self.atoms.positions,
-            cell=np.array(self.atoms.cell),
-            atomic_numbers=self.atoms.numbers,
-            pbc=list(self.atoms.pbc),
-        )
+        try:
+            energy, forces, virial = self._server.calculate(
+                positions=self.atoms.positions,
+                cell=np.array(self.atoms.cell),
+                atomic_numbers=self.atoms.numbers,
+                pbc=list(self.atoms.pbc),
+            )
+        except WorkerDiedError:
+            # A dead worker can't serve the next call either. Tear the server
+            # down so a subsequent calculation starts a fresh one, instead of
+            # this instance being permanently bricked by one GPU OOM mid-MD.
+            # No automatic retry — the same configuration would likely fail
+            # the same way; the caller decides whether to try again.
+            self.close()
+            raise
 
         # Store results
         self.results["energy"] = energy

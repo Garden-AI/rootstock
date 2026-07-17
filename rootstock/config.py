@@ -26,6 +26,7 @@ import tomllib
 ROOTSTOCK_API_KEY_ENV = "ROOTSTOCK_API_KEY"
 ROOTSTOCK_API_SECRET_ENV = "ROOTSTOCK_API_SECRET"
 ROOTSTOCK_API_URL_ENV = "ROOTSTOCK_API_URL"
+ROOTSTOCK_ROOT_ENV = "ROOTSTOCK_ROOT"
 
 # Default config location
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / "rootstock"
@@ -103,6 +104,23 @@ def load_config(config_path: Path | None = None) -> UserConfig:
         config.api_url = os.environ.get(ROOTSTOCK_API_URL_ENV)
 
     return config
+
+
+def resolve_default_root() -> Path | None:
+    """The install root a configured machine implies when none is given.
+
+    Priority: the ROOTSTOCK_ROOT environment variable, then ``root`` in the
+    user config file. None when neither is set. This is the shared fallback
+    behind both CLI commands (``get_root_or_exit``) and
+    ``RootstockCalculator`` called without ``cluster=``/``root=``.
+    """
+    env_root = os.environ.get(ROOTSTOCK_ROOT_ENV)
+    if env_root:
+        return Path(env_root)
+    config = load_config()
+    if config.root:
+        return Path(config.root)
+    return None
 
 
 def save_config(config: UserConfig, config_path: Path | None = None) -> None:
