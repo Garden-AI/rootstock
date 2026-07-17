@@ -14,6 +14,7 @@ import rootstock
 BLESSED = {
     "RootstockCalculator",
     "RootstockServer",
+    "WorkerDiedError",
     "list_declared_checkpoints",
     "CheckpointNotFoundError",
     "CLUSTER_REGISTRY",

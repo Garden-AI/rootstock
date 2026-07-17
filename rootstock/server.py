@@ -26,6 +26,15 @@ from .protocol import (
 logger = logging.getLogger("rootstock.server")
 
 
+class WorkerDiedError(RuntimeError):
+    """The worker process failed at the socket level (died, hung, or the
+    connection broke) — as opposed to reporting a calculation error in-band
+    while staying healthy. The message carries the post-mortem: process fate
+    plus captured output tails. A server that raised this cannot serve
+    further calls; the calculator tears it down and starts fresh on the next
+    calculation."""
+
+
 def _tail(text: str, limit: int = 8192) -> str:
     """Last ``limit`` characters of ``text`` — worker output can be huge
     (chatty model loads), and the useful part of a crash is at the end."""
@@ -81,7 +90,7 @@ class RootstockServer:
         socket_name: str = "rootstock",
         root: Path | None = None,
         cache_root: Path | None = None,
-        timeout: float = 60.0,
+        timeout: float = 600.0,
         setup_kwargs: dict | None = None,
     ):
         """
@@ -100,7 +109,11 @@ class RootstockServer:
                 ipi_<name> inside a fresh private (0700) temp directory on
                 start(), so it is unreachable by other local users.
             root: Root directory for environments and cache (required)
-            timeout: Socket timeout in seconds
+            timeout: Socket timeout in seconds for worker operations.
+                The default (600 s) matches what checkpoint verification
+                uses, so the first real force call — which may pay for
+                torch.compile or large neighbor lists — runs under the
+                same envelope verification exercised.
             setup_kwargs: Extra keyword arguments forwarded to setup()
         """
         if root is None:
@@ -245,7 +258,7 @@ class RootstockServer:
 
         return _drain(self._stdout_file), _drain(self._stderr_file)
 
-    def _worker_failure_error(self, context: str, exc: Exception | None = None) -> RuntimeError:
+    def _worker_failure_error(self, context: str, exc: Exception | None = None) -> WorkerDiedError:
         """Build a post-mortem error for a worker failure.
 
         A worker that dies mid-``calculate`` (GPU OOM, batch-system kill)
@@ -273,7 +286,7 @@ class RootstockServer:
                 lines.append(f"--- worker {name} (tail) ---\n{_tail(text)}")
         if not captured:
             lines.append("(worker produced no output)")
-        return RuntimeError("\n".join(lines))
+        return WorkerDiedError("\n".join(lines))
 
     def calculate(
         self,

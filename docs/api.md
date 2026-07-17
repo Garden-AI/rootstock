@@ -33,8 +33,9 @@ with RootstockCalculator(
 | `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. When omitted, the install's own declaration (`{root}/layout.json`) decides, falling back to the cluster registry for legacy roots, then to `root` |
 | `device` | `str` | No | `"cuda"` (default) or `"cpu"` |
 | `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `checkpoint` or `device` |
+| `timeout` | `float` | No | Socket timeout in seconds for worker operations (default 600, matching checkpoint verification — so the first real force call, which may pay for `torch.compile` or large neighbor lists, runs under the envelope verification exercised) |
 
-*Either `cluster` or `root` must be provided, but not both.
+*`cluster` and `root` are mutually exclusive. When neither is given, the calculator falls back to the `ROOTSTOCK_ROOT` environment variable and then the `root` in `~/.config/rootstock/config.toml` — the same resolution the CLI uses — so on a configured machine `RootstockCalculator(checkpoint=...)` alone works.
 
 ### Examples
 
@@ -68,6 +69,20 @@ with RootstockCalculator(...) as calc:
     atoms.calc = calc
     energy = atoms.get_potential_energy()
 # Worker process is automatically terminated when exiting the context
+```
+
+### Worker crashes and recovery
+
+A worker that dies mid-calculation (GPU OOM, batch-system kill) raises `rootstock.WorkerDiedError` carrying a post-mortem: the process exit code and the tail of the worker's captured output. The calculator tears the dead server down, so the **same calculator instance recovers on the next call** — a fresh worker is started automatically. There is no automatic retry of the failed calculation: the same configuration would likely fail the same way, so retrying is the caller's decision.
+
+```python
+from rootstock import WorkerDiedError
+
+try:
+    energy = atoms.get_potential_energy()
+except WorkerDiedError as exc:
+    print(exc)          # exit code + worker stderr tail (e.g. the OOM traceback)
+    ...                 # decide: smaller system, different device, give up
 ```
 
 ### Logging
