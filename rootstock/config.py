@@ -20,6 +20,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+import tomli_w
 import tomllib
 
 # Environment variable names
@@ -134,23 +135,25 @@ def save_config(config: UserConfig, config_path: Path | None = None) -> None:
     path = config_path or DEFAULT_CONFIG_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    lines = []
+    # A real TOML writer, not string concatenation: values containing quotes,
+    # backslashes, or newlines must round-trip through the tomllib reader.
+    data: dict = {}
     if config.root:
-        lines.append(f'root = "{config.root}"')
-    lines.append(f"is_maintainer = {str(config.is_maintainer).lower()}")
+        data["root"] = config.root
+    data["is_maintainer"] = config.is_maintainer
     if config.api_key:
-        lines.append(f'api_key = "{config.api_key}"')
+        data["api_key"] = config.api_key
     if config.api_secret:
-        lines.append(f'api_secret = "{config.api_secret}"')
+        data["api_secret"] = config.api_secret
     if config.api_url:
-        lines.append(f'api_url = "{config.api_url}"')
+        data["api_url"] = config.api_url
 
-    if config.name or config.email:
-        lines.append("")
-        lines.append("[maintainer]")
-        if config.name:
-            lines.append(f'name = "{config.name}"')
-        if config.email:
-            lines.append(f'email = "{config.email}"')
+    maintainer = {}
+    if config.name:
+        maintainer["name"] = config.name
+    if config.email:
+        maintainer["email"] = config.email
+    if maintainer:
+        data["maintainer"] = maintainer
 
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text(tomli_w.dumps(data))
