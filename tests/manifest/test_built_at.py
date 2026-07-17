@@ -101,7 +101,7 @@ def test_add_backfills_real_env_info_from_disk(tmp_path):
     synthesizing a placeholder with source_hash='' and built_at=now."""
     env_dir = _make_built_env(tmp_path)
 
-    manifest, env, _ = _ensure_manifest_entry(tmp_path, "test", "mace", "some-ckpt")
+    env, _ = _ensure_manifest_entry(_manifest(tmp_path), tmp_path, "mace", "some-ckpt")
 
     assert env.source_hash.startswith("sha256:")
     assert env.source == ENV_SOURCE
@@ -111,7 +111,7 @@ def test_add_backfills_real_env_info_from_disk(tmp_path):
 
 def test_add_errors_on_unbuilt_env(tmp_path):
     with pytest.raises(RuntimeError, match="not built"):
-        _ensure_manifest_entry(tmp_path, "test", "mace", "some-ckpt")
+        _ensure_manifest_entry(_manifest(tmp_path), tmp_path, "mace", "some-ckpt")
 
 
 def test_add_errors_on_env_missing_source(tmp_path):
@@ -120,4 +120,4 @@ def test_add_errors_on_env_missing_source(tmp_path):
     (env_dir / "bin" / "python").touch()
 
     with pytest.raises(RuntimeError, match="no env_source.py"):
-        _ensure_manifest_entry(tmp_path, "test", "mace", "some-ckpt")
+        _ensure_manifest_entry(_manifest(tmp_path), tmp_path, "mace", "some-ckpt")

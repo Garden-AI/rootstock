@@ -9,7 +9,7 @@ from pathlib import Path
 from ..clusters import CLUSTER_REGISTRY, get_cluster_for_root
 from ..config import DEFAULT_CONFIG_FILE, load_config, save_config
 from ..layout import write_layout_marker
-from ..manifest import create_manifest, save_manifest
+from ..manifest import create_manifest, manifest_lock, save_manifest
 from ..operations import refresh_manifest_environments
 from .common import ROOTSTOCK_ROOT_ENV
 
@@ -157,10 +157,11 @@ def cmd_init(args) -> int:
     # Initialize manifest if we have a cluster
     if cluster and not args.skip_manifest:
         print("\nInitializing manifest...")
-        manifest = create_manifest(root, cluster, config)
-        # Scan for existing built environments
-        manifest = refresh_manifest_environments(manifest, root)
-        save_manifest(manifest, root)
+        with manifest_lock(root):
+            manifest = create_manifest(root, cluster, config)
+            # Scan for existing built environments
+            manifest = refresh_manifest_environments(manifest, root)
+            save_manifest(manifest, root)
         print(f"  Created: {root}/manifest.json")
         if manifest.environments:
             print(f"  Found {len(manifest.environments)} existing environment(s)")
