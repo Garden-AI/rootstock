@@ -5,6 +5,7 @@ This runs in the main process and acts as an i-PI server,
 sending atomic positions and receiving forces from a worker process.
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -151,9 +152,9 @@ class RootstockServer:
         self._init_numbers: list[int] | None = None
         self._init_pbc: list[bool] | None = None
 
-        # Environment manager
-        self._env_manager = None
-        self._wrapper_path: Path | None = None
+        # Holds the spawn_in_env context (staged wrapper + sidecar) open for
+        # the life of the worker process; stop() closes it.
+        self._spawn_stack: contextlib.ExitStack | None = None
 
     def start(self):
         """Start the server and launch the worker process."""
@@ -181,25 +182,25 @@ class RootstockServer:
 
     def _start_worker(self):
         """Start worker using pre-built environment."""
-        from .environment import EnvironmentManager
+        from .spawn import WORKER_WRAPPER, spawn_in_env
 
-        # Create environment manager
-        self._env_manager = EnvironmentManager(root=self.root, cache_root=self.cache_root)
-
-        # Generate wrapper script
-        self._wrapper_path = self._env_manager.generate_wrapper(
-            env_name=self.env_name,
-            checkpoint=self.checkpoint,
-            device=self.device,
-            socket_path=self.socket_path,
-            setup_kwargs=self.setup_kwargs,
+        self._spawn_stack = contextlib.ExitStack()
+        spec = self._spawn_stack.enter_context(
+            spawn_in_env(
+                self.root,
+                self.env_name,
+                WORKER_WRAPPER,
+                {
+                    "checkpoint": self.checkpoint,
+                    "device": self.device,
+                    "socket_path": self.socket_path,
+                    "setup_kwargs": self.setup_kwargs,
+                },
+                cache_root=self.cache_root,
+            )
         )
 
-        # Get spawn command and environment
-        cmd = self._env_manager.get_spawn_command(self.env_name, self._wrapper_path)
-        env = self._env_manager.get_environment_variables()
-
-        logger.debug("Spawning worker: %s", " ".join(cmd))
+        logger.debug("Spawning worker: %s", " ".join(spec.cmd))
 
         # Redirect worker output to temp files rather than pipes. The worker
         # loads the model in setup() *before* connecting to the socket; a noisy
@@ -212,8 +213,9 @@ class RootstockServer:
         self._stderr_file = tempfile.TemporaryFile()
 
         self._process = subprocess.Popen(
-            cmd,
-            env=env,
+            spec.cmd,
+            env=spec.env,
+            cwd=spec.cwd,
             stdout=self._stdout_file,
             stderr=self._stderr_file,
         )
@@ -405,18 +407,10 @@ class RootstockServer:
             self._socket_dir = None
             self.socket_path = None
 
-        # Clean up wrapper script
-        if self._wrapper_path is not None:
-            try:
-                self._wrapper_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            self._wrapper_path = None
-
-        # Clean up environment manager
-        if self._env_manager is not None:
-            self._env_manager.cleanup()
-            self._env_manager = None
+        # Remove the staged wrapper + sidecar (the worker is gone by now)
+        if self._spawn_stack is not None:
+            self._spawn_stack.close()
+            self._spawn_stack = None
 
         self._connected = False
         self._protocol = None

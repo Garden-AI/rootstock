@@ -31,7 +31,7 @@ from pathlib import Path
 from .client import RootstockClient
 from .clusters import get_cluster_for_root
 from .config import load_config
-from .environment import find_env_for_checkpoint, get_model_cache_env, parse_checkpoints_dict
+from .environment import find_env_for_checkpoint, parse_checkpoints_dict
 from .exceptions import RootstockError
 from .layout import resolve_cache_root
 from .manifest import (
@@ -51,6 +51,7 @@ from .pep723 import (
     parse_pep723_metadata,
     validate_environment_file,
 )
+from .spawn import DOWNLOAD_WRAPPER, spawn_in_env
 from .verify import verify_checkpoint
 
 ROOTSTOCK_GITHUB_URL = "https://github.com/Garden-AI/rootstock.git"
@@ -843,43 +844,23 @@ def _run_download(
     """Run ``setup(checkpoint, "cpu", **setup_kwargs)`` to trigger the cache-aware
     download path. Returns ``(ok, error)``."""
     env_dir = root / "envs" / env_name
-    env_python = env_dir / "bin" / "python"
-    if not env_python.exists():
+    if not (env_dir / "bin" / "python").exists():
         return False, f"environment not built at {env_dir}"
 
-    fd, kwargs_path = tempfile.mkstemp(suffix=".json", prefix="rootstock_add_kwargs_")
-    try:
-        with open(fd, "w") as f:
-            json.dump(setup_kwargs, f)
-
-        script = (
-            "import sys, json\n"
-            f'sys.path.insert(0, "{env_dir}")\n'
-            "from env_source import setup\n"
-            f'with open("{kwargs_path}") as _f: kwargs = json.load(_f)\n'
-            f'setup({checkpoint!r}, "cpu", **kwargs)\n'
-        )
-
-        env = {**os.environ, **get_model_cache_env(root, cache_root)}
-        # Run from env_dir so the implicit "" entry that `python -c` puts on
-        # sys.path resolves to the env directory (which holds only env_source.py
-        # and the venv internals) rather than the caller's CWD. Without this, a
-        # config whose top-level import name matches a file in the caller's CWD
-        # — e.g. running from environments/ where mace.py lives while adding a
-        # checkpoint whose setup() does `import mace` — shadows the installed
-        # package and fails with "'mace' is not a package".
+    with spawn_in_env(
+        root,
+        env_name,
+        DOWNLOAD_WRAPPER,
+        {"checkpoint": checkpoint, "device": "cpu", "setup_kwargs": setup_kwargs},
+        cache_root=cache_root,
+    ) as spec:
         result = subprocess.run(
-            [str(env_python), "-c", script],
-            env=env,
-            cwd=str(env_dir),
+            spec.cmd,
+            env=spec.env,
+            cwd=spec.cwd,
             capture_output=True,
             text=True,
         )
-    finally:
-        try:
-            Path(kwargs_path).unlink()
-        except OSError:
-            pass
 
     if result.returncode != 0:
         err = result.stderr.strip().splitlines()

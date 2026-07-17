@@ -86,7 +86,7 @@ def chatty_env_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     still ``import rootstock`` / ``ase`` — CPython resolves a symlinked
     interpreter's prefix from the *symlink* location, which has no
     site-packages, so the import would otherwise fail. The worker inherits this
-    env via ``os.environ.copy()`` in EnvironmentManager.get_environment_variables.
+    env via ``os.environ.copy()`` in spawn_in_env.
     """
     import ase
 
