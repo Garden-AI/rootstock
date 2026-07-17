@@ -39,7 +39,7 @@ __version__ = _pkg_version("rootstock")
 # they live. Gives 0.x users a pointed error instead of a bare AttributeError.
 _MOVED = {
     "RootstockClient": "rootstock.client",
-    "EnvironmentManager": "rootstock.environment",
+    "EnvironmentManager": "rootstock.spawn — its replacement is spawn_in_env",
     "list_environments": "rootstock.environment",
     "list_built_environments": "rootstock.environment",
     "get_model_cache_env": "rootstock.environment",
