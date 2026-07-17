@@ -636,8 +636,11 @@ def cmd_install(args) -> int:
     if not getattr(args, "no_perm_check", False):
         _warn_on_permissions(root)
 
-    # Stamp (or backfill, for pre-marker installs) the layout version.
-    write_layout_marker(root)
+    # Stamp (or backfill, for pre-marker installs) the layout version, and
+    # make the install self-describing: declare its cache root. For legacy
+    # roots without a declaration this persists the registry's answer, so
+    # the install keeps working after pinned clients' registries go stale.
+    write_layout_marker(root, cache_root=resolve_cache_root(root))
 
     # DIRECTORY MODE: install all *.py files
     if source_path.is_dir():

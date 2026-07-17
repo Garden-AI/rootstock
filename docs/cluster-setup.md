@@ -30,16 +30,18 @@ Choose a location on a shared filesystem where other users have access:
 
 On most clusters a single shared filesystem hosts both the rootstock install (code, venvs, manifest) and the model-weight cache. Some clusters require these to live on different filesystems — typically because the recommended persistent project filesystem doesn't support `flock`, which the HuggingFace cache requires. NERSC Perlmutter is one such case: code lives on CFS, model weights on PSCRATCH.
 
-The cluster registry (`rootstock/clusters.py`) encodes both paths per cluster:
+The install declares its own cache root in `{root}/layout.json` — `rootstock install` and `rootstock init` record it automatically. Every reader (CLI commands and `RootstockCalculator`, whether given `cluster=` or `root=`) resolves the cache root the same way: an explicit override wins, then the install's declaration, then — for legacy installs that predate the declaration — the cluster registry's entry, then the install root itself.
+
+The cluster registry (`rootstock/clusters.py`) is only a name → install-path bootstrap so users can say `cluster="perlmutter"` instead of remembering a path. Its per-cluster `cache_root` field remains solely as the legacy fallback above; new split-filesystem deployments don't need a registry entry at all, just a declaration in the install:
 
 ```python
 "perlmutter": Cluster(
     root=Path("/global/cfs/cdirs/m4845/rootstock"),
-    cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),
+    cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),  # legacy fallback only
 ),
 ```
 
-When `cache_root` is omitted from the registry, both paths are the same. Users don't need to set environment variables — `RootstockCalculator(cluster="perlmutter", ...)` resolves both automatically.
+Users don't need to set environment variables — `RootstockCalculator(cluster="perlmutter", ...)` resolves both automatically.
 
 ### Permissions for shared installs
 

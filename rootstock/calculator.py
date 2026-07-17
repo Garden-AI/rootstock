@@ -15,7 +15,7 @@ from ase.stress import full_3x3_to_voigt_6_stress
 
 from .clusters import get_cluster
 from .environment import find_env_for_checkpoint
-from .layout import ensure_layout_compatible
+from .layout import ensure_layout_compatible, resolve_cache_root
 from .server import RootstockServer
 
 
@@ -79,12 +79,13 @@ class RootstockCalculator(Calculator):
                         "uma-s-1p1"). Required. The hosting env is resolved
                         from the installed envs at ``root``.
             cluster: Known cluster name (e.g., "della", "perlmutter"). Mutually
-                     exclusive with root. The cluster's registered cache_root is
-                     used unless `cache_root` is also passed.
+                     exclusive with root; a name -> install-path bootstrap.
             root: Path to rootstock install directory. Mutually exclusive with cluster.
-            cache_root: Optional separate root for the model-weight cache and
-                        redirected HOME. Defaults to the cluster's registered
-                        cache_root, or to ``root`` if no cluster is in play.
+            cache_root: Optional override for the model-weight cache and
+                        redirected HOME. When omitted, the install's own
+                        declaration ({root}/layout.json) decides, falling back
+                        to the cluster registry for legacy roots, then to
+                        ``root`` — the same resolution the CLI uses.
             device: PyTorch device ("cuda", "cuda:0", "cpu")
             setup_kwargs: Extra keyword arguments forwarded to the env's setup()
                           function. May not contain "checkpoint" or "device" —
@@ -108,22 +109,21 @@ class RootstockCalculator(Calculator):
         self.setup_kwargs = setup_kwargs
         self.log = log
 
-        # Resolve install root and cache root.
-        # Resolution: explicit kwarg > cluster registry default > install root.
+        # Resolve the install root: the cluster name is only a name -> path
+        # bootstrap. Everything else about the install (including where its
+        # cache lives) is read from the install itself, identically for both
+        # entry points — see resolve_cache_root.
         if cluster is not None and root is not None:
             raise ValueError("Cannot specify both 'cluster' and 'root'")
 
         if cluster is not None:
-            cluster_info = get_cluster(cluster)
-            self.root = cluster_info.root
-            self.cache_root = (
-                Path(cache_root) if cache_root is not None else cluster_info.resolved_cache_root
-            )
+            self.root = get_cluster(cluster).root
         elif root is not None:
             self.root = Path(root)
-            self.cache_root = Path(cache_root) if cache_root is not None else self.root
         else:
             raise ValueError("Must specify either 'cluster' or 'root'")
+
+        self.cache_root = resolve_cache_root(self.root, explicit=cache_root)
 
         # A root laid out by a newer rootstock may not be readable by this
         # client's conventions — fail with "upgrade rootstock", not a

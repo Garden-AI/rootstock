@@ -102,8 +102,10 @@ is mounted (HPC shared filesystem, NFS, Lustre, etc.).
 
 On clusters where the right filesystem for code is different from the right
 filesystem for the model-weight cache (e.g., Perlmutter — code on CFS, cache
-on PSCRATCH), the cluster registry encodes both as `root` and `cache_root`.
-Most clusters use the same path for both.
+on PSCRATCH), the install declares its own `cache_root` in `{root}/layout.json`
+(written by `install`/`init`). The cluster registry is only a name → path
+bootstrap; its `cache_root` field is a fallback for legacy installs that
+predate the declaration. Most clusters use the same path for both.
 
 ### Known Clusters
 
