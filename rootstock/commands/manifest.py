@@ -12,17 +12,6 @@ from ..operations import refresh_manifest_environments
 from .common import get_root_or_exit
 
 
-def cmd_manifest(args) -> int:
-    """Handle manifest subcommands."""
-    if args.manifest_action == "show":
-        return cmd_manifest_show(args)
-    elif args.manifest_action == "push":
-        return cmd_manifest_push(args)
-    elif args.manifest_action == "init":
-        return cmd_manifest_init(args)
-    return 0
-
-
 def cmd_manifest_show(args) -> int:
     """Show current manifest."""
     root = get_root_or_exit(args)

@@ -6,7 +6,7 @@ from .check_perms import cmd_check_perms
 from .create import cmd_new_env
 from .init import cmd_init
 from .install import cmd_install
-from .manifest import cmd_manifest
+from .manifest import cmd_manifest_init, cmd_manifest_push, cmd_manifest_show
 from .resolve import cmd_resolve
 from .serve import cmd_serve
 from .setup_perms import cmd_setup_perms
@@ -20,7 +20,9 @@ __all__ = [
     "cmd_init",
     "cmd_install",
     "cmd_list",
-    "cmd_manifest",
+    "cmd_manifest_init",
+    "cmd_manifest_push",
+    "cmd_manifest_show",
     "cmd_new_env",
     "cmd_resolve",
     "cmd_serve",
