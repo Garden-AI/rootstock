@@ -12,6 +12,7 @@ from ..manifest import (
     EnvironmentInfo,
     is_verified,
     load_manifest,
+    manifest_lock,
     now_iso,
     save_manifest,
 )
@@ -69,6 +70,13 @@ def cmd_smoke_test(args) -> int:
     n_failed = 0
     total_start = time.monotonic()
 
+    # Verification runs are long (minutes per checkpoint) and must not hold
+    # the manifest lock. Record outcomes here and apply them to a *freshly
+    # loaded* manifest in one locked cycle afterwards — mutating the manifest
+    # loaded before the loop and saving it at the end would silently revert
+    # anything a co-maintainer wrote in between.
+    outcomes: list[tuple[str, str, bool, str | None]] = []
+
     for env_name, ckpt_name, env, ckpt in selected:
         start = time.monotonic()
         ok, err = verify_checkpoint(
@@ -80,7 +88,10 @@ def cmd_smoke_test(args) -> int:
             cache_root=cache_root,
         )
         elapsed = time.monotonic() - start
+        outcomes.append((env_name, ckpt_name, ok, err))
 
+        # Mirror the outcome onto the working copy so verified_current in the
+        # report reflects this run.
         if ok:
             ckpt.verified_at = now_iso()
             ckpt.verified_device = device
@@ -111,7 +122,23 @@ def cmd_smoke_test(args) -> int:
                 line += f"  {err}"
             print(line)
 
-    save_manifest(manifest, root)
+    with manifest_lock(root):
+        fresh = load_manifest(root)
+        if fresh is not None:
+            for env_name, ckpt_name, ok, err in outcomes:
+                env_record = fresh.environments.get(env_name)
+                ckpt_record = env_record.checkpoints.get(ckpt_name) if env_record else None
+                if ckpt_record is None:
+                    continue  # env/checkpoint removed while we were testing
+                if ok:
+                    ckpt_record.verified_at = now_iso()
+                    ckpt_record.verified_device = device
+                    ckpt_record.last_error = None
+                else:
+                    ckpt_record.verified_at = None
+                    ckpt_record.verified_device = None
+                    ckpt_record.last_error = f"smoke-test: {err}"
+            save_manifest(fresh, root)
     update_and_push_manifest(root, quiet=True, push=not no_push)
 
     total_elapsed = time.monotonic() - total_start

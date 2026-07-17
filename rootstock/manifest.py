@@ -15,9 +15,12 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,12 +30,26 @@ from .exceptions import RootstockError
 
 SCHEMA_VERSION = 4
 
+# manifest_lock defaults. The lock is only held across a load → mutate → save
+# cycle (plus the env refresh, which shells out to `uv pip list` per env), so
+# holds are seconds, not minutes; the stale threshold is deliberately far
+# beyond any legitimate hold.
+LOCK_TIMEOUT = 120.0
+LOCK_STALE_AFTER = 600.0
+_LOCK_POLL_INTERVAL = 0.5
+
 
 class ManifestError(RootstockError, RuntimeError):
     """The manifest exists but cannot be used: corrupt JSON, missing required
     fields, or a schema this client has no path to. Deliberately NOT treated
     as "no manifest" — a silent fresh start would let the next save overwrite
     all fetch/verify history."""
+
+
+class ManifestLockTimeout(ManifestError):
+    """Could not acquire the manifest lock within the timeout. Subclasses
+    ManifestError so the CLI reports it as a clean diagnosis, not a
+    traceback."""
 
 
 def _migrate_v1_to_v2(data: dict) -> tuple[dict, str | None]:
@@ -414,6 +431,97 @@ def built_at_estimate(env_path: Path) -> str:
     """
     ts = env_path.stat().st_mtime
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def _try_create_lock(lock_path: Path) -> bool:
+    """One atomic O_EXCL attempt; the lock file records who holds it."""
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as f:
+        json.dump(
+            {"pid": os.getpid(), "host": socket.gethostname(), "created": now_iso()},
+            f,
+        )
+    return True
+
+
+def _describe_lock(lock_path: Path) -> str:
+    try:
+        holder = json.loads(lock_path.read_text())
+        return (
+            f"held by pid {holder.get('pid')} on {holder.get('host')} "
+            f"since {holder.get('created')}"
+        )
+    except (OSError, json.JSONDecodeError):
+        return "holder unknown (lock file unreadable)"
+
+
+@contextmanager
+def manifest_lock(
+    root: Path,
+    timeout: float = LOCK_TIMEOUT,
+    stale_after: float = LOCK_STALE_AFTER,
+):
+    """Hold ``{root}/manifest.json.lock`` for a read-modify-write cycle.
+
+    Every writer must load the manifest fresh *inside* this lock, mutate, and
+    save before releasing — holding a manifest object across the lock
+    boundary reintroduces the lost-update race this exists to prevent
+    (nightly smoke-test vs. a co-maintainer's add).
+
+    Deliberately NOT fcntl/flock: the manifest lives on the install root,
+    which can be a filesystem without working POSIX locks (Perlmutter CFS is
+    why the cache_root split exists at all). An O_EXCL create is atomic on
+    the filesystems we care about.
+
+    A lock older than ``stale_after`` (far beyond any legitimate hold) is
+    presumed abandoned by a killed process and broken: unlinked and
+    re-contested. The mtime comes from the fileserver's clock, so
+    ``stale_after`` is generous rather than tight.
+
+    Raises:
+        ManifestLockTimeout: not acquired within ``timeout`` seconds.
+    """
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    lock_path = root / "manifest.json.lock"
+
+    deadline = time.monotonic() + timeout
+    while not _try_create_lock(lock_path):
+        try:
+            seen = lock_path.stat()
+        except FileNotFoundError:
+            continue  # released between attempts — retry immediately
+
+        if time.time() - seen.st_mtime > stale_after:
+            # Presumed abandoned. Re-stat before unlinking so we only break
+            # the lock we judged stale, not one freshly taken since (the
+            # unlink itself can still race another breaker — the loser of
+            # the subsequent O_EXCL just keeps waiting).
+            try:
+                if lock_path.stat().st_mtime == seen.st_mtime:
+                    lock_path.unlink()
+            except FileNotFoundError:
+                pass
+            continue
+
+        if time.monotonic() >= deadline:
+            raise ManifestLockTimeout(
+                f"could not lock {root / 'manifest.json'} after {timeout:.0f}s; "
+                f"lock file {lock_path} is {_describe_lock(lock_path)}. "
+                f"If that process is dead, remove the lock file and retry."
+            )
+        time.sleep(_LOCK_POLL_INTERVAL)
+
+    try:
+        yield
+    finally:
+        # If we exceeded stale_after ourselves, another process may have
+        # broken our lock and taken its own; this unlink would then release
+        # theirs early. Tolerated: stale_after is far above any real hold.
+        lock_path.unlink(missing_ok=True)
 
 
 def load_manifest(root: Path) -> Manifest | None:

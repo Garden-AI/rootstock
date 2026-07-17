@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from .manifest import (
     create_manifest,
     get_installed_versions,
     load_manifest,
+    manifest_lock,
     now_iso,
     save_manifest,
 )
@@ -232,35 +234,39 @@ def update_and_push_manifest(
     """
     config = load_config()
 
-    # Load existing manifest first
-    manifest = load_manifest(root)
+    # The whole load → refresh → save cycle runs under the manifest lock so a
+    # concurrent writer (nightly smoke-test vs. a co-maintainer's add) can't
+    # be silently overwritten. The push happens after release — no reason to
+    # hold the lock across a network call.
+    with manifest_lock(root):
+        manifest = load_manifest(root)
 
-    # Determine cluster: provided > existing manifest > detect from path
-    if cluster is None:
-        if manifest is not None:
-            cluster = manifest.cluster
-        else:
-            cluster = get_cluster_for_root(root)
+        # Determine cluster: provided > existing manifest > detect from path
+        if cluster is None:
+            if manifest is not None:
+                cluster = manifest.cluster
+            else:
+                cluster = get_cluster_for_root(root)
 
-    if cluster is None:
-        if not quiet:
-            print(
-                "Warning: Cannot update manifest - cluster not specified and "
-                "root doesn't match any known cluster. "
-                "Run 'rootstock manifest init --cluster <name>' first.",
-                file=sys.stderr,
-            )
-        return False
+        if cluster is None:
+            if not quiet:
+                print(
+                    "Warning: Cannot update manifest - cluster not specified and "
+                    "root doesn't match any known cluster. "
+                    "Run 'rootstock manifest init --cluster <name>' first.",
+                    file=sys.stderr,
+                )
+            return False
 
-    # Create manifest if it doesn't exist
-    if manifest is None:
-        manifest = create_manifest(root, cluster, config)
+        # Create manifest if it doesn't exist
+        if manifest is None:
+            manifest = create_manifest(root, cluster, config)
 
-    # Refresh environment info from current state
-    manifest = refresh_manifest_environments(manifest, root, built_env=built_env)
+        # Refresh environment info from current state
+        manifest = refresh_manifest_environments(manifest, root, built_env=built_env)
 
-    # Save locally
-    save_manifest(manifest, root)
+        # Save locally
+        save_manifest(manifest, root)
 
     # Skip push if explicitly disabled
     if not push:
@@ -870,19 +876,33 @@ def _run_download(
     return True, None
 
 
+@contextmanager
+def _manifest_transaction(root: Path, cluster_hint: str | None = None):
+    """Lock → load-fresh (or create) → yield → save-once → unlock.
+
+    The single sanctioned way to mutate the manifest. Long-running work
+    (downloads, verification subprocesses) must happen *outside* the
+    transaction; the body should only apply its results. On an exception in
+    the body nothing is saved.
+    """
+    with manifest_lock(root):
+        manifest = load_manifest(root)
+        if manifest is None:
+            config = load_config()
+            manifest = create_manifest(root, cluster_hint or "unknown", config)
+        yield manifest
+        save_manifest(manifest, root)
+
+
 def _ensure_manifest_entry(
+    manifest: Manifest,
     root: Path,
-    cluster_hint: str | None,
     env_name: str,
     checkpoint: str,
-) -> tuple[Manifest, EnvironmentInfo, CheckpointInfo]:
-    """Load (or create) the manifest and return the env+checkpoint records."""
-    manifest = load_manifest(root)
-    if manifest is None:
-        config = load_config()
-        cluster = cluster_hint or "unknown"
-        manifest = create_manifest(root, cluster, config)
-
+) -> tuple[EnvironmentInfo, CheckpointInfo]:
+    """Return the env+checkpoint records, refreshing from disk if the env is
+    missing from the manifest. Mutates ``manifest`` in place — call inside a
+    transaction."""
     env = manifest.environments.get(env_name)
     if env is None:
         # The manifest hasn't been refreshed since this env was built. Refresh
@@ -906,7 +926,7 @@ def _ensure_manifest_entry(
 
     if checkpoint not in env.checkpoints:
         env.checkpoints[checkpoint] = CheckpointInfo()
-    return manifest, env, env.checkpoints[checkpoint]
+    return env, env.checkpoints[checkpoint]
 
 
 def add_checkpoint(
@@ -938,25 +958,46 @@ def add_checkpoint(
 
     env_name, _ = find_env_for_checkpoint(root, checkpoint)
 
-    manifest, env, ckpt = _ensure_manifest_entry(root, None, env_name, checkpoint)
+    # Fail fast before any long-running work (checked again inside each
+    # transaction by _ensure_manifest_entry, whose refresh needs it too).
+    env_dir = root / "envs" / env_name
+    if not (env_dir / "bin" / "python").exists():
+        raise OperationError(
+            f"environment '{env_name}' is not built at {env_dir}.\n"
+            f"Run: rootstock install <path-to-{env_name}.py> --root {root}"
+        )
 
-    # ---- Download phase ------------------------------------------------
-    already_fetched = ckpt.fetched_at is not None
+    # Unlocked peek for idempotence; every write below loads fresh inside
+    # its own transaction, so a racing writer costs at most a redundant
+    # (idempotent) download, never a lost update.
+    peek = load_manifest(root)
+    peek_env = peek.environments.get(env_name) if peek else None
+    peek_ckpt = peek_env.checkpoints.get(checkpoint) if peek_env else None
+    already_fetched = peek_ckpt is not None and peek_ckpt.fetched_at is not None
+
+    fetched_at = peek_ckpt.fetched_at if peek_ckpt else None
+    verified_at: str | None = None
+    verified_device: str | None = None
+
+    # ---- Download phase (runs outside the lock) ------------------------
     if not already_fetched:
         _say(progress, f"Downloading {env_name}/{checkpoint} on CPU...")
         ok, err = _run_download(root, env_name, checkpoint, setup_kwargs, cache_root=cache_root)
+        with _manifest_transaction(root) as manifest:
+            _, ckpt = _ensure_manifest_entry(manifest, root, env_name, checkpoint)
+            if ok:
+                ckpt.fetched_at = now_iso()
+                ckpt.last_error = None
+                fetched_at = ckpt.fetched_at
+            else:
+                ckpt.last_error = f"download: {err}"
         if not ok:
-            ckpt.last_error = f"download: {err}"
-            save_manifest(manifest, root)
             raise OperationError(f"download failed: {err}")
-        ckpt.fetched_at = now_iso()
-        ckpt.last_error = None
-        save_manifest(manifest, root)
-        _say(progress, f"  fetched_at = {ckpt.fetched_at}")
+        _say(progress, f"  fetched_at = {fetched_at}")
     else:
-        _say(progress, f"{env_name}/{checkpoint} already fetched at {ckpt.fetched_at}")
+        _say(progress, f"{env_name}/{checkpoint} already fetched at {fetched_at}")
 
-    # ---- Verify phase --------------------------------------------------
+    # ---- Verify phase (runs outside the lock) --------------------------
     if not verify:
         _say(progress, "(skipping verify per --no-verify)")
     else:
@@ -964,26 +1005,30 @@ def add_checkpoint(
         ok, err = verify_checkpoint(
             root, env_name, checkpoint, device, setup_kwargs, cache_root=cache_root
         )
+        with _manifest_transaction(root) as manifest:
+            _, ckpt = _ensure_manifest_entry(manifest, root, env_name, checkpoint)
+            if ok:
+                ckpt.verified_at = now_iso()
+                ckpt.verified_device = device
+                ckpt.last_error = None
+                verified_at = ckpt.verified_at
+                verified_device = ckpt.verified_device
+            else:
+                ckpt.verified_at = None
+                ckpt.verified_device = None
+                ckpt.last_error = f"verify: {err}"
         if not ok:
-            ckpt.verified_at = None
-            ckpt.verified_device = None
-            ckpt.last_error = f"verify: {err}"
-            save_manifest(manifest, root)
             raise OperationError(f"verify failed: {err}")
-        ckpt.verified_at = now_iso()
-        ckpt.verified_device = device
-        ckpt.last_error = None
-        save_manifest(manifest, root)
-        _say(progress, f"  verified_at = {ckpt.verified_at} ({device})")
+        _say(progress, f"  verified_at = {verified_at} ({device})")
 
-    # Refresh + push
+    # Refresh + push (takes the lock for its own load -> refresh -> save)
     update_and_push_manifest(root, quiet=True, push=push)
 
     return AddResult(
         env_name=env_name,
         checkpoint=checkpoint,
-        fetched_at=ckpt.fetched_at,
+        fetched_at=fetched_at,
         already_fetched=already_fetched,
-        verified_at=ckpt.verified_at if verify else None,
-        verified_device=ckpt.verified_device if verify else None,
+        verified_at=verified_at if verify else None,
+        verified_device=verified_device if verify else None,
     )

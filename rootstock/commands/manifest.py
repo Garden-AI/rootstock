@@ -7,7 +7,7 @@ import sys
 
 from ..client import RootstockClient
 from ..config import load_config
-from ..manifest import create_manifest, load_manifest, save_manifest
+from ..manifest import create_manifest, load_manifest, manifest_lock, save_manifest
 from ..operations import refresh_manifest_environments
 from .common import get_root_or_exit
 
@@ -110,9 +110,10 @@ def cmd_manifest_init(args) -> int:
         )
 
     # Create and save manifest
-    manifest = create_manifest(root, cluster, config)
-    manifest = refresh_manifest_environments(manifest, root)
-    save_manifest(manifest, root)
+    with manifest_lock(root):
+        manifest = create_manifest(root, cluster, config)
+        manifest = refresh_manifest_environments(manifest, root)
+        save_manifest(manifest, root)
 
     print(f"Manifest initialized: {root}/manifest.json")
     print(f"  Cluster: {cluster}")
