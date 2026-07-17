@@ -32,6 +32,7 @@ from .client import RootstockClient
 from .clusters import get_cluster_for_root
 from .config import load_config
 from .environment import find_env_for_checkpoint, get_model_cache_env, parse_checkpoints_dict
+from .exceptions import RootstockError
 from .layout import resolve_cache_root
 from .manifest import (
     CheckpointInfo,
@@ -57,7 +58,7 @@ ROOTSTOCK_GITHUB_URL = "https://github.com/Garden-AI/rootstock.git"
 Progress = Callable[[str], None]
 
 
-class OperationError(RuntimeError):
+class OperationError(RootstockError, RuntimeError):
     """An operation failed; the message is presentable to the user as-is."""
 
 

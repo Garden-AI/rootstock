@@ -15,6 +15,7 @@ BLESSED = {
     "RootstockCalculator",
     "RootstockServer",
     "WorkerDiedError",
+    "RootstockError",
     "list_declared_checkpoints",
     "CheckpointNotFoundError",
     "CLUSTER_REGISTRY",
