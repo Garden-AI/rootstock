@@ -343,11 +343,13 @@ def get_installed_versions(
     def normalize(name: str) -> str:
         return name.lower().replace("-", "_").replace(".", "_")
 
-    filter_set = (
-        {normalize(p.split("==")[0].split(">")[0].split("<")[0].split("~")[0].split("[")[0].strip()) for p in only_packages}
-        if only_packages
-        else None
-    )
+    def base_name(spec: str) -> str:
+        # Strip version specifiers and extras: "torch>=2.0" / "mace[dev]" -> package name
+        for sep in ("==", ">", "<", "~", "["):
+            spec = spec.split(sep)[0]
+        return spec.strip()
+
+    filter_set = {normalize(base_name(p)) for p in only_packages} if only_packages else None
 
     packages_data = []
 
