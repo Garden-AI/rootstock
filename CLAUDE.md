@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rootstock is a proof-of-concept for running MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments, communicating via the i-PI protocol over Unix sockets.
 
-**Current version: v0.8** - Manifest schema v4 (older schemas migrate in place on load); canonical-checkpoint-id API.
+Versioning is dynamic (git tags via uv-dynamic-versioning) — check `rootstock --version`. Manifest schema v4 (older schemas migrate in place on load); canonical-checkpoint-id API.
 
 ## Commands
 
@@ -65,7 +65,7 @@ Main Process                          Worker Process (subprocess)
 
 ### Core Files
 
-- `rootstock/cli.py` - CLI commands (`build`, `status`, `list`, `register`)
+- `rootstock/cli.py` + `rootstock/commands/` - CLI (`install`, `add`, `smoke-test`, `status`, `serve`, ... — thin adapters over `rootstock/operations.py`)
 - `rootstock/calculator.py` - ASE Calculator interface (main entry point)
 - `rootstock/server.py` - Spawns worker subprocess, manages socket lifecycle
 - `rootstock/worker.py` - i-PI client state machine
@@ -120,7 +120,7 @@ predate the declaration. Most clusters use the same path for both.
 ## API
 
 ```python
-# v0.8: single canonical checkpoint id; env is resolved automatically.
+# Single canonical checkpoint id; the hosting env is resolved automatically.
 with RootstockCalculator(
     cluster="della",
     checkpoint="mace-mp-0-medium",

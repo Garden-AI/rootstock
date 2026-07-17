@@ -135,7 +135,7 @@ class EnvironmentManager:
     """
     Manages pre-built rootstock environments and worker spawning.
 
-    In v0.4+, environments are pre-built virtual environments located in
+    Environments are pre-built virtual environments located in
     {root}/envs/{env_name}/. The environment source file is copied into
     the venv as env_source.py during build.
     """
@@ -177,7 +177,7 @@ class EnvironmentManager:
 
             raise RuntimeError(
                 f"Environment '{env_name}' not built. "
-                f"Run: rootstock build {env_name} --root {self.root}\n"
+                f"Run: rootstock install {env_name} --root {self.root}\n"
                 f"Available environments: {available}"
             )
 
