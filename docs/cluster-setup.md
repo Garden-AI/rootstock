@@ -43,6 +43,21 @@ The cluster registry (`rootstock/clusters.py`) is only a name → install-path b
 
 Users don't need to set environment variables — `RootstockCalculator(cluster="perlmutter", ...)` resolves both automatically.
 
+### Trust model
+
+Using a shared install means trusting its maintainer. An environment's
+`setup()` function is **maintainer-authored Python executed with the calling
+user's credentials** — inside the worker subprocess, as you, with your
+filesystem access and your HF tokens (forwarded so gated models work).
+Rootstock isolates *dependencies*, not *privilege*: the pre-built venv keeps
+MLIP stacks out of your Python environment, but it is not a sandbox.
+
+Concretely: only use installs whose maintainer you trust, exactly as you
+would a module farm or a shared conda env maintained by your facility. The
+permission recipe below makes installs world-*readable*, and only
+maintainers can modify `env_source.py` — so the code you run is the code the
+maintainer published, but what that code does runs as you.
+
 ### Permissions for shared installs
 
 Shared installs on HPC clusters should be **world-readable**: anyone on the cluster (not just members of the maintainer's project group) should be able to use the environments and model weights. Nothing in a rootstock install is sensitive — it's all derived from public PyPI packages and public model checkpoints. Maintainer secrets (API tokens) live in the maintainer's `~/.config/rootstock/config.toml`, not in the shared root.
