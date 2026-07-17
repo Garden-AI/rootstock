@@ -16,8 +16,10 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from .exceptions import RootstockError
 
-class CheckpointNotFoundError(LookupError):
+
+class CheckpointNotFoundError(RootstockError, LookupError):
     """Raised when a canonical checkpoint id is not declared by any installed env."""
 
 

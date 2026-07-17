@@ -15,6 +15,7 @@ from importlib.metadata import version as _pkg_version
 from .calculator import RootstockCalculator
 from .clusters import CLUSTER_REGISTRY, Cluster, get_cluster, get_root_for_cluster
 from .environment import CheckpointNotFoundError, list_declared_checkpoints
+from .exceptions import RootstockError
 from .server import RootstockServer, WorkerDiedError
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "RootstockCalculator",
     "RootstockServer",
     "WorkerDiedError",
+    "RootstockError",
     # Checkpoint discovery
     "list_declared_checkpoints",
     "CheckpointNotFoundError",

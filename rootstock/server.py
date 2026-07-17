@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .exceptions import RootstockError
 from .protocol import (
     IPIProtocol,
     SocketClosed,
@@ -26,7 +27,7 @@ from .protocol import (
 logger = logging.getLogger("rootstock.server")
 
 
-class WorkerDiedError(RuntimeError):
+class WorkerDiedError(RootstockError, RuntimeError):
     """The worker process failed at the socket level (died, hung, or the
     connection broke) — as opposed to reporting a calculation error in-band
     while staying healthy. The message carries the post-mortem: process fate
