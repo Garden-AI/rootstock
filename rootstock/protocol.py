@@ -13,9 +13,12 @@ Protocol Overview:
 Reference: https://docs.ipi-code.org/
 """
 
+import logging
 import socket
 
 import numpy as np
+
+logger = logging.getLogger("rootstock.protocol")
 
 # ASE units conversion
 BOHR_TO_ANGSTROM = 0.52917721067
@@ -46,15 +49,21 @@ class IPIProtocol:
 
         Args:
             sock: Connected socket object
-            log: Optional file object for logging (useful for debugging)
+            log: Optional file object for wire tracing. Only the worker side
+                passes this — worker logging is a file-object affair
+                controlled by ROOTSTOCK_WORKER_LOG (see worker_config.py).
+                When None (the client side), traces go to the
+                ``rootstock.protocol`` logger at DEBUG level.
         """
         self.socket = sock
         self.log = log
 
     def _log(self, *args):
-        """Write to log if logging is enabled."""
+        """Trace a wire event: to the worker's log file, or to stdlib logging."""
         if self.log is not None:
             print(*args, file=self.log, flush=True)
+        else:
+            logger.debug(" ".join(str(a) for a in args))
 
     # -------------------------------------------------------------------------
     # Low-level send/receive

@@ -6,6 +6,7 @@ sending atomic positions and receiving forces from a worker process.
 """
 
 import json
+import logging
 import os
 import shutil
 import socket
@@ -21,6 +22,8 @@ from .protocol import (
     create_private_socket_path,
     create_server_socket,
 )
+
+logger = logging.getLogger("rootstock.server")
 
 
 def _tail(text: str, limit: int = 8192) -> str:
@@ -78,12 +81,16 @@ class RootstockServer:
         socket_name: str = "rootstock",
         root: Path | None = None,
         cache_root: Path | None = None,
-        log=None,
         timeout: float = 60.0,
         setup_kwargs: dict | None = None,
     ):
         """
         Initialize the server.
+
+        Server-side diagnostics go to the ``rootstock.server`` logger
+        (lifecycle at INFO, detail at DEBUG); the wire trace goes to
+        ``rootstock.protocol`` at DEBUG. Enable with e.g.
+        ``logging.basicConfig(level=logging.DEBUG)``.
 
         Args:
             env_name: Name of pre-built environment (e.g., "mace")
@@ -93,7 +100,6 @@ class RootstockServer:
                 ipi_<name> inside a fresh private (0700) temp directory on
                 start(), so it is unreachable by other local users.
             root: Root directory for environments and cache (required)
-            log: Optional file object for protocol logging
             timeout: Socket timeout in seconds
             setup_kwargs: Extra keyword arguments forwarded to setup()
         """
@@ -105,7 +111,6 @@ class RootstockServer:
         # directory that stop() removes.
         self.socket_path: str | None = None
         self._socket_dir: str | None = None
-        self.log = log
         self.timeout = timeout
 
         self.env_name = env_name
@@ -144,14 +149,18 @@ class RootstockServer:
         self._server_socket = create_server_socket(self.socket_path, timeout=self.timeout)
         self._server_socket.listen(1)
 
-        if self.log:
-            print(f"Server listening on {self.socket_path}", file=self.log, flush=True)
+        logger.debug("Server listening on %s", self.socket_path)
 
         # Launch worker process
         self._start_worker()
 
-        if self.log:
-            print(f"Launched worker process (PID {self._process.pid})", file=self.log, flush=True)
+        logger.info(
+            "Launched worker (PID %s) for %s/%s on %s",
+            self._process.pid,
+            self.env_name,
+            self.checkpoint,
+            self.device,
+        )
 
         # Wait for worker to connect
         self._accept_connection()
@@ -176,18 +185,17 @@ class RootstockServer:
         cmd = self._env_manager.get_spawn_command(self.env_name, self._wrapper_path)
         env = self._env_manager.get_environment_variables()
 
-        if self.log:
-            print(f"Spawning worker: {' '.join(cmd)}", file=self.log, flush=True)
+        logger.debug("Spawning worker: %s", " ".join(cmd))
 
         # Redirect worker output to temp files rather than pipes. The worker
         # loads the model in setup() *before* connecting to the socket; a noisy
         # load that exceeds the OS pipe buffer (~64 KB) would block on the write
         # and never connect, deadlocking _accept_connection. Regular files have
-        # no such buffer limit, and we can still read them back to report errors
-        # if the worker dies. When logging, inherit the parent's fds as before.
-        if not self.log:
-            self._stdout_file = tempfile.TemporaryFile()
-            self._stderr_file = tempfile.TemporaryFile()
+        # no such buffer limit, and we read them back for the post-mortem when
+        # the worker fails. (The worker's own verbosity is controlled by the
+        # ROOTSTOCK_WORKER_LOG env var — see worker_config.py.)
+        self._stdout_file = tempfile.TemporaryFile()
+        self._stderr_file = tempfile.TemporaryFile()
 
         self._process = subprocess.Popen(
             cmd,
@@ -214,11 +222,10 @@ class RootstockServer:
         self._server_socket.settimeout(self.timeout)
         self._client_socket.settimeout(self.timeout)
 
-        self._protocol = IPIProtocol(self._client_socket, log=self.log)
+        self._protocol = IPIProtocol(self._client_socket)
         self._connected = True
 
-        if self.log:
-            print("Worker connected", file=self.log, flush=True)
+        logger.info("Worker connected")
 
     def _read_worker_output(self) -> tuple[str, str]:
         """Read the worker's captured stdout/stderr from the temp files.
@@ -265,10 +272,7 @@ class RootstockServer:
                 captured = True
                 lines.append(f"--- worker {name} (tail) ---\n{_tail(text)}")
         if not captured:
-            note = "(no worker output captured"
-            if self.log:
-                note += " — logging mode inherits the parent's stdio"
-            lines.append(note + ")")
+            lines.append("(worker produced no output)")
         return RuntimeError("\n".join(lines))
 
     def calculate(
@@ -403,8 +407,7 @@ class RootstockServer:
         self._connected = False
         self._protocol = None
 
-        if self.log:
-            print("Server stopped", file=self.log, flush=True)
+        logger.info("Server stopped")
 
     def __enter__(self):
         self.start()

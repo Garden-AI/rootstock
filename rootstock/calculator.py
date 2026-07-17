@@ -68,11 +68,15 @@ class RootstockCalculator(Calculator):
         cache_root: str | Path | None = None,
         device: str = "cuda",
         setup_kwargs: dict | None = None,
-        log=None,
         **kwargs,
     ):
         """
         Initialize the Rootstock calculator.
+
+        Diagnostics go to stdlib logging under the ``rootstock`` namespace:
+        server lifecycle on ``rootstock.server`` (INFO/DEBUG), the wire trace
+        on ``rootstock.protocol`` (DEBUG). Enable with e.g.
+        ``logging.basicConfig(level=logging.DEBUG)``.
 
         Args:
             checkpoint: Canonical checkpoint id (e.g., "mace-mp-0-medium",
@@ -90,9 +94,17 @@ class RootstockCalculator(Calculator):
             setup_kwargs: Extra keyword arguments forwarded to the env's setup()
                           function. May not contain "checkpoint" or "device" —
                           those are passed at the top level.
-            log: Optional file object for logging
             **kwargs: Additional arguments passed to ASE Calculator
         """
+        # ASE's Calculator quietly absorbs unknown kwargs as parameters, so a
+        # 0.x caller passing the removed log= would silently lose their logs.
+        if "log" in kwargs:
+            raise TypeError(
+                "RootstockCalculator no longer takes 'log'. Client-side "
+                "diagnostics use stdlib logging — e.g. "
+                "logging.basicConfig(level=logging.DEBUG) — and worker "
+                "verbosity is controlled by the ROOTSTOCK_WORKER_LOG env var."
+            )
         super().__init__(**kwargs)
 
         if setup_kwargs is None:
@@ -107,7 +119,6 @@ class RootstockCalculator(Calculator):
         self.checkpoint = checkpoint
         self.device = device
         self.setup_kwargs = setup_kwargs
-        self.log = log
 
         # Resolve the install root: the cluster name is only a name -> path
         # bootstrap. Everything else about the install (including where its
@@ -149,7 +160,6 @@ class RootstockCalculator(Calculator):
                 socket_name=self._socket_name,
                 root=self.root,
                 cache_root=self.cache_root,
-                log=self.log,
                 setup_kwargs=self.setup_kwargs,
             )
             self._server.start()
