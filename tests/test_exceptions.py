@@ -6,11 +6,14 @@ import pytest
 
 from rootstock import RootstockError
 from rootstock.environment import CheckpointNotFoundError
+from rootstock.manifest import ManifestError
 from rootstock.operations import OperationError
 from rootstock.server import WorkerDiedError
 
 
-@pytest.mark.parametrize("exc", [CheckpointNotFoundError, WorkerDiedError, OperationError])
+@pytest.mark.parametrize(
+    "exc", [CheckpointNotFoundError, WorkerDiedError, OperationError, ManifestError]
+)
 def test_domain_errors_share_the_base(exc):
     assert issubclass(exc, RootstockError)
 
@@ -21,6 +24,7 @@ def test_historic_stdlib_categories_preserved():
     assert issubclass(CheckpointNotFoundError, LookupError)
     assert issubclass(WorkerDiedError, RuntimeError)
     assert issubclass(OperationError, RuntimeError)
+    assert issubclass(ManifestError, RuntimeError)
 
 
 def test_catching_the_base_catches_a_raise():

@@ -23,11 +23,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import UserConfig
+from .exceptions import RootstockError
 
 SCHEMA_VERSION = 4
 
 
-class ManifestError(RuntimeError):
+class ManifestError(RootstockError, RuntimeError):
     """The manifest exists but cannot be used: corrupt JSON, missing required
     fields, or a schema this client has no path to. Deliberately NOT treated
     as "no manifest" — a silent fresh start would let the next save overwrite
