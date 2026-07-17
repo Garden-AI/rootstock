@@ -23,6 +23,14 @@ from .protocol import (
 )
 
 
+def _tail(text: str, limit: int = 8192) -> str:
+    """Last ``limit`` characters of ``text`` — worker output can be huge
+    (chatty model loads), and the useful part of a crash is at the end."""
+    if len(text) <= limit:
+        return text
+    return f"...[{len(text) - limit} chars truncated]...\n{text[-limit:]}"
+
+
 def _worker_error_from_extra(extra: bytes) -> str | None:
     """Extract an in-band worker error from the FORCEREADY extra field.
 
@@ -200,11 +208,7 @@ class RootstockServer:
             except TimeoutError:
                 # Check if process died
                 if self._process.poll() is not None:
-                    stdout, stderr = self._read_worker_output()
-                    raise RuntimeError(
-                        f"Worker process died with code {self._process.returncode}.\n"
-                        f"stdout: {stdout}\nstderr: {stderr}"
-                    )
+                    raise self._worker_failure_error("Worker process died before connecting")
 
         # Restore original timeout
         self._server_socket.settimeout(self.timeout)
@@ -234,6 +238,39 @@ class RootstockServer:
 
         return _drain(self._stdout_file), _drain(self._stderr_file)
 
+    def _worker_failure_error(self, context: str, exc: Exception | None = None) -> RuntimeError:
+        """Build a post-mortem error for a worker failure.
+
+        A worker that dies mid-``calculate`` (GPU OOM, batch-system kill)
+        surfaces as a bare socket timeout or closed socket while the actual
+        traceback sits unread in the captured output files — so read them on
+        *any* worker failure and report the cause, not just the symptom.
+        """
+        if self._process is None:
+            fate = "worker process was never started"
+        elif self._process.poll() is not None:
+            fate = f"worker process exited with code {self._process.returncode}"
+        else:
+            fate = "worker process is still running (hung, or blocked on the device?)"
+
+        lines = [f"{context}: {fate}."]
+        if exc is not None:
+            lines.append(f"Cause: {type(exc).__name__}: {exc}")
+
+        stdout, stderr = self._read_worker_output()
+        captured = False
+        for name, text in (("stdout", stdout), ("stderr", stderr)):
+            text = text.strip()
+            if text:
+                captured = True
+                lines.append(f"--- worker {name} (tail) ---\n{_tail(text)}")
+        if not captured:
+            note = "(no worker output captured"
+            if self.log:
+                note += " — logging mode inherits the parent's stdio"
+            lines.append(note + ")")
+        return RuntimeError("\n".join(lines))
+
     def calculate(
         self,
         positions: np.ndarray,
@@ -258,43 +295,50 @@ class RootstockServer:
         if not self._connected:
             raise RuntimeError("Server not connected. Call start() first.")
 
-        # Check worker status
-        self._protocol.send_status()
-        status = self._protocol.recv_status()
-
-        if status == "NEEDINIT":
-            # Send INIT with atomic species info
-            init_data = {
-                "numbers": atomic_numbers.tolist() if atomic_numbers is not None else None,
-                "pbc": [bool(p) for p in pbc] if pbc is not None else [True, True, True],
-            }
-            init_bytes = json.dumps(init_data).encode("utf-8")
-            self._protocol.send_init(bead_index=0, init_string=init_bytes)
-
-            # Track what we sent
-            self._init_sent = True
-            self._init_numbers = init_data["numbers"]
-            self._init_pbc = init_data["pbc"]
-
+        # A worker that dies mid-exchange (GPU OOM, batch-system kill) can't
+        # report in-band; the failure shows up here as a socket timeout,
+        # closed socket, or broken pipe. Turn that into a post-mortem that
+        # includes the worker's captured output instead of a bare socket error.
+        try:
+            # Check worker status
             self._protocol.send_status()
             status = self._protocol.recv_status()
 
-        if status != "READY":
-            raise RuntimeError(f"Worker not ready, status: {status}")
+            if status == "NEEDINIT":
+                # Send INIT with atomic species info
+                init_data = {
+                    "numbers": atomic_numbers.tolist() if atomic_numbers is not None else None,
+                    "pbc": [bool(p) for p in pbc] if pbc is not None else [True, True, True],
+                }
+                init_bytes = json.dumps(init_data).encode("utf-8")
+                self._protocol.send_init(bead_index=0, init_string=init_bytes)
 
-        # Send positions
-        self._protocol.send_posdata(cell, positions)
+                # Track what we sent
+                self._init_sent = True
+                self._init_numbers = init_data["numbers"]
+                self._init_pbc = init_data["pbc"]
 
-        # Check status - worker should now be calculating
-        self._protocol.send_status()
-        status = self._protocol.recv_status()
+                self._protocol.send_status()
+                status = self._protocol.recv_status()
 
-        if status != "HAVEDATA":
-            raise RuntimeError(f"Worker failed to calculate, status: {status}")
+            if status != "READY":
+                raise RuntimeError(f"Worker not ready, status: {status}")
 
-        # Get results
-        self._protocol.send_getforce()
-        energy, forces, virial, extra = self._protocol.recv_forceready()
+            # Send positions
+            self._protocol.send_posdata(cell, positions)
+
+            # Check status - worker should now be calculating
+            self._protocol.send_status()
+            status = self._protocol.recv_status()
+
+            if status != "HAVEDATA":
+                raise RuntimeError(f"Worker failed to calculate, status: {status}")
+
+            # Get results
+            self._protocol.send_getforce()
+            energy, forces, virial, extra = self._protocol.recv_forceready()
+        except (TimeoutError, SocketClosed, OSError) as exc:
+            raise self._worker_failure_error("Worker failed mid-calculation", exc) from exc
 
         error = _worker_error_from_extra(extra)
         if error is not None:
