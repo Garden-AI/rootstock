@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rootstock.commands.manifest import _refresh_manifest_environments
 from rootstock.manifest import SCHEMA_VERSION, Maintainer, Manifest, compute_source_hash
+from rootstock.operations import refresh_manifest_environments
 
 ENV_SOURCE = (
     "# /// script\n"
@@ -40,19 +40,19 @@ def _empty_manifest(root: Path) -> Manifest:
 
 def test_refresh_records_lock_hash(tmp_path: Path, monkeypatch):
     # Version probing shells out to the env's python; not under test here.
-    monkeypatch.setattr("rootstock.commands.manifest.get_installed_versions", lambda *a, **k: {})
+    monkeypatch.setattr("rootstock.operations.get_installed_versions", lambda *a, **k: {})
     env_dir = _make_built_env(tmp_path, "locked", with_lock=True)
 
-    manifest = _refresh_manifest_environments(_empty_manifest(tmp_path), tmp_path)
+    manifest = refresh_manifest_environments(_empty_manifest(tmp_path), tmp_path)
 
     expected = compute_source_hash(env_dir / "env_source.py.lock")
     assert manifest.environments["locked"].lock_hash == expected
 
 
 def test_refresh_without_lockfile_records_none(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("rootstock.commands.manifest.get_installed_versions", lambda *a, **k: {})
+    monkeypatch.setattr("rootstock.operations.get_installed_versions", lambda *a, **k: {})
     _make_built_env(tmp_path, "legacy", with_lock=False)
 
-    manifest = _refresh_manifest_environments(_empty_manifest(tmp_path), tmp_path)
+    manifest = refresh_manifest_environments(_empty_manifest(tmp_path), tmp_path)
 
     assert manifest.environments["legacy"].lock_hash is None

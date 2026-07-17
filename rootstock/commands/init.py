@@ -10,8 +10,8 @@ from ..clusters import CLUSTER_REGISTRY, get_cluster_for_root
 from ..config import DEFAULT_CONFIG_FILE, load_config, save_config
 from ..layout import write_layout_marker
 from ..manifest import create_manifest, save_manifest
+from ..operations import refresh_manifest_environments
 from .common import ROOTSTOCK_ROOT_ENV
-from .manifest import _refresh_manifest_environments
 
 
 def prompt_with_default(prompt: str, default: str | None = None) -> str | None:
@@ -122,6 +122,7 @@ def cmd_init(args) -> int:
     if not args.skip_dirs:
         print("\nCreating directory structure...")
         from ..clusters import get_cluster
+
         if cluster:
             cache_root = get_cluster(cluster).resolved_cache_root
         else:
@@ -158,7 +159,7 @@ def cmd_init(args) -> int:
         print("\nInitializing manifest...")
         manifest = create_manifest(root, cluster, config)
         # Scan for existing built environments
-        manifest = _refresh_manifest_environments(manifest, root)
+        manifest = refresh_manifest_environments(manifest, root)
         save_manifest(manifest, root)
         print(f"  Created: {root}/manifest.json")
         if manifest.environments:

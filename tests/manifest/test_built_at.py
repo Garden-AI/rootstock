@@ -13,14 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from rootstock.commands.add import _ensure_manifest_entry
-from rootstock.commands.manifest import _refresh_manifest_environments
 from rootstock.manifest import (
     SCHEMA_VERSION,
     Maintainer,
     Manifest,
     built_at_estimate,
 )
+from rootstock.operations import _ensure_manifest_entry, refresh_manifest_environments
 
 ENV_SOURCE = (
     "# /// script\n"
@@ -36,9 +35,7 @@ BUILD_TIME = 1735689600  # 2025-01-01T00:00:00Z
 @pytest.fixture(autouse=True)
 def _no_version_probe(monkeypatch):
     """Version probing shells out to the env's python; not under test here."""
-    monkeypatch.setattr(
-        "rootstock.commands.manifest.get_installed_versions", lambda *a, **k: {}
-    )
+    monkeypatch.setattr("rootstock.operations.get_installed_versions", lambda *a, **k: {})
 
 
 def _make_built_env(root: Path, name: str = "mace") -> Path:
@@ -68,20 +65,20 @@ def _manifest(root: Path, environments=None) -> Manifest:
 
 def test_refresh_stamps_built_env_to_now(tmp_path):
     _make_built_env(tmp_path)
-    manifest = _refresh_manifest_environments(_manifest(tmp_path), tmp_path)
+    manifest = refresh_manifest_environments(_manifest(tmp_path), tmp_path)
     old = manifest.environments["mace"].built_at
 
-    manifest = _refresh_manifest_environments(manifest, tmp_path, built_env="mace")
+    manifest = refresh_manifest_environments(manifest, tmp_path, built_env="mace")
 
     assert manifest.environments["mace"].built_at > old
 
 
 def test_refresh_preserves_built_at_for_known_env(tmp_path):
     _make_built_env(tmp_path)
-    manifest = _refresh_manifest_environments(_manifest(tmp_path), tmp_path)
+    manifest = refresh_manifest_environments(_manifest(tmp_path), tmp_path)
     recorded = manifest.environments["mace"].built_at
 
-    manifest = _refresh_manifest_environments(manifest, tmp_path)
+    manifest = refresh_manifest_environments(manifest, tmp_path)
 
     assert manifest.environments["mace"].built_at == recorded
 
@@ -89,7 +86,7 @@ def test_refresh_preserves_built_at_for_known_env(tmp_path):
 def test_refresh_estimates_built_at_from_dir_mtime_for_unknown_env(tmp_path):
     env_dir = _make_built_env(tmp_path)
 
-    manifest = _refresh_manifest_environments(_manifest(tmp_path), tmp_path)
+    manifest = refresh_manifest_environments(_manifest(tmp_path), tmp_path)
 
     built_at = manifest.environments["mace"].built_at
     assert built_at == built_at_estimate(env_dir)

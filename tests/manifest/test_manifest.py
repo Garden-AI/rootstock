@@ -61,9 +61,11 @@ def test_checkpoint_info_defaults_to_none():
 
 
 def test_environment_info_with_dict_checkpoints_round_trip():
-    env = _make_env(**{
-        "mace-mp-0-medium": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
-    })
+    env = _make_env(
+        **{
+            "mace-mp-0-medium": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
+        }
+    )
     restored = EnvironmentInfo.from_dict(env.to_dict())
     assert "mace-mp-0-medium" in restored.checkpoints
     assert restored.checkpoints["mace-mp-0-medium"].fetched_at == "2026-01-02T00:00:00Z"
@@ -84,16 +86,20 @@ def test_environment_info_without_lock_hash_loads_as_none():
 
 
 def test_manifest_round_trip_preserves_checkpoint_metadata():
-    m = _make_manifest({
-        "mace": _make_env(**{
-            "mace-mp-0-medium": CheckpointInfo(
-                fetched_at="2026-01-02T00:00:00Z",
-                verified_at="2026-01-03T00:00:00Z",
-                verified_device="cuda",
-            ),
-            "mace-mp-0-small": CheckpointInfo(),
-        })
-    })
+    m = _make_manifest(
+        {
+            "mace": _make_env(
+                **{
+                    "mace-mp-0-medium": CheckpointInfo(
+                        fetched_at="2026-01-02T00:00:00Z",
+                        verified_at="2026-01-03T00:00:00Z",
+                        verified_device="cuda",
+                    ),
+                    "mace-mp-0-small": CheckpointInfo(),
+                }
+            )
+        }
+    )
     restored = Manifest.from_dict(m.to_dict())
     ckpts = restored.environments["mace"].checkpoints
     assert ckpts["mace-mp-0-medium"].verified_device == "cuda"
