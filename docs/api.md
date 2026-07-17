@@ -70,6 +70,17 @@ with RootstockCalculator(...) as calc:
 # Worker process is automatically terminated when exiting the context
 ```
 
+### Logging
+
+Client-side diagnostics use stdlib logging under the `rootstock` namespace — server lifecycle on `rootstock.server` (INFO/DEBUG), the full i-PI wire trace on `rootstock.protocol` (DEBUG):
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)  # or logging.getLogger("rootstock").setLevel(...)
+```
+
+The worker subprocess is separate: its verbosity is controlled by the `ROOTSTOCK_WORKER_LOG` environment variable (`stderr`, `stdout`, or a file path), and its output is captured and shown automatically when the worker fails.
+
 ## Available models
 
 What is deployed and verified per cluster changes over time. The authoritative, current list lives in the [Matter Model Almanac](https://garden-ai.github.io/almanac).
