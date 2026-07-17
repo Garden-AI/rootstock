@@ -18,7 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -160,7 +160,7 @@ class Maintainer:
     email: str
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "email": self.email}
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> Maintainer:
@@ -177,12 +177,7 @@ class CheckpointInfo:
     last_error: str | None = None       # most recent error from add or smoke-test
 
     def to_dict(self) -> dict:
-        return {
-            "fetched_at": self.fetched_at,
-            "verified_at": self.verified_at,
-            "verified_device": self.verified_device,
-            "last_error": self.last_error,
-        }
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> CheckpointInfo:
@@ -208,23 +203,17 @@ class EnvironmentInfo:
     source: str  # Full source code of the environment file
     python_requires: str  # ">=3.11"
     dependencies: dict[str, str]  # {"mace-torch": "0.3.6"}
-    checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
     # sha256 of the env's uv lockfile (envs/<name>/env_source.py.lock).
     # None means the env was built without one — either by a pre-lockfile
     # rootstock or because the env defeats universal resolution — and can
     # only be re-resolved, not faithfully rebuilt.
     lock_hash: str | None = None
+    # Field order is the JSON key order (asdict): lock_hash stays ahead of
+    # checkpoints to match the layout pushed manifests have always had.
+    checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {
-            "built_at": self.built_at,
-            "source_hash": self.source_hash,
-            "source": self.source,
-            "python_requires": self.python_requires,
-            "dependencies": self.dependencies,
-            "lock_hash": self.lock_hash,
-            "checkpoints": {name: ckpt.to_dict() for name, ckpt in self.checkpoints.items()},
-        }
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> EnvironmentInfo:
@@ -265,16 +254,7 @@ class Manifest:
     environments: dict[str, EnvironmentInfo] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {
-            "schema_version": self.schema_version,
-            "cluster": self.cluster,
-            "root": self.root,
-            "maintainer": self.maintainer.to_dict(),
-            "rootstock_version": self.rootstock_version,
-            "python_version": self.python_version,
-            "last_updated": self.last_updated,
-            "environments": {name: env.to_dict() for name, env in self.environments.items()},
-        }
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> Manifest:
