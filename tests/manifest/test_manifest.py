@@ -106,6 +106,39 @@ def test_manifest_round_trip_preserves_checkpoint_metadata():
     assert ckpts["mace-mp-0-small"].fetched_at is None
 
 
+def test_to_dict_key_layout_is_stable():
+    """Pushed manifests are consumed downstream (the Almanac renders them) —
+    the JSON key layout is a contract, not an implementation detail."""
+    data = _make_manifest({"mace": _make_env(**{"mace-mp-0-small": CheckpointInfo()})}).to_dict()
+    assert list(data) == [
+        "schema_version",
+        "cluster",
+        "root",
+        "maintainer",
+        "rootstock_version",
+        "python_version",
+        "last_updated",
+        "environments",
+    ]
+    assert list(data["maintainer"]) == ["name", "email"]
+    env = data["environments"]["mace"]
+    assert list(env) == [
+        "built_at",
+        "source_hash",
+        "source",
+        "python_requires",
+        "dependencies",
+        "lock_hash",
+        "checkpoints",
+    ]
+    assert list(env["checkpoints"]["mace-mp-0-small"]) == [
+        "fetched_at",
+        "verified_at",
+        "verified_device",
+        "last_error",
+    ]
+
+
 def test_from_dict_migrates_v2():
     """Old manifests load via migration instead of demanding a reinstall.
 
