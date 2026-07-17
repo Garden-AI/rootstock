@@ -59,9 +59,10 @@ source ~/envs/calphy/bin/activate
 cd ~/lammps/build
 cmake . -DPython_EXECUTABLE=$(which python)
 make install-python
-python -c "from lammps import lammps; \
-    print(lammps(cmdargs=['-log','none','-screen','none']).has_style('pair','rootstock'))"
-# True
+python -c "from lammps import lammps; l = lammps(cmdargs=['-log','none','-screen','none']); \
+    print(l.has_style('pair','rootstock'), l.has_style('fix','ti/spring'))"
+# True True — first is the rootstock style, second is calphy's switching fix
+# (EXTRA-FIX package; False means the build is missing the PKG_* flags above)
 ```
 
 If the make step prints "Installing wheel into system site-packages folder",
@@ -113,6 +114,16 @@ forward/backward switching error reported in `fe-*/calphy.log` is small
 relative to the free energy.
 
 ## Troubleshooting
+
+- `Unrecognized fix style 'ti/spring' ... EXTRA-FIX package` (mid-run, at the
+  switching stage) → the LAMMPS build is missing the `PKG_*` flags from
+  step 2. Rerun step 2's cmake with all flags, `make -j 8`, then redo step 3.
+- Calphy crashes but the Slurm job keeps RUNNING at 0% GPU (cluster
+  zero-utilization emails) → leftover LAMMPS/worker processes outlive the
+  crashed kernel. Both example job paths carry a traceback watchdog that
+  ends the job within ~3 minutes of a crash; if you removed it or wrote
+  your own variant, `scancel` manually. The traceback is in
+  `fe-*.sub.slurm.err` (slurm scheduler) or `local.err` (local scheduler).
 
 - `OPAL ERROR: Unreachable in file ext3x_client.c` / "appears to have been
   direct launched using srun" → calphy's launcher uses srun inside Slurm

@@ -33,6 +33,10 @@ calculations:
         - module purge
         - module load anaconda3/2024.10 gcc-toolset/14 openmpi/gcc/4.1.8
         - conda activate calphy
+        # Watchdog: a crashed kernel hangs instead of exiting, burning the
+        # walltime at 0% GPU. Cancel the job when a traceback appears.
+        # Must come before the unset line (needs $SLURM_JOB_ID).
+        - '( while ! grep -q "Traceback (most recent call last)" ./*.slurm.err 2>/dev/null; do sleep 60; done; sleep 120; scancel $SLURM_JOB_ID ) &'
         - unset $(env | grep -o '^SLURM_[A-Za-z0-9_]*')
     reference_phase: solid
     repeat: [5, 5, 5]

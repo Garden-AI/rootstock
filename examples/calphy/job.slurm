@@ -19,3 +19,12 @@ conda activate calphy
 unset $(env | grep -o '^SLURM_[A-Za-z0-9_]*')
 
 calphy -i input.yaml
+
+# calphy backgrounds its kernel and returns immediately; hold the job open
+# until the kernel exits. Bail out if the kernel has crashed — a crashed
+# kernel hangs instead of exiting and would burn the walltime at 0% GPU.
+sleep 30
+while pgrep -u $USER -f calphy_kernel > /dev/null; do
+    grep -q "Traceback (most recent call last)" local.err 2>/dev/null && break
+    sleep 60
+done
