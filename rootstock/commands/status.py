@@ -88,12 +88,20 @@ def cmd_status(args) -> int:
         for name in sorted(state.manifest_only_envs):
             print(f"  {name:<20} [manifest only — not on disk]")
 
-    # Show cache sizes. Cache may live under the install root or under a
-    # separate cluster-registered cache_root. Some libraries respect
-    # XDG_CACHE_HOME and write under cache/; others hardcode ~/.cache/ or
-    # ~/.matgl/ etc. and write under our redirected home/. Sum both.
+    # Show the cache location; computing sizes is opt-in. Cache may live
+    # under the install root or under a separate declared cache_root. Some
+    # libraries respect XDG_CACHE_HOME and write under cache/; others
+    # hardcode ~/.cache/ or ~/.matgl/ etc. and write under our redirected
+    # home/ — sizing sums both, which means a full rglob+stat over the model
+    # cache: minutes of metadata traffic on Lustre/GPFS for big HF caches,
+    # so it only runs with --sizes.
     cache_root = resolve_cache_root(root)
     print(f"\nCache: {cache_root}")
+
+    if not getattr(args, "sizes", False):
+        print("  (pass --sizes to compute per-directory cache sizes)")
+        print(f"\nConfig file: {DEFAULT_CONFIG_FILE}")
+        return 0
 
     locations: list = []
     for parent in (cache_root / "cache", cache_root / "home" / ".cache"):

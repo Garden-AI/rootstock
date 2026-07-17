@@ -173,3 +173,46 @@ def test_status_human_view_flags_drift_and_manifest_only(tmp_path: Path, capsys)
     out = capsys.readouterr().out
     assert "differs from the manifest" in out
     assert "manifest only — not on disk" in out
+
+
+def test_status_skips_cache_sizes_by_default(tmp_path: Path, capsys, monkeypatch):
+    """The rglob+stat sweep is minutes on Lustre for big HF caches — it must
+    not run unless asked."""
+    _make_built_env(tmp_path)
+    cache_dir = tmp_path / "cache" / "huggingface"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "weights.bin").write_bytes(b"x" * 2048)
+
+    sweep = []
+    real_rglob = Path.rglob
+
+    def counting_rglob(self, pattern):
+        sweep.append(self)
+        return real_rglob(self, pattern)
+
+    monkeypatch.setattr(Path, "rglob", counting_rglob)
+
+    rc = cmd_status(_args(tmp_path, as_json=False))
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "--sizes" in out  # points the user at the opt-in
+    assert "MB" not in out
+    assert sweep == []  # no recursive sweep happened
+
+
+def test_status_sizes_flag_computes_cache_sizes(tmp_path: Path, capsys):
+    _make_built_env(tmp_path)
+    cache_dir = tmp_path / "cache" / "huggingface"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "weights.bin").write_bytes(b"x" * 2048)
+
+    args = _args(tmp_path, as_json=False)
+    args.sizes = True
+    rc = cmd_status(args)
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "huggingface/" in out
+    assert "MB" in out
+    assert "TOTAL" in out

@@ -272,6 +272,14 @@ def main():
         action="store_true",
         help="Output the manifest as JSON (with computed verified_current per checkpoint)",
     )
+    status_parser.add_argument(
+        "--sizes",
+        action="store_true",
+        help=(
+            "Also compute per-directory cache sizes (full recursive stat of the "
+            "model cache — can take minutes on Lustre/GPFS for large caches)"
+        ),
+    )
     status_parser.set_defaults(func=cmd_status)
 
     # list command
