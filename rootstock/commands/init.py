@@ -146,7 +146,9 @@ def cmd_init(args) -> int:
                 print(f"  Exists:  {dir_path}")
 
         try:
-            write_layout_marker(root)
+            # Declare the cache root so the install is self-describing —
+            # readers prefer this over the baked-in cluster registry.
+            write_layout_marker(root, cache_root=cache_root)
             print(f"  Created: {root / 'layout.json'}")
         except PermissionError:
             print(f"  Skipped (no permission): {root / 'layout.json'}")

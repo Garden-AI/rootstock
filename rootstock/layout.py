@@ -30,6 +30,16 @@ LAYOUT_VERSION = 1
 MARKER_NAME = "layout.json"
 
 
+def _read_marker(root: Path) -> dict:
+    """Best-effort read of {root}/layout.json; {} when absent or corrupt."""
+    marker = Path(root) / MARKER_NAME
+    try:
+        data = json.loads(marker.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def read_layout_version(root: Path) -> int | None:
     """Return the root's recorded layout version, or None if unrecorded.
 
@@ -38,12 +48,49 @@ def read_layout_version(root: Path) -> int | None:
     reads as None: a broken metadata file must not brick an otherwise
     working install.
     """
-    marker = Path(root) / MARKER_NAME
-    try:
-        version = json.loads(marker.read_text()).get("layout_version")
-    except (OSError, json.JSONDecodeError, AttributeError):
-        return None
+    version = _read_marker(root).get("layout_version")
     return version if isinstance(version, int) else None
+
+
+def read_declared_cache_root(root: Path) -> Path | None:
+    """Return the cache root this install declares for itself, if any.
+
+    The declaration lives in {root}/layout.json — it is layout information:
+    where the cache/home half of the install is, which may be a different
+    filesystem than the install root (e.g. Perlmutter: code on CFS, cache on
+    PSCRATCH). Installs written before the declaration existed return None.
+    """
+    declared = _read_marker(root).get("cache_root")
+    return Path(declared) if isinstance(declared, str) and declared else None
+
+
+def resolve_cache_root(root: Path, explicit: Path | str | None = None) -> Path:
+    """Resolve the model-weight cache root for an install root.
+
+    Resolution order:
+      1. an explicit override from the caller (CLI flag / calculator kwarg),
+      2. the install's own declaration in {root}/layout.json,
+      3. legacy fallback for installs predating the declaration: the cluster
+         registry's entry for this root (reverse lookup),
+      4. the install root itself.
+
+    Every entry point resolves through here, so the CLI and the calculator
+    can't disagree about where an install's cache lives.
+    """
+    root = Path(root)
+    if explicit is not None:
+        return Path(explicit)
+
+    declared = read_declared_cache_root(root)
+    if declared is not None:
+        return declared
+
+    from .clusters import get_cluster, get_cluster_for_root
+
+    cluster_name = get_cluster_for_root(root)
+    if cluster_name is not None:
+        return get_cluster(cluster_name).resolved_cache_root
+    return root
 
 
 def ensure_layout_compatible(root: Path) -> None:
@@ -61,19 +108,27 @@ def ensure_layout_compatible(root: Path) -> None:
         )
 
 
-def write_layout_marker(root: Path) -> None:
-    """Record the current layout version in {root}/layout.json.
+def write_layout_marker(root: Path, cache_root: Path | str | None = None) -> None:
+    """Record the layout version — and the install's cache root — in
+    {root}/layout.json.
 
     Called from maintainer commands that write the root anyway (install,
-    init). No-op when the recorded version is already current, so repeated
-    installs don't churn the file. Atomic write, mode honoring the process
-    umask — same recipe as save_manifest.
+    init). ``cache_root`` records where this install keeps its model-weight
+    cache; when omitted, an existing declaration is preserved. No-op when
+    nothing would change, so repeated installs don't churn the file. Atomic
+    write, mode honoring the process umask — same recipe as save_manifest.
     """
     from . import __version__
     from .manifest import now_iso
 
     root = Path(root)
-    if read_layout_version(root) == LAYOUT_VERSION:
+    declared = str(cache_root) if cache_root is not None else None
+    if declared is None:
+        existing = read_declared_cache_root(root)
+        declared = str(existing) if existing is not None else None
+
+    current = _read_marker(root)
+    if current.get("layout_version") == LAYOUT_VERSION and current.get("cache_root") == declared:
         return
 
     data = {
@@ -81,6 +136,8 @@ def write_layout_marker(root: Path) -> None:
         "written_by": f"rootstock {__version__}",
         "written_at": now_iso(),
     }
+    if declared is not None:
+        data["cache_root"] = declared
 
     root.mkdir(parents=True, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(dir=root, suffix=".json")

@@ -30,7 +30,7 @@ with RootstockCalculator(
 | `checkpoint` | `str` | Yes | Canonical checkpoint id (e.g., `"mace-mp-0-medium"`, `"uma-s-1p1"`). The hosting env is resolved automatically by walking the installed envs and matching against each env's `CHECKPOINTS` table |
 | `cluster` | `str` | Yes* | Cluster name (e.g., `"della"`, `"perlmutter"`) |
 | `root` | `str` | Yes* | Custom install-root path instead of a known cluster |
-| `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. Defaults to the cluster's registered `cache_root`, or to `root` if no cluster is in play |
+| `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. When omitted, the install's own declaration (`{root}/layout.json`) decides, falling back to the cluster registry for legacy roots, then to `root` |
 | `device` | `str` | No | `"cuda"` (default) or `"cpu"` |
 | `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `checkpoint` or `device` |
 
@@ -42,10 +42,11 @@ with RootstockCalculator(
 # Using a known cluster
 RootstockCalculator(cluster="della", checkpoint="mace-mp-0-medium")
 
-# Perlmutter — install root and cache root come from the registry
+# Perlmutter — cluster name bootstraps the install path; the install itself
+# declares where its cache lives (layout.json), e.g. PSCRATCH
 RootstockCalculator(cluster="perlmutter", checkpoint="uma-s-1p1")
 
-# Custom install root (cache_root defaults to the install root)
+# Custom install root (cache_root from the install's declaration, else the root)
 RootstockCalculator(root="/scratch/gpfs/specific/install/rootstock", checkpoint="mace-mp-0-medium")
 
 # Explicit split between install root and cache root
