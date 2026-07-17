@@ -15,9 +15,9 @@ from ..manifest import (
     now_iso,
     save_manifest,
 )
+from ..operations import update_and_push_manifest
 from ..verify import verify_checkpoint
 from .common import get_root_or_exit, resolve_cache_root
-from .manifest import update_and_push_manifest
 
 
 def _select(
@@ -92,15 +92,17 @@ def cmd_smoke_test(args) -> int:
             ckpt.last_error = f"smoke-test: {err}"
             n_failed += 1
 
-        results.append({
-            "env": env_name,
-            "checkpoint": ckpt_name,
-            "device": device,
-            "passed": ok,
-            "elapsed_s": round(elapsed, 2),
-            "error": err,
-            "verified_current": is_verified(env, ckpt),
-        })
+        results.append(
+            {
+                "env": env_name,
+                "checkpoint": ckpt_name,
+                "device": device,
+                "passed": ok,
+                "elapsed_s": round(elapsed, 2),
+                "error": err,
+                "verified_current": is_verified(env, ckpt),
+            }
+        )
 
         if not json_out:
             verdict = "PASS" if ok else "FAIL"
@@ -115,12 +117,17 @@ def cmd_smoke_test(args) -> int:
     total_elapsed = time.monotonic() - total_start
 
     if json_out:
-        print(json.dumps({
-            "results": results,
-            "passed": n_passed,
-            "failed": n_failed,
-            "elapsed_s": round(total_elapsed, 2),
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "results": results,
+                    "passed": n_passed,
+                    "failed": n_failed,
+                    "elapsed_s": round(total_elapsed, 2),
+                },
+                indent=2,
+            )
+        )
     else:
         print(f"\n{n_passed} passed, {n_failed} failed in {total_elapsed:.1f}s")
 

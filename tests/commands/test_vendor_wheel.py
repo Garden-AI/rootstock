@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from rootstock.commands.install import _vendor_rootstock_wheel
+from rootstock.operations import _vendor_rootstock_wheel
 
 WHEEL_BYTES = b"not-really-a-wheel-but-bytes-are-bytes"
 VERSION = "9.9.9"
@@ -154,22 +154,15 @@ def test_install_step_prefers_vendored_wheel(tmp_path, monkeypatch, release_vers
         result.stdout = ""
         return result
 
-    monkeypatch.setattr("rootstock.commands.install.subprocess.run", fake_run)
-    monkeypatch.setattr("rootstock.commands.install.shutil.copy", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "rootstock.commands.install._precompile_environment", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        "rootstock.commands.manifest.update_and_push_manifest", lambda *a, **k: None
-    )
+    monkeypatch.setattr("rootstock.operations.subprocess.run", fake_run)
+    monkeypatch.setattr("rootstock.operations.shutil.copy", lambda *a, **k: None)
+    monkeypatch.setattr("rootstock.operations._precompile_environment", lambda *a, **k: None)
+    monkeypatch.setattr("rootstock.operations.update_and_push_manifest", lambda *a, **k: None)
 
-    from rootstock.commands.install import _install_single_environment
+    from rootstock.operations import install_environment
 
-    rc = _install_single_environment(
-        root=tmp_path, source=str(env_source), force=False, verbose=False
-    )
+    install_environment(root=tmp_path, source=str(env_source), force=False, verbose=False)
 
-    assert rc == 0
     wheel_path = str(tmp_path / "wheels" / FILENAME)
     pip_installs = [c for c in captured if c[:3] == ["uv", "pip", "install"]]
     assert pip_installs and pip_installs[0][-1] == wheel_path

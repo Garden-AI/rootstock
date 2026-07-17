@@ -55,10 +55,10 @@ class RootstockMLIPxModel(zntrack.Node):
     """
 
     checkpoint: str = zntrack.params()
-    cluster: t.Optional[str] = zntrack.params(None)
-    root: t.Optional[str] = zntrack.params(None)
+    cluster: str | None = zntrack.params(None)
+    root: str | None = zntrack.params(None)
     device: str = zntrack.params("cpu")  # RootstockCalculator defaults to cuda; we don't.
-    setup_kwargs: t.Optional[dict] = zntrack.params(None)
+    setup_kwargs: dict | None = zntrack.params(None)
 
     def run(self) -> None:
         # Pure calculator provider; `run` exists to satisfy zntrack and to

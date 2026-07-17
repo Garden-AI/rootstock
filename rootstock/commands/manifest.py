@@ -4,183 +4,12 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
 from ..client import RootstockClient
-from ..clusters import get_cluster_for_root
 from ..config import load_config
-from ..manifest import (
-    EnvironmentInfo,
-    Manifest,
-    built_at_estimate,
-    create_manifest,
-    get_installed_versions,
-    load_manifest,
-    now_iso,
-    save_manifest,
-)
-from ..pep723 import get_dependencies, get_requires_python
+from ..manifest import create_manifest, load_manifest, save_manifest
+from ..operations import refresh_manifest_environments
 from .common import get_root_or_exit
-
-
-def update_and_push_manifest(
-    root: Path,
-    cluster: str | None = None,
-    quiet: bool = False,
-    push: bool = True,
-    built_env: str | None = None,
-) -> bool:
-    """
-    Update manifest with current state and optionally push to backend.
-
-    Called after any state-changing operation.
-
-    Args:
-        root: Rootstock root directory
-        cluster: Cluster name (optional, will try to detect)
-        quiet: Suppress output
-        push: Whether to push to backend (default True)
-        built_env: Env name that was (re)built by the calling command, if any;
-            its built_at is stamped to now
-
-    Returns:
-        True if push succeeded or was skipped (no API key), False on error
-    """
-    config = load_config()
-
-    # Load existing manifest first
-    manifest = load_manifest(root)
-
-    # Determine cluster: provided > existing manifest > detect from path
-    if cluster is None:
-        if manifest is not None:
-            cluster = manifest.cluster
-        else:
-            cluster = get_cluster_for_root(root)
-
-    if cluster is None:
-        if not quiet:
-            print(
-                "Warning: Cannot update manifest - cluster not specified and "
-                "root doesn't match any known cluster. "
-                "Run 'rootstock manifest init --cluster <name>' first.",
-                file=sys.stderr,
-            )
-        return False
-
-    # Create manifest if it doesn't exist
-    if manifest is None:
-        manifest = create_manifest(root, cluster, config)
-
-    # Refresh environment info from current state
-    manifest = _refresh_manifest_environments(manifest, root, built_env=built_env)
-
-    # Save locally
-    save_manifest(manifest, root)
-
-    # Skip push if explicitly disabled
-    if not push:
-        if not quiet:
-            print("Manifest saved locally (push disabled via --no-push).")
-        return True
-
-    # Push to backend only if user is maintainer and API is configured
-    if config.is_maintainer and config.is_push_enabled():
-        client = RootstockClient(config)
-        success, message = client.push_manifest(manifest)
-        if not quiet:
-            if success:
-                print(f"Manifest pushed: {message}")
-            else:
-                print(
-                    f"Warning: Failed to push manifest: {message}",
-                    file=sys.stderr,
-                )
-                print(
-                    "Manifest saved locally. Run 'rootstock manifest push' to retry.",
-                    file=sys.stderr,
-                )
-        return success
-    elif not config.is_maintainer and not quiet:
-        print("Manifest saved locally (not pushing - you are not the maintainer).")
-
-    return True  # Not maintainer or no API key = skip push (not an error)
-
-
-def _refresh_manifest_environments(
-    manifest: Manifest, root: Path, built_env: str | None = None
-) -> Manifest:
-    """
-    Update manifest with current environment state.
-
-    Reads the installation through the InstallState reader: the filesystem
-    decides which envs the manifest records, and records for envs no longer
-    on disk are dropped.
-
-    built_at semantics: `built_env` (the env the calling command just built)
-    is stamped now; envs already in the manifest keep their recorded time; an
-    env the manifest has never seen gets the env directory's mtime as a
-    best-effort estimate — never `now`, which would fake freshness into the
-    `verified_at > built_at` staleness comparison.
-    """
-    from .. import __version__
-    from ..install_state import read_install_state
-
-    # Update rootstock version
-    manifest.rootstock_version = __version__
-
-    state = read_install_state(root, manifest=manifest)
-
-    for env_name, env in state.envs.items():
-        if env.source_file is None:
-            # Built but missing env_source.py — nothing derivable to record;
-            # keep whatever record already exists.
-            continue
-
-        source_content = env.source_file.read_text()
-
-        # Get python requires from source
-        python_requires = get_requires_python(env.source_file) or ">=3.11"
-
-        # Get direct dependencies from source
-        direct_deps = get_dependencies(env.source_file)
-        # Always track rootstock itself
-        if "rootstock" not in [d.lower() for d in direct_deps]:
-            direct_deps.append("rootstock")
-
-        # Get installed package versions (filtered to direct dependencies)
-        dependencies = get_installed_versions(env.path, only_packages=direct_deps)
-
-        # Get checkpoints (from existing manifest if available)
-        checkpoints = env.record.checkpoints if env.record else {}
-
-        if env_name == built_env:
-            built_at = now_iso()
-        elif env.record:
-            built_at = env.record.built_at
-        else:
-            built_at = built_at_estimate(env.path)
-
-        manifest.environments[env_name] = EnvironmentInfo(
-            built_at=built_at,
-            source_hash=env.source_hash,
-            source=source_content,
-            python_requires=python_requires,
-            dependencies=dependencies,
-            checkpoints=checkpoints,
-            lock_hash=env.lock_hash,
-        )
-
-    # The filesystem is the truth for what's installed: a record whose env
-    # is gone from disk describes nothing and must not reach the push payload.
-    for env_name in sorted(state.manifest_only_envs):
-        print(
-            f"Note: dropping manifest record for '{env_name}' — env no longer on disk",
-            file=sys.stderr,
-        )
-        del manifest.environments[env_name]
-
-    return manifest
 
 
 def cmd_manifest(args) -> int:
@@ -293,7 +122,7 @@ def cmd_manifest_init(args) -> int:
 
     # Create and save manifest
     manifest = create_manifest(root, cluster, config)
-    manifest = _refresh_manifest_environments(manifest, root)
+    manifest = refresh_manifest_environments(manifest, root)
     save_manifest(manifest, root)
 
     print(f"Manifest initialized: {root}/manifest.json")

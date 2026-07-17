@@ -25,7 +25,7 @@ def cmd_serve(args) -> int:
         EnvironmentManager,
         find_env_for_checkpoint,
     )
-    from .add import _kwargs_from_args
+    from ..operations import parse_setup_kwargs
     from .common import resolve_cache_root
 
     root = get_root_or_exit(args)
@@ -35,7 +35,7 @@ def cmd_serve(args) -> int:
     device = args.device
 
     try:
-        setup_kwargs = _kwargs_from_args(getattr(args, "kwarg", None))
+        setup_kwargs = parse_setup_kwargs(getattr(args, "kwarg", None))
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2

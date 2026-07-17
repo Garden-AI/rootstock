@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from rootstock.commands.manifest import _refresh_manifest_environments
 from rootstock.manifest import (
     SCHEMA_VERSION,
     EnvironmentInfo,
     Maintainer,
     Manifest,
 )
+from rootstock.operations import refresh_manifest_environments
 
 ENV_SOURCE = (
     "# /// script\n"
@@ -31,9 +31,7 @@ ENV_SOURCE = (
 @pytest.fixture(autouse=True)
 def _no_version_probe(monkeypatch):
     """Version probing shells out to the env's python; not under test here."""
-    monkeypatch.setattr(
-        "rootstock.commands.manifest.get_installed_versions", lambda *a, **k: {}
-    )
+    monkeypatch.setattr("rootstock.operations.get_installed_versions", lambda *a, **k: {})
 
 
 def _make_built_env(root: Path, name: str, with_source: bool = True) -> Path:
@@ -72,7 +70,7 @@ def test_refresh_drops_record_for_env_gone_from_disk(tmp_path, capsys):
     _make_built_env(tmp_path, "mace")
     manifest = _manifest(tmp_path, {"mace": _record(), "deleted": _record()})
 
-    manifest = _refresh_manifest_environments(manifest, tmp_path)
+    manifest = refresh_manifest_environments(manifest, tmp_path)
 
     assert set(manifest.environments) == {"mace"}
     assert "dropping manifest record for 'deleted'" in capsys.readouterr().err
@@ -85,7 +83,7 @@ def test_refresh_keeps_record_for_built_env_missing_source(tmp_path, capsys):
     record = _record()
     manifest = _manifest(tmp_path, {"sourceless": record})
 
-    manifest = _refresh_manifest_environments(manifest, tmp_path)
+    manifest = refresh_manifest_environments(manifest, tmp_path)
 
     assert manifest.environments["sourceless"] is record
     assert "dropping" not in capsys.readouterr().err

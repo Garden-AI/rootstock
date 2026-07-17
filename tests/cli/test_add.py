@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from rootstock.commands import add as add_module
-from rootstock.commands.add import cmd_add, parse_kwarg
+from rootstock import operations
+from rootstock.commands.add import cmd_add
 from rootstock.manifest import load_manifest
+from rootstock.operations import parse_kwarg
 
 # ---------- parse_kwarg ----------------------------------------------------
 
@@ -77,7 +78,7 @@ def fake_root(tmp_path: Path, monkeypatch) -> Path:
 
     # Stub update_and_push_manifest — not under test here.
     monkeypatch.setattr(
-        "rootstock.commands.add.update_and_push_manifest",
+        "rootstock.operations.update_and_push_manifest",
         lambda *a, **kw: True,
     )
     return root
@@ -99,7 +100,7 @@ def _make_args(root: Path, **overrides):
 
 
 def test_add_no_verify_sets_fetched_at(fake_root, monkeypatch):
-    monkeypatch.setattr(add_module, "_run_download", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(operations, "_run_download", lambda *a, **kw: (True, None))
 
     rc = cmd_add(_make_args(fake_root, no_verify=True))
     assert rc == 0
@@ -116,7 +117,7 @@ def test_add_overrides_restrictive_umask(fake_root, monkeypatch):
     of the maintainer's personal umask."""
     import os
 
-    monkeypatch.setattr(add_module, "_run_download", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(operations, "_run_download", lambda *a, **kw: (True, None))
 
     old = os.umask(0o077)
     try:
@@ -139,8 +140,8 @@ def test_add_then_add_is_idempotent(fake_root, monkeypatch):
         verify_calls.append((a, kw))
         return True, None
 
-    monkeypatch.setattr(add_module, "_run_download", fake_download)
-    monkeypatch.setattr(add_module, "verify_checkpoint", fake_verify)
+    monkeypatch.setattr(operations, "_run_download", fake_download)
+    monkeypatch.setattr(operations, "verify_checkpoint", fake_verify)
 
     # First call: --no-verify, only fetches.
     assert cmd_add(_make_args(fake_root, no_verify=True)) == 0
@@ -160,7 +161,8 @@ def test_add_then_add_is_idempotent(fake_root, monkeypatch):
 
 def test_add_records_download_failure_and_returns_1(fake_root, monkeypatch):
     monkeypatch.setattr(
-        add_module, "_run_download",
+        operations,
+        "_run_download",
         lambda *a, **kw: (False, "ConnectionError: hub unreachable"),
     )
     rc = cmd_add(_make_args(fake_root, no_verify=True))
@@ -174,9 +176,10 @@ def test_add_records_download_failure_and_returns_1(fake_root, monkeypatch):
 
 
 def test_add_records_verify_failure_and_returns_1(fake_root, monkeypatch):
-    monkeypatch.setattr(add_module, "_run_download", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(operations, "_run_download", lambda *a, **kw: (True, None))
     monkeypatch.setattr(
-        add_module, "verify_checkpoint",
+        operations,
+        "verify_checkpoint",
         lambda *a, **kw: (False, "RuntimeError: CUDA OOM"),
     )
 
@@ -195,9 +198,10 @@ def test_add_records_verify_failure_and_returns_1(fake_root, monkeypatch):
 def test_add_clears_last_error_on_success(fake_root, monkeypatch):
     """After a verify failure, a successful re-add should clear last_error."""
     # First attempt: verify fails.
-    monkeypatch.setattr(add_module, "_run_download", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(operations, "_run_download", lambda *a, **kw: (True, None))
     monkeypatch.setattr(
-        add_module, "verify_checkpoint",
+        operations,
+        "verify_checkpoint",
         lambda *a, **kw: (False, "ValueError: bad input"),
     )
     cmd_add(_make_args(fake_root, no_verify=False))
@@ -206,7 +210,7 @@ def test_add_clears_last_error_on_success(fake_root, monkeypatch):
     assert m.environments["mace"].checkpoints["mace-mp-0-medium"].last_error is not None
 
     # Second attempt: verify succeeds. last_error should clear.
-    monkeypatch.setattr(add_module, "verify_checkpoint", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(operations, "verify_checkpoint", lambda *a, **kw: (True, None))
     rc = cmd_add(_make_args(fake_root, no_verify=False))
     assert rc == 0
 
@@ -225,8 +229,8 @@ def test_add_forwards_kwargs_to_download_and_verify(fake_root, monkeypatch):
         captured["verify_kwargs"] = setup_kwargs
         return True, None
 
-    monkeypatch.setattr(add_module, "_run_download", fake_download)
-    monkeypatch.setattr(add_module, "verify_checkpoint", fake_verify)
+    monkeypatch.setattr(operations, "_run_download", fake_download)
+    monkeypatch.setattr(operations, "verify_checkpoint", fake_verify)
 
     rc = cmd_add(_make_args(fake_root, kwarg=["task=omat", "charge=-1"]))
     assert rc == 0

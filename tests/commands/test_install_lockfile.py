@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from rootstock.commands.install import _install_single_environment, _lockfile_for
+from rootstock.operations import _lockfile_for, install_environment
 
 ENV_WITH_DEPS = (
     "# /// script\n"
@@ -68,19 +68,20 @@ def _fake_uv(captured_calls, lock_content=FAKE_LOCK, fail_on=None):
 def _install(tmp_path, monkeypatch, source: Path, calls, fake_run=None, **kwargs):
     monkeypatch.setattr("rootstock.__version__", "9.9.9")
     monkeypatch.setattr(
-        "rootstock.commands.install.subprocess.run",
+        "rootstock.operations.subprocess.run",
         fake_run or _fake_uv(calls),
     )
-    monkeypatch.setattr("rootstock.commands.install._precompile_environment", lambda *a, **k: None)
+    monkeypatch.setattr("rootstock.operations._precompile_environment", lambda *a, **k: None)
     monkeypatch.setattr(
-        "rootstock.commands.manifest.update_and_push_manifest",
+        "rootstock.operations.update_and_push_manifest",
         lambda *a, **k: None,
     )
-    return _install_single_environment(
+    return install_environment(
         root=tmp_path,
         source=str(source),
         force=kwargs.pop("force", False),
         verbose=False,
+        progress=print,
         **kwargs,
     )
 
@@ -97,9 +98,8 @@ def test_lock_resolved_before_sync(tmp_path, monkeypatch):
     calls: list[list[str]] = []
     env_file = _write_env(tmp_path)
 
-    rc = _install(tmp_path, monkeypatch, env_file, calls)
+    _install(tmp_path, monkeypatch, env_file, calls)
 
-    assert rc == 0
     canonical = tmp_path / "environments" / "probe.py"
     lock_calls = [c for c in calls if c[:2] == ["uv", "lock"]]
     sync_calls = [c for c in calls if c[:2] == ["uv", "sync"]]
@@ -112,9 +112,8 @@ def test_upgrade_flag_re_resolves(tmp_path, monkeypatch):
     calls: list[list[str]] = []
     env_file = _write_env(tmp_path)
 
-    rc = _install(tmp_path, monkeypatch, env_file, calls, upgrade=True)
+    _install(tmp_path, monkeypatch, env_file, calls, upgrade=True)
 
-    assert rc == 0
     canonical = tmp_path / "environments" / "probe.py"
     lock_calls = [c for c in calls if c[:2] == ["uv", "lock"]]
     assert lock_calls == [["uv", "lock", "--script", str(canonical), "--upgrade"]]
@@ -124,9 +123,8 @@ def test_lockfile_stored_in_built_env(tmp_path, monkeypatch):
     calls: list[list[str]] = []
     env_file = _write_env(tmp_path)
 
-    rc = _install(tmp_path, monkeypatch, env_file, calls)
+    _install(tmp_path, monkeypatch, env_file, calls)
 
-    assert rc == 0
     stored = tmp_path / "envs" / "probe" / "env_source.py.lock"
     assert stored.read_text() == FAKE_LOCK
 
@@ -139,9 +137,8 @@ def test_existing_lockfile_honored_on_rebuild(tmp_path, monkeypatch, capsys):
     canonical.write_text(ENV_WITH_DEPS)
     _lockfile_for(canonical).write_text(FAKE_LOCK)
 
-    rc = _install(tmp_path, monkeypatch, Path("probe"), calls)
+    _install(tmp_path, monkeypatch, Path("probe"), calls)
 
-    assert rc == 0
     assert "Honoring existing lockfile" in capsys.readouterr().out
     lock_calls = [c for c in calls if c[:2] == ["uv", "lock"]]
     assert lock_calls == [["uv", "lock", "--script", str(canonical)]]
@@ -154,9 +151,8 @@ def test_source_adjacent_lockfile_registered(tmp_path, monkeypatch):
     env_file = _write_env(tmp_path)
     _lockfile_for(env_file).write_text("carried = true\n")
 
-    rc = _install(tmp_path, monkeypatch, env_file, calls)
+    _install(tmp_path, monkeypatch, env_file, calls)
 
-    assert rc == 0
     canonical_lock = _lockfile_for(tmp_path / "environments" / "probe.py")
     assert canonical_lock.read_text() == "carried = true\n"
     stored = tmp_path / "envs" / "probe" / "env_source.py.lock"
@@ -171,7 +167,7 @@ def test_unlockable_env_builds_without_lockfile(tmp_path, monkeypatch, capsys):
     calls: list[list[str]] = []
     env_file = _write_env(tmp_path)
 
-    rc = _install(
+    _install(
         tmp_path,
         monkeypatch,
         env_file,
@@ -179,7 +175,6 @@ def test_unlockable_env_builds_without_lockfile(tmp_path, monkeypatch, capsys):
         fake_run=_fake_uv(calls, fail_on=["uv", "lock"]),
     )
 
-    assert rc == 0
     assert "could not resolve a lockfile" in capsys.readouterr().err
     (sync_call,) = [c for c in calls if c[:2] == ["uv", "sync"]]
     assert "--frozen" not in sync_call
@@ -198,7 +193,7 @@ def test_lock_failure_never_freezes_to_a_possibly_stale_lockfile(tmp_path, monke
     canonical.write_text(ENV_WITH_DEPS)
     _lockfile_for(canonical).write_text(FAKE_LOCK)
 
-    rc = _install(
+    _install(
         tmp_path,
         monkeypatch,
         Path("probe"),
@@ -206,7 +201,6 @@ def test_lock_failure_never_freezes_to_a_possibly_stale_lockfile(tmp_path, monke
         fake_run=_fake_uv(calls, fail_on=["uv", "lock"]),
     )
 
-    assert rc == 0
     assert "could not resolve a lockfile" in capsys.readouterr().err
     (sync_call,) = [c for c in calls if c[:2] == ["uv", "sync"]]
     assert "--frozen" not in sync_call
@@ -216,8 +210,7 @@ def test_no_dependencies_skips_lock(tmp_path, monkeypatch):
     calls: list[list[str]] = []
     env_file = _write_env(tmp_path, name="noop", content=ENV_WITHOUT_DEPS)
 
-    rc = _install(tmp_path, monkeypatch, env_file, calls)
+    _install(tmp_path, monkeypatch, env_file, calls)
 
-    assert rc == 0
     assert not [c for c in calls if c[:2] == ["uv", "lock"]]
     assert not (tmp_path / "envs" / "noop" / "env_source.py.lock").exists()

@@ -15,7 +15,9 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from rootstock.commands.install import _install_single_environment
+import pytest
+
+from rootstock.operations import OperationError, install_environment
 
 ENV_SOURCE = (
     "# /// script\n"
@@ -46,21 +48,13 @@ def _fake_uv(calls, fail_on=None):
 
 def _install(tmp_path, monkeypatch, calls, fake_run=None, force=False):
     monkeypatch.setattr("rootstock.__version__", "9.9.9")
-    monkeypatch.setattr(
-        "rootstock.commands.install.subprocess.run", fake_run or _fake_uv(calls)
-    )
-    monkeypatch.setattr(
-        "rootstock.commands.install._precompile_environment", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        "rootstock.commands.manifest.update_and_push_manifest", lambda *a, **k: None
-    )
+    monkeypatch.setattr("rootstock.operations.subprocess.run", fake_run or _fake_uv(calls))
+    monkeypatch.setattr("rootstock.operations._precompile_environment", lambda *a, **k: None)
+    monkeypatch.setattr("rootstock.operations.update_and_push_manifest", lambda *a, **k: None)
     env_file = tmp_path / "src" / "probe.py"
     env_file.parent.mkdir(exist_ok=True)
     env_file.write_text(ENV_SOURCE)
-    return _install_single_environment(
-        root=tmp_path, source=str(env_file), force=force, verbose=False
-    )
+    return install_environment(root=tmp_path, source=str(env_file), force=force, verbose=False)
 
 
 def _make_live_env(tmp_path) -> Path:
@@ -73,9 +67,8 @@ def _make_live_env(tmp_path) -> Path:
 def test_fresh_install_lands_in_envs_and_cleans_build_dir(tmp_path, monkeypatch):
     calls: list[list[str]] = []
 
-    rc = _install(tmp_path, monkeypatch, calls)
+    _install(tmp_path, monkeypatch, calls)
 
-    assert rc == 0
     assert (tmp_path / "envs" / "probe" / "new-build-marker").exists()
     assert list((tmp_path / ".build").iterdir()) == []
 
@@ -85,9 +78,8 @@ def test_venv_is_created_relocatable(tmp_path, monkeypatch):
     shebangs must not bake in the staging path."""
     calls: list[list[str]] = []
 
-    rc = _install(tmp_path, monkeypatch, calls)
+    _install(tmp_path, monkeypatch, calls)
 
-    assert rc == 0
     (venv_call,) = [c for c in calls if c[:2] == ["uv", "venv"]]
     assert "--relocatable" in venv_call
     assert venv_call[2] == str(tmp_path / ".build" / f"probe.{os.getpid()}")
@@ -97,9 +89,8 @@ def test_force_rebuild_swaps_env_without_predelete(tmp_path, monkeypatch):
     _make_live_env(tmp_path)
     calls: list[list[str]] = []
 
-    rc = _install(tmp_path, monkeypatch, calls, force=True)
+    _install(tmp_path, monkeypatch, calls, force=True)
 
-    assert rc == 0
     env_target = tmp_path / "envs" / "probe"
     assert (env_target / "new-build-marker").exists()
     assert not (env_target / "live-env-marker").exists()
@@ -112,12 +103,15 @@ def test_failed_build_leaves_live_env_untouched(tmp_path, monkeypatch):
     _make_live_env(tmp_path)
     calls: list[list[str]] = []
 
-    rc = _install(
-        tmp_path, monkeypatch, calls, fake_run=_fake_uv(calls, fail_on=["uv", "sync"]),
-        force=True,
-    )
+    with pytest.raises(OperationError, match="Error installing dependencies"):
+        _install(
+            tmp_path,
+            monkeypatch,
+            calls,
+            fake_run=_fake_uv(calls, fail_on=["uv", "sync"]),
+            force=True,
+        )
 
-    assert rc == 1
     env_target = tmp_path / "envs" / "probe"
     assert (env_target / "live-env-marker").exists()
     assert not (env_target / "new-build-marker").exists()
@@ -131,7 +125,6 @@ def test_stale_build_dirs_are_cleared(tmp_path, monkeypatch):
     (stale / "junk").touch()
     calls: list[list[str]] = []
 
-    rc = _install(tmp_path, monkeypatch, calls)
+    _install(tmp_path, monkeypatch, calls)
 
-    assert rc == 0
     assert not stale.exists()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from rootstock.commands.install import _precompile_environment
+from rootstock.operations import _precompile_environment
 
 
 def _make_tree(tmp_path: Path) -> Path:
