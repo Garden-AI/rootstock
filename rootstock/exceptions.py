@@ -12,6 +12,8 @@ they historically subclassed, so existing ``except LookupError`` /
   socket level; carries a post-mortem.
 - ``OperationError`` (rootstock.operations) — an install/add operation
   failed; message is user-presentable.
+- ``ManifestError`` (rootstock.manifest) — the manifest exists but cannot
+  be used; deliberately not treated as "no manifest".
 """
 
 from __future__ import annotations
