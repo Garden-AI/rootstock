@@ -159,6 +159,16 @@ def test_perlmutter_registered_with_split():
     assert "pscratch" in str(pm.cache_root).lower()
 
 
+def test_frontier_registered_with_split():
+    fr = get_cluster("frontier")
+    assert fr.cache_root is not None
+    assert fr.cache_root != fr.root
+    # UMS software area for code (read-only on compute nodes), Lustre for the
+    # cache, which model libraries write to at runtime.
+    assert "/sw/frontier/ums" in str(fr.root)
+    assert "lustre" in str(fr.cache_root).lower()
+
+
 def test_polaris_shares_sophia_eagle_root():
     """Both ALCF machines mount Eagle and share one install."""
     assert get_cluster("polaris").root == get_cluster("sophia").root
