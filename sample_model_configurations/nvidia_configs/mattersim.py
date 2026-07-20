@@ -4,10 +4,21 @@
 #     "mattersim>=1.1.0",
 #     "ase>=3.22",
 #     "torch>=2.0",
+#     # Not imported here. mattersim -> torchmetrics -> torchvision pulls it in
+#     # transitively, and torchvision ships compiled ops ABI-locked to one exact
+#     # torch build. An `explicit` index is only consulted for packages listed
+#     # in `dependencies`, so without this line torchvision silently resolves
+#     # from PyPI against a different torch and the mismatch surfaces only at
+#     # `import torchvision` as:
+#     #     RuntimeError: operator torchvision::nms does not exist
+#     # Leave it unpinned: the index hosts one build per torch release and uv
+#     # enforces the torch<->torchvision pairing.
+#     "torchvision",
 # ]
 #
 # [tool.uv.sources]
 # torch = { index = "pytorch-cu128" }
+# torchvision = { index = "pytorch-cu128" }
 #
 # [[tool.uv.index]]
 # name = "pytorch-cu128"
