@@ -49,10 +49,17 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
         root=Path("/global/cfs/cdirs/m4845/rootstock"),
         cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),
     ),
-    "delta": Cluster(
-        root=Path("/work/hdd/data/rootstock")
-    )
+    "delta": Cluster(root=Path("/work/hdd/data/rootstock")),
+    # ORNL Frontier (AMD MI250X). The install root is a User-Managed Software
+    # area, which is read-only on compute nodes -- fine for serving, since
+    # workers only read their env. The cache is split onto Lustre because
+    # model libraries write weights there at runtime.
+    "frontier": Cluster(
+        root=Path("/sw/frontier/ums/ums047/rootstock"),
+        cache_root=Path("/lustre/orion/ums047/world-shared/rootstock-cache"),
+    ),
 }
+
 
 def get_cluster(cluster: str) -> Cluster:
     """Look up a known cluster by name."""
