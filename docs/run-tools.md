@@ -2,6 +2,8 @@
 
 `RootstockCalculator` is a standard ASE calculator. Most tools that accept an ASE calculator can use a Rootstock-hosted model in its place, without that tool needing the model's Python dependencies. You point the tool at a `RootstockCalculator` for a given `(cluster, checkpoint)` pair, and it talks to the isolated model environment through Rootstock.
 
+The integration points below aren't as battle-tested as the main ASE calculator yet. Please file a GitHub issue if you run into any problems with them.
+
 ## atomate2
 
 [atomate2](https://github.com/materialsproject/atomate2) builds materials science workflows out of `Maker` objects, and its force-field Makers run on any ASE calculator. A Rootstock-hosted checkpoint slots in as the calculator, so the workflow itself never needs the model's dependencies.
