@@ -8,35 +8,36 @@ from pathlib import Path
 
 from ..clusters import get_cluster
 from ..perms import check_permissions, format_command, render_commands
+from .common import resolve_cache_root
 
 
-def _resolve_roots(args) -> tuple[Path, Path | None] | None:
-    """Resolve (install_root, cache_root) from --cluster or the positional root.
+def _resolve_roots(args) -> tuple[Path, Path] | None:
+    """Resolve (install_root, cache_root) from --cluster or the given root.
 
-    Returns None (after printing an error) on bad input. ``cache_root`` is None
-    when there is no separate cache filesystem.
+    Returns None (after printing an error) on bad input. ``cache_root`` equals
+    ``install_root`` when there is no separate cache filesystem; ``resolve_cache_root``
+    is the single resolution order every entry point shares (explicit override,
+    then the install's ``layout.json`` declaration, then the cluster registry's
+    legacy entry) — so setup-perms and check-perms can't disagree about which
+    paths the recipe covers.
     """
     if args.cluster:
         try:
-            cluster = get_cluster(args.cluster)
+            install_root = get_cluster(args.cluster).root
         except ValueError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return None
-        install_root = cluster.root
-        cache_root = cluster.cache_root  # None when same as install root
-        return install_root, cache_root
+    else:
+        root = getattr(args, "root_flag", None) or args.root
+        if not root:
+            print(
+                "Error: provide an install root path or --cluster <name>.",
+                file=sys.stderr,
+            )
+            return None
+        install_root = Path(root)
 
-    root = getattr(args, "root_flag", None) or args.root
-    if not root:
-        print(
-            "Error: provide an install root path or --cluster <name>.",
-            file=sys.stderr,
-        )
-        return None
-
-    install_root = Path(root)
-    cache_root = Path(args.cache_root) if args.cache_root else None
-    return install_root, cache_root
+    return install_root, resolve_cache_root(install_root, args.cache_root)
 
 
 def cmd_setup_perms(args) -> int:

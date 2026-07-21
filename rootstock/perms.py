@@ -67,12 +67,25 @@ def render_commands(
         ["chgrp", group, str(install_root)],
         ["setfacl", "-m", f"g:{group}:rwx", str(install_root)],
         ["setfacl", "-dm", f"g:{group}:rwx", str(install_root)],
+        # State the default ``other`` entry rather than letting setfacl derive
+        # it from the mode: the chmod runs last (see below), so at this point
+        # the mode may still be the restrictive one we're fixing, and a derived
+        # ``other::---`` default would leave new files unreadable to everyone
+        # outside the group.
+        ["setfacl", "-dm", "o::r-X", str(install_root)],
     ]
 
     separate_cache = cache_root is not None and Path(cache_root) != install_root
     if separate_cache:
         cache_root = Path(cache_root)
-        cmds += [["chgrp", group, str(cache_root)]]
+        cmds += [
+            ["chgrp", group, str(cache_root)],
+            # Same reasoning, and it's what makes newly downloaded weights
+            # world-readable regardless of the maintainer's umask. No
+            # named-group entry — maintainer-only-write on the cache is the
+            # accepted default.
+            ["setfacl", "-dm", "o::r-X", str(cache_root)],
+        ]
 
     if retrofit:
         # Existing files: make the named-group ACL and world r-x apply to what's

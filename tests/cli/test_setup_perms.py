@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from rootstock.commands.setup_perms import cmd_setup_perms
+from rootstock.layout import write_layout_marker
 from rootstock.perms import PermIssue
 
 
@@ -49,6 +50,25 @@ def test_cluster_resolves_split_roots(capsys):
     out = capsys.readouterr().out
     assert "chmod 2775 /global/cfs/cdirs/m5268/rootstock" in out
     assert "chmod 2755 /pscratch/sd/o/oprice/rootstock-cache" in out
+
+
+def test_declared_cache_root_is_covered(tmp_path, capsys):
+    """A split cache declared in layout.json must be in the recipe.
+
+    check-perms resolves the cache root through layout.json, so setup-perms
+    has to as well — otherwise the recipe silently skips the cache and the
+    very next check-perms reports issues nobody applied a fix for.
+    """
+    install = tmp_path / "rootstock"
+    cache = tmp_path / "cache"
+    install.mkdir()
+    write_layout_marker(install, cache)
+
+    rc = cmd_setup_perms(_args(root=str(install)))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert f"chmod 2755 {cache}" in out
+    assert f"chgrp m4845 {cache}" in out
 
 
 def test_cluster_single_root_no_cache_commands(capsys):
