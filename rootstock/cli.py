@@ -94,6 +94,15 @@ def main():
         description="Guided setup for root directory, maintainer info, and API credentials.",
     )
     init_parser.add_argument(
+        "--cache-root",
+        help=(
+            "Filesystem for model weights when it differs from the install root "
+            "(recorded in {root}/layout.json). Prompted for if omitted. This is "
+            "a deployment-time choice: changing it later means editing "
+            "layout.json and moving the weights."
+        ),
+    )
+    init_parser.add_argument(
         "--skip-dirs",
         action="store_true",
         help="Skip creating directory structure",
