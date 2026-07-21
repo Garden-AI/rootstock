@@ -30,7 +30,31 @@ Choose a location on a shared filesystem where other users have access:
 
 On most clusters a single shared filesystem hosts both the rootstock install (code, venvs, manifest) and the model-weight cache. Some clusters require these to live on different filesystems — typically because the recommended persistent project filesystem doesn't support `flock`, which the HuggingFace cache requires. NERSC Perlmutter is one such case: code lives on CFS, model weights on PSCRATCH.
 
-The install declares its own cache root in `{root}/layout.json` — `rootstock install` and `rootstock init` record it automatically. Every reader (CLI commands and `RootstockCalculator`, whether given `cluster=` or `root=`) resolves the cache root the same way: an explicit override wins, then the install's declaration, then — for legacy installs that predate the declaration — the cluster registry's entry, then the install root itself.
+The install declares its own cache root in `{root}/layout.json`. Every reader (CLI commands and `RootstockCalculator`, whether given `cluster=` or `root=`) resolves the cache root the same way: an explicit override wins, then the install's declaration, then — for legacy installs that predate the declaration — the cluster registry's entry, then the install root itself.
+
+**Setting it at install time.** `rootstock init` asks:
+
+```
+Model weights can live on a different filesystem than the install
+itself — some clusters require it (the project filesystem may not
+support flock, or weights may belong on scratch).
+Cache on a different filesystem? (y/n) [y]:
+  Cache root [/pscratch/sd/u/me/rootstock-cache]:
+```
+
+The suggestion is seeded from the cluster registry when the root belongs to a known cluster, but you can override it — don't accept a path just because it was pre-filled, since it reflects whatever registry *this client release* happened to ship. Pass `--cache-root` to skip the prompt entirely:
+
+```bash
+rootstock init --cache-root /pscratch/sd/u/me/rootstock-cache
+```
+
+Verify what an install actually declares with:
+
+```bash
+cat {root}/layout.json
+```
+
+**Changing it afterwards is deliberately awkward.** Only `init` sets the cache root; `rootstock install` records the declaration when one is missing but never changes an existing one, so no routine rebuild can re-point a deployment and scatter checkpoints across two filesystems. To move a populated install's cache: edit `cache_root` in `{root}/layout.json`, then move the `cache/` and `home/` directories to the new path (or re-run `rootstock add` to re-download into it). Don't re-run `rootstock init` on a populated root for this — it writes a fresh manifest and loses recorded environment state.
 
 The cluster registry (`rootstock/clusters.py`) is only a name → install-path bootstrap so users can say `cluster="perlmutter"` instead of remembering a path. Its per-cluster `cache_root` field remains solely as the legacy fallback above; new split-filesystem deployments don't need a registry entry at all, just a declaration in the install:
 

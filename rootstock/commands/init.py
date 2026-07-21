@@ -41,6 +41,54 @@ def prompt_secret(prompt: str, existing: str | None = None) -> str | None:
     return value if value else None
 
 
+def resolve_init_cache_root(args, root: Path, cluster: str | None) -> Path:
+    """Decide where this install's model-weight cache lives.
+
+    Order: an explicit ``--cache-root`` wins; otherwise ask, seeding the
+    suggestion from the cluster registry. The prompt exists because the
+    registry is baked into the client — a maintainer running a pinned release
+    would otherwise silently inherit whatever cache path that release happened
+    to ship, which is exactly the coupling the layout.json declaration is
+    meant to break.
+
+    Paths are expanded but deliberately not ``resolve()``d: the answer is
+    written verbatim into layout.json and read by every other user's client,
+    so the canonical path the maintainer typed travels better than one node's
+    symlink-collapsed view of it.
+    """
+    explicit = getattr(args, "cache_root", None)
+    if explicit:
+        cache_root = Path(explicit).expanduser()
+        print(f"Cache root: {cache_root}")
+        return cache_root
+
+    if cluster:
+        from ..clusters import get_cluster
+
+        suggested = get_cluster(cluster).resolved_cache_root
+    else:
+        suggested = root
+
+    print("Model weights can live on a different filesystem than the install")
+    print("itself — some clusters require it (the project filesystem may not")
+    print("support flock, or weights may belong on scratch).")
+    split_default = "y" if suggested != root else "n"
+    answer = prompt_with_default("Cache on a different filesystem? (y/n)", split_default)
+    if answer.lower() not in ("y", "yes"):
+        print(f"  -> Cache root: {root} (same as install root)")
+        return root
+
+    default = str(suggested) if suggested != root else None
+    while True:
+        value = prompt_with_default("  Cache root", default)
+        if value:
+            return Path(value).expanduser()
+        print(
+            "  A cache root is required — answer 'n' to keep it under the install root.",
+            file=sys.stderr,
+        )
+
+
 def cmd_init(args) -> int:
     """
     Interactive initialization of rootstock configuration.
@@ -84,6 +132,13 @@ def cmd_init(args) -> int:
 
     print()
 
+    # Settled here, next to the root question it belongs with, but only when
+    # there is somewhere to record it — --skip-dirs writes no layout marker,
+    # so asking would discard the answer.
+    cache_root = resolve_init_cache_root(args, root, cluster) if not args.skip_dirs else None
+
+    print()
+
     # Ask if user is the maintainer
     print("Are you the maintainer of this rootstock installation?")
     print("Maintainers can configure API credentials to push manifests to the backend.")
@@ -121,12 +176,6 @@ def cmd_init(args) -> int:
     # path or different filesystems depending on the cluster.
     if not args.skip_dirs:
         print("\nCreating directory structure...")
-        from ..clusters import get_cluster
-
-        if cluster:
-            cache_root = get_cluster(cluster).resolved_cache_root
-        else:
-            cache_root = root
 
         dirs_to_create = [
             root / "environments",

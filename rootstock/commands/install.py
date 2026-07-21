@@ -16,7 +16,7 @@ from ..operations import OperationError, install_environment
 from .common import get_root_or_exit, resolve_cache_root
 
 
-def _warn_on_permissions(root: Path) -> None:
+def _warn_on_permissions(root: Path, cache_root: Path) -> None:
     """Best-effort, bounded permission check run up front (warn-only).
 
     A shared install with the wrong perms "works for the maintainer, breaks for
@@ -26,7 +26,7 @@ def _warn_on_permissions(root: Path) -> None:
     """
     from ..perms import check_permissions
 
-    issues = check_permissions(root, resolve_cache_root(root))
+    issues = check_permissions(root, cache_root)
     if not issues:
         return
 
@@ -111,15 +111,24 @@ def cmd_install(args) -> int:
         )
         return 1
 
+    # Deliberately not overridable here. Where the weights live is a
+    # deployment-time decision (`rootstock init --cache-root`), not a
+    # per-build one: install runs once per environment and on every rebuild,
+    # so a flag here would let one stray invocation re-point the declaration
+    # and scatter checkpoints across two filesystems. Changing it on a
+    # populated install means editing {root}/layout.json and moving the
+    # weights, which should be deliberate.
+    cache_root = resolve_cache_root(root)
+
     # Surface permission problems before the (slow) build starts.
     if not getattr(args, "no_perm_check", False):
-        _warn_on_permissions(root)
+        _warn_on_permissions(root, cache_root)
 
     # Stamp (or backfill, for pre-marker installs) the layout version, and
     # make the install self-describing: declare its cache root. For legacy
     # roots without a declaration this persists the registry's answer, so
     # the install keeps working after pinned clients' registries go stale.
-    write_layout_marker(root, cache_root=resolve_cache_root(root))
+    write_layout_marker(root, cache_root=cache_root)
 
     # DIRECTORY MODE: install all *.py files
     if source_path.is_dir():
