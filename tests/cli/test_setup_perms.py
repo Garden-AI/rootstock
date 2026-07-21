@@ -47,8 +47,8 @@ def test_cluster_resolves_split_roots(capsys):
     rc = cmd_setup_perms(_args(cluster="perlmutter"))
     assert rc == 0
     out = capsys.readouterr().out
-    assert "chmod 2775 /global/cfs/cdirs/m4845/rootstock" in out
-    assert "chmod 2755 /pscratch/sd/w/wengler/rootstock-cache" in out
+    assert "chmod 2775 /global/cfs/cdirs/m5268/rootstock" in out
+    assert "chmod 2755 /pscratch/sd/o/oprice/rootstock-cache" in out
 
 
 def test_cluster_single_root_no_cache_commands(capsys):
