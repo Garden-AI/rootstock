@@ -21,11 +21,12 @@ from rootstock.perms import (
 def test_render_single_filesystem():
     cmds = render_commands("/install/root", group="m4845")
     lines = [format_command(c) for c in cmds]
+    # chmod goes last: setting an ACL rewrites the mode and can drop setgid.
     assert lines == [
-        "chmod 2775 /install/root",
         "chgrp m4845 /install/root",
         "setfacl -m g:m4845:rwx /install/root",
         "setfacl -dm g:m4845:rwx /install/root",
+        "chmod 2775 /install/root",
     ]
 
 
@@ -46,6 +47,26 @@ def test_render_cache_root_same_as_install_emits_nothing_extra():
     assert len(cmds) == 4
 
 
+def test_render_chmod_follows_every_setfacl():
+    """Every path's chmod must come after the last setfacl touching that path.
+
+    A setfacl can rewrite the mode bits (and drop setgid on some filesystems),
+    so a chmod-first recipe leaves the root without setgid — the NERSC CFS bug.
+    """
+    for retrofit in (False, True):
+        cmds = render_commands(
+            "/install/root", cache_root="/cache/root", group="m4845", retrofit=retrofit
+        )
+        for root in ("/install/root", "/cache/root"):
+            touching = [i for i, c in enumerate(cmds) if root in c]
+            chmods = [i for i in touching if cmds[i][0] == "chmod"]
+            setfacls = [i for i in touching if cmds[i][0] == "setfacl"]
+            assert chmods, f"no chmod for {root} (retrofit={retrofit})"
+            assert all(i < min(chmods) for i in setfacls), (
+                f"setfacl runs after chmod for {root} (retrofit={retrofit})"
+            )
+
+
 def test_render_retrofit_adds_recursive_variants():
     cmds = render_commands("/install/root", cache_root="/cache/root", group="m4845", retrofit=True)
     lines = [format_command(c) for c in cmds]
@@ -59,6 +80,16 @@ def test_render_retrofit_adds_recursive_variants():
     assert "setfacl -R -dm o::r-X /cache/root" in lines
     # ...but no recursive named-group ACL on the cache root.
     assert "setfacl -R -m g:m4845:rwX /cache/root" not in lines
+
+
+def test_render_retrofit_sets_setgid_on_existing_dirs():
+    cmds = render_commands("/install/root", cache_root="/cache/root", group="m4845", retrofit=True)
+    lines = [format_command(c) for c in cmds]
+    assert "find /install/root -type d -exec chmod g+s '{}' +" in lines
+    assert "find /cache/root -type d -exec chmod g+s '{}' +" in lines
+    # Without --retrofit only the root itself is touched.
+    plain = [format_command(c) for c in render_commands("/install/root", group="m4845")]
+    assert not any(line.startswith("find ") for line in plain)
 
 
 # --------------------------------------------------------------------------- #

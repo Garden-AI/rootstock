@@ -317,6 +317,13 @@ def main():
         nargs="?",
         help="Install root path (omit when using --cluster)",
     )
+    # --root is how every other command spells it; accept both rather than
+    # failing with "unrecognized arguments" on the obvious guess.
+    setup_perms_parser.add_argument(
+        "--root",
+        dest="root_flag",
+        help="Install root path (same as the positional argument)",
+    )
     setup_perms_parser.add_argument(
         "--cache-root",
         help="Cache root path, when on a separate filesystem from the install root",
@@ -359,6 +366,11 @@ def main():
         nargs="?",
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Install root path (default: ${ROOTSTOCK_ROOT_ENV}; or use --cluster)",
+    )
+    check_perms_parser.add_argument(
+        "--root",
+        dest="root_flag",
+        help="Install root path (same as the positional argument)",
     )
     check_perms_parser.add_argument(
         "--cache-root",

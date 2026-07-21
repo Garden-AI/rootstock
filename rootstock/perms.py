@@ -23,7 +23,12 @@ The recipe:
   handles group-ownership inheritance. No named-group ACL (maintainer-only-write
   on the cache is the accepted default).
 * ``--retrofit`` — recursive ``setfacl -R`` variants so an install that already
-  has files in it becomes world-readable, not just future files.
+  has files in it becomes world-readable, not just future files, plus a
+  ``find -type d ... chmod g+s`` so existing subdirectories inherit too.
+
+The ``chmod`` comes *last* in the rendered order: setting an ACL rewrites a
+path's mode bits, which can clear setgid, so the mode is asserted after all the
+``setfacl`` work rather than before it.
 """
 
 from __future__ import annotations
@@ -59,7 +64,6 @@ def render_commands(
     """
     install_root = Path(install_root)
     cmds: list[list[str]] = [
-        ["chmod", INSTALL_ROOT_MODE, str(install_root)],
         ["chgrp", group, str(install_root)],
         ["setfacl", "-m", f"g:{group}:rwx", str(install_root)],
         ["setfacl", "-dm", f"g:{group}:rwx", str(install_root)],
@@ -68,10 +72,7 @@ def render_commands(
     separate_cache = cache_root is not None and Path(cache_root) != install_root
     if separate_cache:
         cache_root = Path(cache_root)
-        cmds += [
-            ["chmod", CACHE_ROOT_MODE, str(cache_root)],
-            ["chgrp", group, str(cache_root)],
-        ]
+        cmds += [["chgrp", group, str(cache_root)]]
 
     if retrofit:
         # Existing files: make the named-group ACL and world r-x apply to what's
@@ -89,8 +90,30 @@ def render_commands(
                 ["setfacl", "-R", "-m", "o::r-X", str(cache_root)],
                 ["setfacl", "-R", "-dm", "o::r-X", str(cache_root)],
             ]
+        # setgid has to hold on every *existing* directory too, not just the
+        # root: a subdirectory without it hands new files the creator's primary
+        # group. ``-exec ... +`` batches, so this is one chmod per few thousand
+        # dirs rather than one per dir.
+        cmds += [_setgid_dirs(install_root)]
+        if separate_cache:
+            cmds += [_setgid_dirs(cache_root)]
+
+    # Mode bits go *last*, deliberately. Setting an ACL rewrites the file mode
+    # (the ACL's owner/mask/other entries are the mode bits), and on some
+    # filesystems that drops the setgid bit — observed on NERSC CFS in 2026-07,
+    # where a chmod-first recipe left the root at 0775 and check-perms flagged
+    # it immediately after a successful setup-perms --apply. Re-asserting the
+    # mode after every setfacl is cheap and makes the recipe order-independent.
+    cmds += [["chmod", INSTALL_ROOT_MODE, str(install_root)]]
+    if separate_cache:
+        cmds += [["chmod", CACHE_ROOT_MODE, str(cache_root)]]
 
     return cmds
+
+
+def _setgid_dirs(root: Path) -> list[str]:
+    """``find``-based recursive setgid for directories under ``root``."""
+    return ["find", str(root), "-type", "d", "-exec", "chmod", "g+s", "{}", "+"]
 
 
 def format_command(argv: list[str]) -> str:
