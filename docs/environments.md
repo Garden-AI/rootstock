@@ -2,7 +2,7 @@
 
 A model family is made available to Rootstock through an **environment file**: a small Python file that pins the model's dependencies in an isolated virtual environment and exposes a `setup()` that returns an ASE calculator. One file covers a whole family — every checkpoint it lists.
 
-These files are written once per family and kept as working **samples** in the Rootstock repo, under [`sample_model_configurations/nvidia_configs/`](https://github.com/Garden-AI/rootstock/tree/main/sample_model_configurations/nvidia_configs). Samples are grouped by hardware target; other targets (AMD/ROCm, Apple Silicon, CPU-only) get their own `*_configs/` folder as they are added.
+These files are written once per family and kept as working **samples** in the Rootstock repo, under [`sample_model_configurations/`](https://github.com/Garden-AI/rootstock/tree/main/sample_model_configurations/). Samples are grouped by hardware target (currently, NVIDIA and AMD).
 
 ![Define a model family as a Python file, build its isolated env, then verify and re-verify it on a GPU node](assets/rootstock_model_installation.png)
 
