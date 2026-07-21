@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from ..clusters import get_cluster
-from ..perms import format_command, render_commands
+from ..perms import check_permissions, format_command, render_commands
 
 
 def _resolve_roots(args) -> tuple[Path, Path | None] | None:
@@ -26,14 +26,15 @@ def _resolve_roots(args) -> tuple[Path, Path | None] | None:
         cache_root = cluster.cache_root  # None when same as install root
         return install_root, cache_root
 
-    if not args.root:
+    root = getattr(args, "root_flag", None) or args.root
+    if not root:
         print(
             "Error: provide an install root path or --cluster <name>.",
             file=sys.stderr,
         )
         return None
 
-    install_root = Path(args.root)
+    install_root = Path(root)
     cache_root = Path(args.cache_root) if args.cache_root else None
     return install_root, cache_root
 
@@ -80,6 +81,22 @@ def cmd_setup_perms(args) -> int:
             if result.stderr:
                 print(result.stderr.rstrip(), file=sys.stderr)
             return 1
+
+    # Re-check rather than trust: every command can exit 0 and still leave the
+    # roots wrong (a filesystem that silently drops setgid, an ACL the fs maps
+    # differently). Better to say so here than to have the maintainer discover
+    # it from a later check-perms.
+    issues = check_permissions(install_root, cache_root, group=args.group)
+    if issues:
+        print("Permissions applied, but the roots still look wrong:", file=sys.stderr)
+        for issue in issues:
+            print(f"  - {issue.path}: {issue.problem}", file=sys.stderr)
+        print(
+            "\nThis filesystem may not support part of the recipe; "
+            "run 'rootstock check-perms' for the full check.",
+            file=sys.stderr,
+        )
+        return 1
 
     print("Permissions applied.")
     return 0

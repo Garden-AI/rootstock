@@ -83,9 +83,11 @@ rootstock setup-perms /path/to/install/root \
   --group <group> --apply
 ```
 
-Omit `--apply` for a **dry run** (the default) that just prints the `chmod` / `chgrp` / `setfacl` commands — useful if you (or a cautious sysadmin) want to review them or paste them into a script before anything touches the filesystem. `--apply` runs them after a confirmation prompt, stopping at the first failure.
+Omit `--apply` for a **dry run** (the default) that just prints the `chmod` / `chgrp` / `setfacl` commands — useful if you (or a cautious sysadmin) want to review them or paste them into a script before anything touches the filesystem. `--apply` runs them after a confirmation prompt, stopping at the first failure, then re-runs the read-only check and reports anything the filesystem didn't actually honour.
 
-If the install or cache root **already has files in it** when you set this up (e.g., you're retrofitting a deployment that started out project-only), add `--retrofit` so the recipe also applies recursively and existing files become world-readable too:
+The order matters: the `chmod` comes **last**. Setting an ACL rewrites a path's mode bits, and on some filesystems (observed on NERSC CFS) that clears the setgid bit — so the mode is asserted after all the `setfacl` work, not before. If you hand-roll the recipe, keep that order.
+
+If the install or cache root **already has files in it** when you set this up (e.g., you're retrofitting a deployment that started out project-only), add `--retrofit` so the recipe also applies recursively — existing files become world-readable, and existing *subdirectories* get setgid so files created under them inherit the project group:
 
 ```bash
 rootstock setup-perms --cluster perlmutter --group m4845 --retrofit --apply

@@ -15,8 +15,8 @@ from .common import ROOTSTOCK_ROOT_ENV, resolve_cache_root
 def _resolve_roots(args) -> tuple[Path, Path | None] | None:
     """Resolve (install_root, cache_root) to check.
 
-    Priority: --cluster, then the positional root (whose argparse default is
-    $ROOTSTOCK_ROOT), then the config file. When the root isn't given via
+    Priority: --cluster, then --root or the positional root (whose argparse
+    default is $ROOTSTOCK_ROOT), then the config file. When the root isn't given via
     --cluster, the cache root comes from --cache-root or a reverse lookup in
     the cluster registry. Returns None (after printing an error) on bad input.
     """
@@ -28,7 +28,7 @@ def _resolve_roots(args) -> tuple[Path, Path | None] | None:
             return None
         return cluster.root, cluster.cache_root
 
-    root = args.root or load_config().root
+    root = getattr(args, "root_flag", None) or args.root or load_config().root
     if not root:
         print(
             f"Error: provide an install root path, --cluster <name>, or set {ROOTSTOCK_ROOT_ENV}.",

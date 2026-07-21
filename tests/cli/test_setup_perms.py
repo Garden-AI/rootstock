@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from rootstock.commands.setup_perms import cmd_setup_perms
+from rootstock.perms import PermIssue
 
 
 def _args(**overrides):
     base = dict(
         root=None,
+        root_flag=None,
         cache_root=None,
         cluster=None,
         group="m4845",
@@ -84,12 +87,47 @@ def test_apply_runs_commands_after_confirmation(monkeypatch, capsys):
         return SimpleNamespace(returncode=0, stderr="")
 
     monkeypatch.setattr("rootstock.commands.setup_perms.subprocess.run", fake_run)
+    monkeypatch.setattr("rootstock.commands.setup_perms.check_permissions", lambda *a, **k: [])
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
 
     rc = cmd_setup_perms(_args(root="/install/root", apply=True))
     assert rc == 0
-    assert ["chmod", "2775", "/install/root"] in calls
+    # The mode bits are asserted last, after the ACL work that can clear setgid.
+    assert calls[-1] == ["chmod", "2775", "/install/root"]
     assert "Permissions applied." in capsys.readouterr().out
+
+
+def test_apply_reports_issues_that_survive(monkeypatch, capsys):
+    """Every command exiting 0 doesn't mean the roots ended up correct."""
+    monkeypatch.setattr(
+        "rootstock.commands.setup_perms.subprocess.run",
+        lambda argv, capture_output=False, text=False: SimpleNamespace(returncode=0, stderr=""),
+    )
+    monkeypatch.setattr(
+        "rootstock.commands.setup_perms.check_permissions",
+        lambda *a, **k: [PermIssue(Path("/install/root"), "setgid bit not set")],
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    rc = cmd_setup_perms(_args(root="/install/root", apply=True))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "still look wrong" in err
+    assert "setgid bit not set" in err
+
+
+def test_apply_accepts_root_flag(monkeypatch, capsys):
+    """--root is accepted alongside the positional form."""
+    monkeypatch.setattr(
+        "rootstock.commands.setup_perms.subprocess.run",
+        lambda argv, capture_output=False, text=False: SimpleNamespace(returncode=0, stderr=""),
+    )
+    monkeypatch.setattr("rootstock.commands.setup_perms.check_permissions", lambda *a, **k: [])
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    rc = cmd_setup_perms(_args(root=None, root_flag="/install/root", apply=True))
+    assert rc == 0
+    assert "/install/root" in capsys.readouterr().out
 
 
 def test_apply_aborts_without_confirmation(monkeypatch, capsys):
@@ -109,7 +147,7 @@ def test_apply_bails_on_first_failure(monkeypatch, capsys):
 
     def fake_run(argv, capture_output=False, text=False):
         calls.append(argv)
-        # Fail on the second command (chgrp).
+        # Fail on the first command (chgrp).
         if argv[0] == "chgrp":
             return SimpleNamespace(returncode=1, stderr="chgrp: invalid group")
         return SimpleNamespace(returncode=0, stderr="")
