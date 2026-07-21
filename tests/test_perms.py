@@ -21,29 +21,66 @@ from rootstock.perms import (
 def test_render_single_filesystem():
     cmds = render_commands("/install/root", group="m4845")
     lines = [format_command(c) for c in cmds]
+    # chmod goes last: setting an ACL rewrites the mode and can drop setgid.
     assert lines == [
-        "chmod 2775 /install/root",
         "chgrp m4845 /install/root",
         "setfacl -m g:m4845:rwx /install/root",
         "setfacl -dm g:m4845:rwx /install/root",
+        "setfacl -dm o::r-X /install/root",
+        "chmod 2775 /install/root",
     ]
 
 
 def test_render_split_filesystem():
     cmds = render_commands("/install/root", cache_root="/cache/root", group="m4845")
     lines = [format_command(c) for c in cmds]
-    # Install-root commands plus the two cache-root mode/group commands.
+    # Mode, group, and a default ACL so new weights are born world-readable.
     assert "chmod 2755 /cache/root" in lines
     assert "chgrp m4845 /cache/root" in lines
-    # No named-group ACL on the cache root.
-    assert not any("setfacl" in line and "/cache/root" in line for line in lines)
+    assert "setfacl -dm o::r-X /cache/root" in lines
+    # ...but no named-group ACL: maintainer-only-write on the cache is the
+    # accepted default.
+    assert not any("g:m4845" in line and "/cache/root" in line for line in lines)
 
 
 def test_render_cache_root_same_as_install_emits_nothing_extra():
     cmds = render_commands("/install/root", cache_root="/install/root", group="m4845")
     lines = [format_command(c) for c in cmds]
     assert not any("/cache" in line for line in lines)
-    assert len(cmds) == 4
+    assert lines == [format_command(c) for c in render_commands("/install/root", group="m4845")]
+
+
+def test_render_chmod_follows_every_setfacl():
+    """Every path's chmod must come after the last setfacl touching that path.
+
+    A setfacl can rewrite the mode bits (and drop setgid on some filesystems),
+    so a chmod-first recipe leaves the root without setgid — the NERSC CFS bug.
+    """
+    for retrofit in (False, True):
+        cmds = render_commands(
+            "/install/root", cache_root="/cache/root", group="m4845", retrofit=retrofit
+        )
+        for root in ("/install/root", "/cache/root"):
+            touching = [i for i, c in enumerate(cmds) if root in c]
+            chmods = [i for i in touching if cmds[i][0] == "chmod"]
+            setfacls = [i for i in touching if cmds[i][0] == "setfacl"]
+            assert chmods, f"no chmod for {root} (retrofit={retrofit})"
+            assert all(i < min(chmods) for i in setfacls), (
+                f"setfacl runs after chmod for {root} (retrofit={retrofit})"
+            )
+
+
+def test_render_covers_what_the_checker_demands_of_every_root():
+    """Both roots get a default ACL granting other r-x.
+
+    ``_check_root`` reports "no default ACL" / "default ACL doesn't grant other
+    r-x" for the cache root as well as the install root, so a recipe that skips
+    the cache leaves setup-perms --apply reporting issues it never tried to fix.
+    """
+    cmds = render_commands("/install/root", cache_root="/cache/root", group="m4845")
+    for root in ("/install/root", "/cache/root"):
+        defaults = [c for c in cmds if c[0] == "setfacl" and "-dm" in c and root in c]
+        assert any("o::r-X" in c for c in defaults), f"no default other ACL for {root}"
 
 
 def test_render_retrofit_adds_recursive_variants():
@@ -59,6 +96,16 @@ def test_render_retrofit_adds_recursive_variants():
     assert "setfacl -R -dm o::r-X /cache/root" in lines
     # ...but no recursive named-group ACL on the cache root.
     assert "setfacl -R -m g:m4845:rwX /cache/root" not in lines
+
+
+def test_render_retrofit_sets_setgid_on_existing_dirs():
+    cmds = render_commands("/install/root", cache_root="/cache/root", group="m4845", retrofit=True)
+    lines = [format_command(c) for c in cmds]
+    assert "find /install/root -type d -exec chmod g+s '{}' +" in lines
+    assert "find /cache/root -type d -exec chmod g+s '{}' +" in lines
+    # Without --retrofit only the root itself is touched.
+    plain = [format_command(c) for c in render_commands("/install/root", group="m4845")]
+    assert not any(line.startswith("find ") for line in plain)
 
 
 # --------------------------------------------------------------------------- #

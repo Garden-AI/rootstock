@@ -1,10 +1,14 @@
 """
-Cluster configuration for Rootstock.
+Cluster registry for Rootstock: a name -> path bootstrap.
 
-This module provides mappings from cluster names to install roots and
-model-weight cache roots. On most clusters the two coincide; on clusters
-where they live on different filesystems (e.g., Perlmutter — CFS for code,
-PSCRATCH for the flock-friendly cache) the cluster declares both.
+The registry exists so users can say ``cluster="perlmutter"`` instead of
+remembering an install path. Everything else about an install — most
+importantly where its model-weight cache lives — is declared by the install
+itself in ``{root}/layout.json`` (see ``rootstock.layout``), because a
+registry baked into every release goes stale in pinned clients while the
+install's own declaration travels with the install. The per-cluster
+``cache_root`` here remains only as a fallback for legacy roots that predate
+the declaration.
 """
 
 from __future__ import annotations
@@ -42,13 +46,20 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
         root=Path("/eagle/Garden-Ai/rootstock"),
     ),
     "perlmutter": Cluster(
-        root=Path("/global/cfs/cdirs/m4845/rootstock"),
-        cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),
+        root=Path("/global/cfs/cdirs/m5268/rootstock"),
+        cache_root=Path("/pscratch/sd/o/oprice/rootstock-cache"),
     ),
-    "delta": Cluster(
-        root=Path("/work/hdd/data/rootstock")
-    )
+    "delta": Cluster(root=Path("/work/hdd/data/rootstock")),
+    # ORNL Frontier (AMD MI250X). The install root is a User-Managed Software
+    # area, which is read-only on compute nodes -- fine for serving, since
+    # workers only read their env. The cache is split onto Lustre because
+    # model libraries write weights there at runtime.
+    "frontier": Cluster(
+        root=Path("/sw/frontier/ums/ums047/rootstock"),
+        cache_root=Path("/lustre/orion/ums047/world-shared/rootstock-cache"),
+    ),
 }
+
 
 def get_cluster(cluster: str) -> Cluster:
     """Look up a known cluster by name."""
@@ -72,9 +83,15 @@ def get_cache_root_for_cluster(cluster: str) -> Path:
 
 
 def get_cluster_for_root(root: Path | str) -> str | None:
-    """Reverse lookup: cluster name for a given install root path."""
+    """Reverse lookup: cluster name for a given install root path.
+
+    Returns None when the root is unknown — or when it is ambiguous because
+    several clusters share one install (e.g. sophia/polaris on Eagle), in
+    which case picking one by registry order would be a guess. Callers that
+    need a definite identity must ask for an explicit cluster name.
+    """
     root_str = str(root)
-    for cluster, info in CLUSTER_REGISTRY.items():
-        if str(info.root) == root_str:
-            return cluster
+    matches = [name for name, info in CLUSTER_REGISTRY.items() if str(info.root) == root_str]
+    if len(matches) == 1:
+        return matches[0]
     return None

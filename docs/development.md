@@ -74,6 +74,16 @@ Never: new message types, changed payload layouts, new required
 one of the four channels above, it waits for a major protocol revision and
 a coordinated env rebuild.
 
+**The LAMMPS styles are a third frozen peer.** `rootstock_ipi.cpp` (shared
+by `fix rootstock` and `pair_style rootstock`) is an independent
+implementation of the wire protocol that users compile into their LAMMPS
+binaries — it has its own freeze horizon, separate from both the PyPI
+client and the env-pinned worker. A binary built today must keep driving
+every worker ever deployed, and no client- or worker-side change may assume
+LAMMPS binaries get rebuilt. Wire-protocol changes must be checked against
+all **three** implementations: `protocol.py` server side, `protocol.py`
+worker side, and `lammps/rootstock_ipi.cpp`.
+
 `tests/protocol/test_wire_golden.py` pins the exact bytes of every message.
 If it fails, the change breaks compatibility with every deployed
 environment — fix the change, not the test. (Post-1.0, a CI job should

@@ -5,7 +5,10 @@
 #     "ase>=3.22",
 #     "huggingface_hub",
 #     "matgl",
-#     "nvalchemi-toolkit-ops",
+#     # 0.4+ needs torch>=2.8 at runtime (custom-op registration uses string
+#     # annotations infer_schema can't parse on older torch) but only declares
+#     # the constraint on its extras, so the resolver won't catch it.
+#     "nvalchemi-toolkit-ops<0.4",
 #     "pymatgen",
 #     "monty",
 #     "ruamel.yaml",

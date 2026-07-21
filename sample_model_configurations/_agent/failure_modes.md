@@ -29,12 +29,12 @@ download progress. Not a real failure; just noisy.
 **Signature:** `No solution found ... Because the current Python version
 (3.10.x) does not satisfy Python>=3.11,<3.14 and fairchem-core==2.20.0
 depends on Python>=3.11`.
-**Cause:** fairchem-core 2.20+ dropped Python 3.10. The probe image default
-(`python_version="3.10"`) and a config `requires-python = ">=3.10"` no
-longer resolve.
+**Cause:** fairchem-core 2.20+ dropped Python 3.10; a config declaring an
+older `requires-python` floor (or an old probe image default) no longer
+resolves. The probe image default and all shipped configs declare `>=3.11`
+as of the rootstock 3.11 bump, so this only bites stale local copies.
 **Fix:** Set `python_version="3.11"` on the `@probe_image(...)` and bump the
-config's PEP 723 `requires-python = ">=3.11"`. (eSEN's pinned
-`fairchem-core>=2.0.0` still builds on 3.10; only the 2.20 envs need 3.11.)
+config's PEP 723 `requires-python = ">=3.11"`.
 
 **Signature:** `Failed to download and build '<name> @ git+...'` →
 `Package metadata name '<other-name>' does not match given name '<name>'`.
@@ -255,6 +255,222 @@ lightning and all versions of torchmd-net depend on lightning...".
 that prevents uv from resolving it, even though the package itself works fine.
 **Fix:** Same approach as matgl — install with `--no-deps` and list runtime deps
 (torch, ase, torch-geometric, torch-scatter, torch-sparse, torch-cluster) separately.
+
+---
+
+# AMD / ROCm (droplet_workshop, targeting Frontier)
+
+## pytorch-triton-rocm not found on PyPI
+
+**Signature:** `No solution found ... Because there is no version of
+pytorch-triton-rocm==3.5.1 and torch==2.9.1+rocm6.4 depends on
+pytorch-triton-rocm==3.5.1, we can conclude that your requirements are
+unsatisfiable.`
+**Cause:** ROCm torch depends on `pytorch-triton-rocm`, which is published
+*only* on the PyTorch ROCm index, never on PyPI. With `explicit = true` on the
+index, only packages named in `[tool.uv.sources]` are drawn from it — so the
+transitive triton dep was looked up on PyPI and not found. A `[tool.uv.sources]`
+entry alone does NOT fix this: uv only applies sources to packages that appear
+in `dependencies`.
+**Fix:** List `pytorch-triton-rocm` as a *direct* dependency in the PEP 723
+block AND map it in `[tool.uv.sources]`. No CUDA analog: `triton` is on PyPI,
+so this failure cannot occur on NVIDIA.
+
+## Index shadowing silently downgrades packages (DANGEROUS)
+
+**Signature:** No error at all. The env builds, but resolves e.g.
+`torchmetrics==1.0.3` instead of `1.9.0`.
+**Cause:** "Fixing" the triton failure by dropping `explicit = true` makes the
+ROCm index a general-purpose index. It mirrors an old subset of PyPI, and uv
+takes each package from the first index that carries it — so unrelated packages
+silently resolve to stale versions. This produces a *working* env running
+different library code: the worst class of bug for reproducible science.
+**Fix:** Keep `explicit = true`. Never relax index isolation to fix a missing
+package; add the package as a direct dep instead (see above).
+
+## Lockfile install can't find pinned versions on the ROCm index
+
+**Signature:** `Because there is no version of filelock==3.29.7 and you require
+filelock==3.29.7 ...` — during `uv pip install -r <lock>`, after `uv export`
+succeeded. Hint text mentions `--index-strategy unsafe-best-match`.
+**Cause:** `uv export --script` honors the PEP 723 index rules, but the emitted
+lockfile carries only pinned versions. At install time uv again takes each
+package from the first index that carries it *at all* — and the ROCm index
+mirrors an old `filelock`/`sympy`/etc., which don't match the pins.
+**Fix:** Pass the config's index URLs plus `--index-strategy unsafe-best-match`
+to the install. Safe here precisely because the lock pins exact versions that
+were already resolved under the strict `explicit` rules.
+
+## ROCm torch wheel is ~4.2 GB (15+ GB installed)
+
+**Signature:** `No space left on device (os error 28)` mid-install, often as
+`Failed to clone .../torch/lib/libaotriton_v2.so`.
+**Cause:** ROCm torch fat-binaries kernels for many gfx targets and bundles the
+ROCm math libraries: ~2x the CUDA wheel. One venv is ~15-17 GB installed.
+**Fix:** Put the venv root AND the uv cache on a large volume, not the
+container/boot disk. Budget ~15-17 GB per env plus ~20 GB of shared wheel cache.
+
+## torch-scatter / torch-sparse on ROCm: no wheels, must source-build
+
+**Signature:** uv/pip cannot resolve `torch-scatter` on ROCm; `data.pyg.org`
+serves only `+cuXXX` wheels (any rocm URL there 404s/403s).
+**Cause:** The PyG project publishes CUDA wheels only — their build matrix
+(torch x python x CUDA) already explodes, and ROCm isn't in it. AMD ships fat
+ROCm wheels for *torch*, but nobody ships them for the third-party C++
+extensions.
+**Fix:** Source-build. VERIFIED WORKING on MI300X — full recipe below. The
+resulting .so carries both gfx90a and gfx942, so ONE artifact serves Frontier
+(MI250X) and MI300X. You do NOT need an MI250X to compile for one.
+
+    # 1. Toolchain must MATCH the torch wheel's ROCm major.minor.
+    #    A stock ROCm 5.7 hipcc CANNOT compile torch-2.9/rocm6.4 sources.
+    apt install hipcc hip-dev rocm-llvm rocm-device-libs rocm-core  # from repo.radeon.com/rocm/apt/6.4
+    export ROCM_PATH=/opt/rocm-6.4.0 HIP_PATH=/opt/rocm-6.4.0
+    export PATH=$ROCM_PATH/bin:$ROCM_PATH/llvm/bin:$PATH
+
+    # 2. Build for BOTH arches: Frontier's MI250X and the build box's MI300X.
+    export PYTORCH_ROCM_ARCH="gfx90a;gfx942"
+
+    # 3. Install from GIT, not PyPI (see warp-mask entry below).
+    pip install --no-build-isolation \
+      "torch-scatter @ git+https://github.com/rusty1s/pytorch_scatter.git"
+
+Verify with `check_isa.py <env> --require gfx90a`, and confirm the GPU op is
+actually correct — not merely importable:
+
+    torch_scatter.scatter_add(torch.tensor([1.,2.,3.,4.], device="cuda"),
+                              torch.tensor([0,0,1,1],   device="cuda"))
+    # -> [3.0, 7.0]
+
+## torch-scatter PyPI release assumes 32-lane CUDA warps (breaks on AMD)
+
+**Signature:** Source build fails with
+`static assertion failed due to requirement 'sizeof(unsigned int) == 8':
+The mask must be a 64-bit integer.` in
+`amd_warp_sync_functions.h`, from `__shfl_up_sync<unsigned int, __half>`
+instantiated at `csrc/hip/../hip/utils.cuh:13`.
+**Cause:** A HARDWARE MODEL MISMATCH, not packaging. NVIDIA executes in warps
+of 32 threads, so a warp-shuffle's lane mask is a 32-bit int. AMD executes in
+wavefronts of 64 threads, so the mask must be 64-bit. torch-scatter's released
+source hardcodes CUDA's `unsigned int` mask; ROCm 6.4 added a static_assert
+that rejects it. (ROCm 5.7 didn't assert, but failed differently — ambiguous
+`__shfl_up` overloads.)
+**Fix:** torch-scatter's **git main already fixes this** and the fix is
+UNRELEASED on PyPI:
+
+    #ifdef USE_ROCM
+      using warp_mask_t = unsigned long long;   // 64-lane wavefront
+    #else
+      using warp_mask_t = unsigned int;         // 32-lane warp
+    #endif
+
+So `pip install torch-scatter` is broken on ROCm while the repo is fine. Always
+install these PyG extensions from git on AMD. Expect the same class of bug in
+any CUDA kernel that hardcodes `0xffffffff` as a warp mask.
+
+## torch-sparse spmm SILENTLY COMPUTES WRONG NUMBERS on ROCm (do not ship)
+
+**Signature:** None. No error, no warning. It builds, imports, and returns
+plausible-looking numbers that are WRONG.
+
+    dense reference  : [[2, 2, 2], [7, 7, 7]]
+    torch_sparse CPU : [[2, 2, 2], [7, 7, 7]]   correct
+    torch_sparse GPU : [[2, 2, 2], [2, 2, 2]]   WRONG
+    random 64x64 spmm: max|GPU - dense| = 12.47
+
+**Cause:** The deeper half of the warp-width problem, and it is SEMANTIC, not a
+type error. Fixing the 32->64-bit mask type (see the warp-mask entry above) only
+silences the compiler. torch-sparse's `spmm` kernel is *algorithmically built
+around a 32-lane warp*: it has a warp cooperatively reduce one row of the sparse
+matrix via shuffles, looping over lanes. AMD wavefronts are **64** lanes, so the
+reduction spans the wrong thread set and drops contributions — row 1 above lost
+its second nonzero (3+4=7 became 2).
+
+**THE TRAP:** patch-until-it-compiles produces a working-looking install that
+corrupts the physics. The probe CANNOT catch this — energies and forces still
+come out, they are just wrong. Only a CPU-vs-GPU numerical comparison catches it.
+
+**Fix:** Do NOT ship torch-sparse on ROCm on the strength of a successful build.
+Either (a) confirm the model never calls `torch_sparse.spmm` (many MLIPs pull
+torch-sparse in as a transitive dep of PyG but only ever use torch-scatter), or
+(b) rewrite the spmm kernel for a 64-lane wavefront (`warpSize` is not 32 on
+AMD), or (c) force the CPU/fallback path for spmm.
+
+**ALWAYS numerically validate a source-built GPU extension against CPU.** Not
+"does it import", not "does the probe pass" — compare the numbers:
+
+    cpu = op(src, idx)
+    gpu = op(src.cuda(), idx.cuda()).cpu()
+    assert (cpu - gpu).abs().max() < 1e-4
+
+Verified on MI300X / torch 2.9.1+rocm6.4:
+  torch-scatter  CORRECT (scatter_add/mean/max, segment_csr; max err ~5e-6)
+  torch-cluster  CORRECT (radius_graph edge-identical to CPU)
+  torch-sparse   WRONG   (spmm)
+
+## gfx942-only extension: works on MI300X, dies on Frontier
+
+**Signature:** Extension builds and probes fine on the MI300X box, then on
+Frontier: `HSA_STATUS_ERROR_INVALID_ISA`, "invalid device function", or a
+segfault at first kernel launch.
+**Cause:** A source build targets only the build host's arch (gfx942) unless
+told otherwise. Official torch wheels are unaffected — they are fat binaries
+carrying gfx90a (verified: 23/23 fat libs in the mace env).
+**Fix:** `PYTORCH_ROCM_ARCH="gfx90a;gfx942"` before building, then gate on it —
+the probe CANNOT catch this, since the code runs fine on the build box:
+
+    python3 check_isa.py <env> --require gfx90a
+
+## CUDA torch wheel resolved on a ROCm box
+
+**Signature:** `torch.cuda.is_available()` returns False on a machine where
+`rocm-smi` shows the GPU; or import errors mentioning `libcudart.so` /
+`libnvrtc`.
+**Cause:** The config resolved torch from plain PyPI (a CUDA build) instead of
+the ROCm index.
+**Fix:** Add to the PEP 723 block: `[tool.uv.sources] torch = { index = "pytorch-rocm" }`
+plus `[[tool.uv.index]] name = "pytorch-rocm" url = "https://download.pytorch.org/whl/rocm6.4"
+explicit = true`. Note `--device cuda` is correct on ROCm — HIP devices are
+exposed under the `cuda` API; only the wheel source changes.
+
+## No ROCm wheels for torch-scatter / torch-sparse / torch-cluster
+
+**Signature:** `uv export` / install fails resolving `torch-scatter` against the
+rocm index, or only `+cuXXX` wheels are found on data.pyg.org.
+**Cause:** data.pyg.org publishes CUDA wheels only; there is no official ROCm
+build of the PyG C extensions.
+**Fix (in order):** (1) Try dropping torch-scatter/sparse entirely — PyG >= 2.3
+falls back to pure-torch scatter ops and many models work without them.
+(2) Source-build on the box with `PYTORCH_ROCM_ARCH="gfx90a;gfx942"` (both
+Frontier MI250X and droplet MI300X) and install with `--no-deps`.
+
+## gfx arch mismatch between droplet and Frontier
+
+**Signature:** Works on the MI300X droplet, but on MI250X:
+`HSA_STATUS_ERROR_INVALID_ISA`, "invalid device function", or instant
+segfault at first kernel launch.
+**Cause:** A source-built extension was compiled only for gfx942 (MI300X);
+Frontier's MI250X is gfx90a. Official torch ROCm wheels are multi-arch and
+unaffected — only locally-built extensions hit this.
+**Fix:** Rebuild with `PYTORCH_ROCM_ARCH="gfx90a;gfx942"`.
+
+## cuEquivariance / CUDA-only acceleration packages
+
+**Signature:** Install failure or import error for `cuequivariance*` on ROCm.
+**Cause:** NVIDIA-only package.
+**Fix:** Omit it. MACE and friends run on the pure e3nn/torch path (slower,
+but the configs never enabled acceleration anyway).
+
+## MIOpen cache writes at first inference
+
+**Signature:** First inference is slow or errors with MIOpen unable to write
+its cache in a read-only HOME.
+**Cause:** MIOpen (ROCm's cuDNN analog) writes kernel-tuning caches under
+`$HOME/.cache/miopen` — the ROCm analog of the CUDA_CACHE_PATH redirect
+rootstock already does.
+**Fix:** On the droplet the workshop's HOME redirect covers it. On Frontier,
+set `MIOPEN_USER_DB_PATH` / `MIOPEN_CACHE_DIR` to a writable per-user dir
+alongside rootstock's existing cache redirection.
 
 ---
 

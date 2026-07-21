@@ -1,5 +1,6 @@
 #!/bin/bash
-# Install fix_rootstock into a LAMMPS source tree.
+# Install the rootstock styles (fix rootstock, pair_style rootstock) into a
+# LAMMPS source tree.
 #
 # Usage:
 #   ./install.sh /path/to/lammps/src
@@ -23,8 +24,12 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-cp "$SCRIPT_DIR/fix_rootstock.h"   "$LAMMPS_SRC/"
-cp "$SCRIPT_DIR/fix_rootstock.cpp" "$LAMMPS_SRC/"
+cp "$SCRIPT_DIR/rootstock_ipi.h"    "$LAMMPS_SRC/"
+cp "$SCRIPT_DIR/rootstock_ipi.cpp"  "$LAMMPS_SRC/"
+cp "$SCRIPT_DIR/fix_rootstock.h"    "$LAMMPS_SRC/"
+cp "$SCRIPT_DIR/fix_rootstock.cpp"  "$LAMMPS_SRC/"
+cp "$SCRIPT_DIR/pair_rootstock.h"   "$LAMMPS_SRC/"
+cp "$SCRIPT_DIR/pair_rootstock.cpp" "$LAMMPS_SRC/"
 
-echo "Installed fix_rootstock into $LAMMPS_SRC"
-echo "Rebuild LAMMPS to pick up the new fix."
+echo "Installed fix rootstock and pair_style rootstock into $LAMMPS_SRC"
+echo "Rebuild LAMMPS to pick up the new styles."

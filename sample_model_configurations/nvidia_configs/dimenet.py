@@ -1,9 +1,12 @@
 # /// script
-# requires-python = ">=3.10,<3.11"
+# requires-python = ">=3.11,<3.12"
 # dependencies = [
 #     "torch>=2.4.0",
 #     "fairchem-core>=1.0.0,<2.0.0",
 #     "ase>=3.22",
+#     # scipy.special.sph_harm was removed in scipy 1.17 and fairchem-core 1.x
+#     # still imports it — an uncapped rebuild breaks at import (Delta, 2026-07-18).
+#     "scipy<1.17",
 #     "torch-geometric",
 #     "torch-scatter",
 #     "torch-sparse",

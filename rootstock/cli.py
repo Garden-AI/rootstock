@@ -38,13 +38,13 @@ Commands:
     rootstock setup-perms [<root>] [--cluster <name>] --group <group> [--apply] [--retrofit]
         Render (dry-run) or apply the world-readable shared-install permission
         recipe for an install root (and split cache root):
-            rootstock setup-perms --cluster perlmutter --group m4845 --apply
+            rootstock setup-perms --cluster perlmutter --group m5268 --apply
 
     rootstock check-perms [<root>] [--cluster <name>] [--group <group>] [--json]
         Read-only check that the install root, split cache root, and their
         ancestor directories satisfy the shared-install permission recipe.
         Exits 0 when clean, 1 when issues are found:
-            rootstock check-perms --cluster perlmutter --group m4845
+            rootstock check-perms --cluster perlmutter --group m5268
 """
 
 import argparse
@@ -59,7 +59,9 @@ from .commands import (
     cmd_init,
     cmd_install,
     cmd_list,
-    cmd_manifest,
+    cmd_manifest_init,
+    cmd_manifest_push,
+    cmd_manifest_show,
     cmd_new_env,
     cmd_resolve,
     cmd_serve,
@@ -69,16 +71,10 @@ from .commands import (
 )
 from .commands.common import ROOTSTOCK_ROOT_ENV
 from .config import DEFAULT_CONFIG_FILE
+from .manifest import ManifestError
 
 
 def main():
-    # `rootstock benchmark ...` forwards everything after the subcommand to the
-    # benchmark's own argument parser. Intercept it before the main parser runs,
-    # since argparse can't cleanly pass arbitrary flags through a subparser.
-    argv = sys.argv[1:]
-    if argv and argv[0] == "benchmark":
-        sys.exit(cmd_benchmark(argv[1:]))
-
     parser = argparse.ArgumentParser(
         prog="rootstock",
         description="Rootstock MLIP environment manager",
@@ -159,6 +155,14 @@ def main():
     )
     install_parser.add_argument(
         "--force", action="store_true", help="Update registration and/or rebuild if exists"
+    )
+    install_parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help=(
+            "Re-resolve all dependencies to the latest allowed versions instead of "
+            "honoring the environment's existing lockfile"
+        ),
     )
     install_parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     install_parser.add_argument(
@@ -264,6 +268,14 @@ def main():
         action="store_true",
         help="Output the manifest as JSON (with computed verified_current per checkpoint)",
     )
+    status_parser.add_argument(
+        "--sizes",
+        action="store_true",
+        help=(
+            "Also compute per-directory cache sizes (full recursive stat of the "
+            "model cache — can take minutes on Lustre/GPFS for large caches)"
+        ),
+    )
     status_parser.set_defaults(func=cmd_status)
 
     # list command
@@ -305,6 +317,13 @@ def main():
         nargs="?",
         help="Install root path (omit when using --cluster)",
     )
+    # --root is how every other command spells it; accept both rather than
+    # failing with "unrecognized arguments" on the obvious guess.
+    setup_perms_parser.add_argument(
+        "--root",
+        dest="root_flag",
+        help="Install root path (same as the positional argument)",
+    )
     setup_perms_parser.add_argument(
         "--cache-root",
         help="Cache root path, when on a separate filesystem from the install root",
@@ -316,7 +335,7 @@ def main():
     setup_perms_parser.add_argument(
         "--group",
         required=True,
-        help="Project group that owns the install (e.g., m4845)",
+        help="Project group that owns the install (e.g., m5268)",
     )
     setup_perms_parser.add_argument(
         "--apply",
@@ -347,6 +366,11 @@ def main():
         nargs="?",
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Install root path (default: ${ROOTSTOCK_ROOT_ENV}; or use --cluster)",
+    )
+    check_perms_parser.add_argument(
+        "--root",
+        dest="root_flag",
+        help="Install root path (same as the positional argument)",
     )
     check_perms_parser.add_argument(
         "--cache-root",
@@ -405,10 +429,11 @@ def main():
     )
     serve_parser.set_defaults(func=cmd_serve)
 
-    # benchmark command. Registered only so it appears in `rootstock --help`;
-    # the actual dispatch happens in the early intercept at the top of main(),
-    # which forwards all following args to the benchmark's own parser. (argparse
-    # REMAINDER can't reliably capture leading options, so we bypass it.)
+    # benchmark command. Everything after the subcommand is forwarded to the
+    # benchmark's own parser via the parse_known_args leftovers at the bottom
+    # of main() — argparse.REMAINDER cannot capture leading options (--list as
+    # the first forwarded arg errors), so the subparser declares no arguments
+    # and add_help=False lets --help through to the benchmark parser.
     subparsers.add_parser(
         "benchmark",
         help="Measure i-PI IPC overhead vs. in-env direct calls",
@@ -442,7 +467,7 @@ def main():
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
     )
     manifest_show_parser.add_argument("--json", action="store_true", help="Output as JSON")
-    manifest_show_parser.set_defaults(func=cmd_manifest)
+    manifest_show_parser.set_defaults(func=cmd_manifest_show)
 
     # manifest push
     manifest_push_parser = manifest_subparsers.add_parser(
@@ -454,7 +479,7 @@ def main():
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
     )
-    manifest_push_parser.set_defaults(func=cmd_manifest)
+    manifest_push_parser.set_defaults(func=cmd_manifest_push)
 
     # manifest init
     manifest_init_parser = manifest_subparsers.add_parser(
@@ -481,10 +506,23 @@ def main():
         action="store_true",
         help="Don't push manifest to backend (useful during development)",
     )
-    manifest_init_parser.set_defaults(func=cmd_manifest)
+    manifest_init_parser.set_defaults(func=cmd_manifest_init)
 
-    args = parser.parse_args()
-    sys.exit(args.func(args))
+    # parse_known_args instead of parse_args so `rootstock benchmark ...` can
+    # forward arbitrary flags to the benchmark's own parser. Every other
+    # command keeps strict parsing via the explicit error below.
+    args, extra = parser.parse_known_args()
+    if args.command == "benchmark":
+        sys.exit(cmd_benchmark(extra))
+    if extra:
+        parser.error(f"unrecognized arguments: {' '.join(extra)}")
+    try:
+        sys.exit(args.func(args))
+    except ManifestError as exc:
+        # A corrupt or incompatible manifest is a data-integrity stop, not a
+        # crash: print the diagnosis cleanly instead of a traceback.
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

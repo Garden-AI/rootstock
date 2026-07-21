@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rootstock runs MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments on HPC clusters, communicating via the i-PI protocol over Unix sockets.
 
-**Current version: v0.8** - Manifest schema v3; canonical-checkpoint-id API.
+Versioning is dynamic (git tags via uv-dynamic-versioning) — check `rootstock --version`. Manifest schema v4 (older schemas migrate in place on load); canonical-checkpoint-id API.
 
 ## Commands
 
@@ -18,8 +18,9 @@ uv pip install -e ".[dev]"
 
 ### CLI Commands
 ```bash
-# Build a pre-built environment (venv only — no model weights)
-rootstock install <env_source.py> [--root <path>] [--force]
+# Build a pre-built environment (venv only — no model weights). First build
+# writes environments/<name>.py.lock; rebuilds honor it unless --upgrade.
+rootstock install <env_source.py> [--root <path>] [--force] [--upgrade]
 
 # Download + verify a checkpoint by canonical id (idempotent). Use --no-verify on login nodes.
 rootstock add <checkpoint-id> [--kwarg key=val ...] [--device cuda] [--no-verify]
@@ -64,7 +65,7 @@ Main Process                          Worker Process (subprocess)
 
 ### Core Files
 
-- `rootstock/cli.py` - CLI commands (`build`, `status`, `list`, `register`)
+- `rootstock/cli.py` + `rootstock/commands/` - CLI (`install`, `add`, `smoke-test`, `status`, `serve`, ... — thin adapters over `rootstock/operations.py`)
 - `rootstock/calculator.py` - ASE Calculator interface (main entry point)
 - `rootstock/server.py` - Spawns worker subprocess, manages socket lifecycle
 - `rootstock/worker.py` - i-PI client state machine
@@ -75,17 +76,20 @@ Main Process                          Worker Process (subprocess)
 
 ```
 {root}/
+├── layout.json             # on-disk layout version (clients refuse newer layouts)
 ├── .python/                # uv-managed Python interpreters (portable)
-│   └── cpython-3.10.19-linux-x86_64-gnu/
+│   └── cpython-3.11.9-linux-x86_64-gnu/
 ├── environments/           # Environment SOURCE files (*.py with PEP 723 + CHECKPOINTS)
 │   ├── mace.py
+│   ├── mace.py.lock        # uv lockfile — rebuilds resolve from this
 │   ├── uma.py
 │   └── tensornet.py
 ├── envs/                   # Pre-built virtual environments
 │   ├── mace/
 │   │   ├── bin/python      # Symlinks to .python/
 │   │   ├── lib/python3.11/site-packages/
-│   │   └── env_source.py   # Copy of source for imports
+│   │   ├── env_source.py   # Copy of source for imports
+│   │   └── env_source.py.lock  # what this build was resolved from
 │   └── uma/
 └── cache/                  # XDG_CACHE_HOME for model weights
     ├── mace/
@@ -98,8 +102,10 @@ is mounted (HPC shared filesystem, NFS, Lustre, etc.).
 
 On clusters where the right filesystem for code is different from the right
 filesystem for the model-weight cache (e.g., Perlmutter — code on CFS, cache
-on PSCRATCH), the cluster registry encodes both as `root` and `cache_root`.
-Most clusters use the same path for both.
+on PSCRATCH), the install declares its own `cache_root` in `{root}/layout.json`
+(written by `install`/`init`). The cluster registry is only a name → path
+bootstrap; its `cache_root` field is a fallback for legacy installs that
+predate the declaration. Most clusters use the same path for both.
 
 ### Known Clusters
 
@@ -108,13 +114,14 @@ Most clusters use the same path for both.
 | `della` | `/scratch/gpfs/ROSENGROUP/common/rootstock` | (same as install root) |
 | `sophia` | `/eagle/Garden-Ai/rootstock` | (same as install root) |
 | `polaris` | `/eagle/Garden-Ai/rootstock` (shared with sophia) | (same as install root) |
-| `perlmutter` | `/global/cfs/cdirs/m4845/rootstock` | `/pscratch/sd/w/wengler/rootstock-cache` |
+| `perlmutter` | `/global/cfs/cdirs/m5268/rootstock` | `/pscratch/sd/o/oprice/rootstock-cache` |
 | `delta` | `/work/hdd/data/rootstock` | (same as install root) |
+| `frontier` | `/sw/frontier/ums/ums047/rootstock` | `/lustre/orion/ums047/world-shared/rootstock-cache` |
 
 ## API
 
 ```python
-# v0.8: single canonical checkpoint id; env is resolved automatically.
+# Single canonical checkpoint id; the hosting env is resolved automatically.
 with RootstockCalculator(
     cluster="delta",
     checkpoint="mace-mp-0-medium",
@@ -149,7 +156,7 @@ with RootstockCalculator(
 # 1. Create environment source file
 cat > environments/mace.py << 'EOF'
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.0"]
 # ///
 

@@ -13,9 +13,12 @@ Protocol Overview:
 Reference: https://docs.ipi-code.org/
 """
 
+import logging
 import socket
 
 import numpy as np
+
+logger = logging.getLogger("rootstock.protocol")
 
 # ASE units conversion
 BOHR_TO_ANGSTROM = 0.52917721067
@@ -46,15 +49,21 @@ class IPIProtocol:
 
         Args:
             sock: Connected socket object
-            log: Optional file object for logging (useful for debugging)
+            log: Optional file object for wire tracing. Only the worker side
+                passes this — worker logging is a file-object affair
+                controlled by ROOTSTOCK_WORKER_LOG (see worker_config.py).
+                When None (the client side), traces go to the
+                ``rootstock.protocol`` logger at DEBUG level.
         """
         self.socket = sock
         self.log = log
 
     def _log(self, *args):
-        """Write to log if logging is enabled."""
+        """Trace a wire event: to the worker's log file, or to stdlib logging."""
         if self.log is not None:
             print(*args, file=self.log, flush=True)
+        else:
+            logger.debug(" ".join(str(a) for a in args))
 
     # -------------------------------------------------------------------------
     # Low-level send/receive
@@ -241,13 +250,31 @@ class IPIProtocol:
 # -----------------------------------------------------------------------------
 
 
-def create_unix_socket_path(name: str) -> str:
+def create_private_socket_path(name: str) -> str:
     """
-    Create path for Unix domain socket following i-PI convention.
+    Create a fresh private (0700) directory and return a socket path inside it.
 
-    i-PI uses /tmp/ipi_<name> as the socket path.
+    Sockets historically lived at ``/tmp/ipi_<name>`` (the i-PI convention):
+    world-visible, with umask-derived permissions — race-able by other local
+    users on shared login nodes. A socket inside a ``mkdtemp`` directory is
+    reachable only by the owning user; no peer check is needed because other
+    users cannot traverse into the directory at all.
+
+    The caller owns the directory and must remove it (socket included) on
+    shutdown. Created under the default temp dir unless the resulting path
+    would threaten the ~104-byte ``sun_path`` limit, in which case /tmp is
+    used instead.
     """
-    return f"/tmp/ipi_{name}"
+    import os
+    import tempfile
+
+    sock_dir = tempfile.mkdtemp(prefix="rootstock-")
+    path = os.path.join(sock_dir, f"ipi_{name}")
+    if len(path) >= 100:
+        os.rmdir(sock_dir)
+        sock_dir = tempfile.mkdtemp(prefix="rootstock-", dir="/tmp")
+        path = os.path.join(sock_dir, f"ipi_{name}")
+    return path
 
 
 def create_server_socket(socket_path: str, timeout: float = None) -> socket.socket:

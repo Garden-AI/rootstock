@@ -30,11 +30,12 @@ with RootstockCalculator(
 | `checkpoint` | `str` | Yes | Canonical checkpoint id (e.g., `"mace-mp-0-medium"`, `"uma-s-1p1"`). The hosting env is resolved automatically by walking the installed envs and matching against each env's `CHECKPOINTS` table |
 | `cluster` | `str` | Yes* | Cluster name (e.g., `"delta"`, `"perlmutter"`) |
 | `root` | `str` | Yes* | Custom install-root path instead of a known cluster |
-| `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. Defaults to the cluster's registered `cache_root`, or to `root` if no cluster is in play |
+| `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. When omitted, the install's own declaration (`{root}/layout.json`) decides, falling back to the cluster registry for legacy roots, then to `root` |
 | `device` | `str` | No | `"cuda"` (default) or `"cpu"` |
 | `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `checkpoint` or `device` |
+| `timeout` | `float` | No | Socket timeout in seconds for worker operations (default 600, matching checkpoint verification — so the first real force call, which may pay for `torch.compile` or large neighbor lists, runs under the envelope verification exercised) |
 
-*Either `cluster` or `root` must be provided, but not both.
+*`cluster` and `root` are mutually exclusive. When neither is given, the calculator falls back to the `ROOTSTOCK_ROOT` environment variable and then the `root` in `~/.config/rootstock/config.toml` — the same resolution the CLI uses — so on a configured machine `RootstockCalculator(checkpoint=...)` alone works.
 
 ### Examples
 
@@ -57,6 +58,31 @@ with RootstockCalculator(...) as calc:
     energy = atoms.get_potential_energy()
 # Worker process is automatically terminated when exiting the context
 ```
+
+### Worker crashes and recovery
+
+A worker that dies mid-calculation (GPU OOM, batch-system kill) raises `rootstock.WorkerDiedError` carrying a post-mortem: the process exit code and the tail of the worker's captured output. The calculator tears the dead server down, so the **same calculator instance recovers on the next call** — a fresh worker is started automatically. There is no automatic retry of the failed calculation: the same configuration would likely fail the same way, so retrying is the caller's decision.
+
+```python
+from rootstock import WorkerDiedError
+
+try:
+    energy = atoms.get_potential_energy()
+except WorkerDiedError as exc:
+    print(exc)          # exit code + worker stderr tail (e.g. the OOM traceback)
+    ...                 # decide: smaller system, different device, give up
+```
+
+### Logging
+
+Client-side diagnostics use stdlib logging under the `rootstock` namespace — server lifecycle on `rootstock.server` (INFO/DEBUG), the full i-PI wire trace on `rootstock.protocol` (DEBUG):
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)  # or logging.getLogger("rootstock").setLevel(...)
+```
+
+The worker subprocess is separate: its verbosity is controlled by the `ROOTSTOCK_WORKER_LOG` environment variable (`stderr`, `stdout`, or a file path), and its output is captured and shown automatically when the worker fails.
 
 ## Available models
 
@@ -168,17 +194,23 @@ rootstock install ./mace.py
 # Install all environments from a directory
 rootstock install ./environments/
 
-# Rebuild an existing environment
+# Rebuild an existing environment (honors the env's lockfile)
 rootstock install mace --force
+
+# Rebuild and re-resolve dependencies to the latest allowed versions
+rootstock install mace --force --upgrade
 
 # Install without pushing manifest to backend
 rootstock install mace.py --no-push
 ```
 
+The first build resolves the env file's version ranges and writes a uv lockfile (`environments/<name>.py.lock`); later rebuilds install exactly the locked versions unless `--upgrade` is passed. See [Lockfiles and reproducible rebuilds](environments.md#lockfiles-and-reproducible-rebuilds).
+
 Options:
 
 - `--root <path>`: Specify root directory (or use `$ROOTSTOCK_ROOT`)
 - `--force`: Update registration and rebuild if environment exists
+- `--upgrade`: Re-resolve dependencies to the latest allowed versions instead of honoring the lockfile
 - `--verbose`, `-v`: Verbose output
 - `--no-push`: Skip pushing manifest to backend
 
@@ -232,14 +264,19 @@ Exit code is 0 if all tested checkpoints passed, 1 otherwise.
 Start a worker process for an external i-PI server (advanced usage). Takes a single canonical checkpoint id; the hosting env is resolved from the id.
 
 ```bash
+# Create the socket inside a private directory — a socket directly in /tmp
+# is world-visible and race-able by other users on shared nodes.
+SOCKET_DIR=$(mktemp -d)
 rootstock serve mace-mp-0-medium \
-  --socket /tmp/ipi_socket \
+  --socket "$SOCKET_DIR/ipi.sock" \
   --device cuda
 ```
 
 Options:
 
-- `--socket <path>`: Unix socket path for the i-PI server
+- `--socket <path>`: Unix socket path for the i-PI server. Place it inside a
+  private (0700) directory, e.g. from `mktemp -d` — the LAMMPS styles and
+  `RootstockServer` do this automatically for the sockets they create.
 - `--device <dev>`: Device (default: `cuda`)
 - `--kwarg KEY=VAL`: Repeatable extra kwarg passed to `setup()` (same JSON-decoding as `add`)
 

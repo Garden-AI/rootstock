@@ -5,8 +5,11 @@ This runs in the main process and acts as an i-PI server,
 sending atomic positions and receiving forces from a worker process.
 """
 
+import contextlib
 import json
+import logging
 import os
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -14,12 +17,32 @@ from pathlib import Path
 
 import numpy as np
 
+from .exceptions import RootstockError
 from .protocol import (
     IPIProtocol,
     SocketClosed,
+    create_private_socket_path,
     create_server_socket,
-    create_unix_socket_path,
 )
+
+logger = logging.getLogger("rootstock.server")
+
+
+class WorkerDiedError(RootstockError, RuntimeError):
+    """The worker process failed at the socket level (died, hung, or the
+    connection broke) — as opposed to reporting a calculation error in-band
+    while staying healthy. The message carries the post-mortem: process fate
+    plus captured output tails. A server that raised this cannot serve
+    further calls; the calculator tears it down and starts fresh on the next
+    calculation."""
+
+
+def _tail(text: str, limit: int = 8192) -> str:
+    """Last ``limit`` characters of ``text`` — worker output can be huge
+    (chatty model loads), and the useful part of a crash is at the end."""
+    if len(text) <= limit:
+        return text
+    return f"...[{len(text) - limit} chars truncated]...\n{text[-limit:]}"
 
 
 def _worker_error_from_extra(extra: bytes) -> str | None:
@@ -69,29 +92,40 @@ class RootstockServer:
         socket_name: str = "rootstock",
         root: Path | None = None,
         cache_root: Path | None = None,
-        log=None,
-        timeout: float = 60.0,
+        timeout: float = 600.0,
         setup_kwargs: dict | None = None,
     ):
         """
         Initialize the server.
 
+        Server-side diagnostics go to the ``rootstock.server`` logger
+        (lifecycle at INFO, detail at DEBUG); the wire trace goes to
+        ``rootstock.protocol`` at DEBUG. Enable with e.g.
+        ``logging.basicConfig(level=logging.DEBUG)``.
+
         Args:
             env_name: Name of pre-built environment (e.g., "mace")
             checkpoint: Canonical checkpoint id passed to the env's setup()
             device: Device string to pass to setup()
-            socket_name: Name for the Unix socket (will be /tmp/ipi_<name>)
+            socket_name: Name for the Unix socket. The socket is created as
+                ipi_<name> inside a fresh private (0700) temp directory on
+                start(), so it is unreachable by other local users.
             root: Root directory for environments and cache (required)
-            log: Optional file object for protocol logging
-            timeout: Socket timeout in seconds
+            timeout: Socket timeout in seconds for worker operations.
+                The default (600 s) matches what checkpoint verification
+                uses, so the first real force call — which may pay for
+                torch.compile or large neighbor lists — runs under the
+                same envelope verification exercised.
             setup_kwargs: Extra keyword arguments forwarded to setup()
         """
         if root is None:
             raise ValueError("root is required for pre-built environments")
 
         self.socket_name = socket_name
-        self.socket_path = create_unix_socket_path(socket_name)
-        self.log = log
+        # Created by start(): the socket lives in a private per-server temp
+        # directory that stop() removes.
+        self.socket_path: str | None = None
+        self._socket_dir: str | None = None
         self.timeout = timeout
 
         self.env_name = env_name
@@ -118,64 +152,70 @@ class RootstockServer:
         self._init_numbers: list[int] | None = None
         self._init_pbc: list[bool] | None = None
 
-        # Environment manager
-        self._env_manager = None
-        self._wrapper_path: Path | None = None
+        # Holds the spawn_in_env context (staged wrapper + sidecar) open for
+        # the life of the worker process; stop() closes it.
+        self._spawn_stack: contextlib.ExitStack | None = None
 
     def start(self):
         """Start the server and launch the worker process."""
-        # Create server socket
+        # Create server socket inside a fresh private (0700) directory
+        self.socket_path = create_private_socket_path(self.socket_name)
+        self._socket_dir = os.path.dirname(self.socket_path)
         self._server_socket = create_server_socket(self.socket_path, timeout=self.timeout)
         self._server_socket.listen(1)
 
-        if self.log:
-            print(f"Server listening on {self.socket_path}", file=self.log, flush=True)
+        logger.debug("Server listening on %s", self.socket_path)
 
         # Launch worker process
         self._start_worker()
 
-        if self.log:
-            print(f"Launched worker process (PID {self._process.pid})", file=self.log, flush=True)
+        logger.info(
+            "Launched worker (PID %s) for %s/%s on %s",
+            self._process.pid,
+            self.env_name,
+            self.checkpoint,
+            self.device,
+        )
 
         # Wait for worker to connect
         self._accept_connection()
 
     def _start_worker(self):
         """Start worker using pre-built environment."""
-        from .environment import EnvironmentManager
+        from .spawn import WORKER_WRAPPER, spawn_in_env
 
-        # Create environment manager
-        self._env_manager = EnvironmentManager(root=self.root, cache_root=self.cache_root)
-
-        # Generate wrapper script
-        self._wrapper_path = self._env_manager.generate_wrapper(
-            env_name=self.env_name,
-            checkpoint=self.checkpoint,
-            device=self.device,
-            socket_path=self.socket_path,
-            setup_kwargs=self.setup_kwargs,
+        self._spawn_stack = contextlib.ExitStack()
+        spec = self._spawn_stack.enter_context(
+            spawn_in_env(
+                self.root,
+                self.env_name,
+                WORKER_WRAPPER,
+                {
+                    "checkpoint": self.checkpoint,
+                    "device": self.device,
+                    "socket_path": self.socket_path,
+                    "setup_kwargs": self.setup_kwargs,
+                },
+                cache_root=self.cache_root,
+            )
         )
 
-        # Get spawn command and environment
-        cmd = self._env_manager.get_spawn_command(self.env_name, self._wrapper_path)
-        env = self._env_manager.get_environment_variables()
-
-        if self.log:
-            print(f"Spawning worker: {' '.join(cmd)}", file=self.log, flush=True)
+        logger.debug("Spawning worker: %s", " ".join(spec.cmd))
 
         # Redirect worker output to temp files rather than pipes. The worker
         # loads the model in setup() *before* connecting to the socket; a noisy
         # load that exceeds the OS pipe buffer (~64 KB) would block on the write
         # and never connect, deadlocking _accept_connection. Regular files have
-        # no such buffer limit, and we can still read them back to report errors
-        # if the worker dies. When logging, inherit the parent's fds as before.
-        if not self.log:
-            self._stdout_file = tempfile.TemporaryFile()
-            self._stderr_file = tempfile.TemporaryFile()
+        # no such buffer limit, and we read them back for the post-mortem when
+        # the worker fails. (The worker's own verbosity is controlled by the
+        # ROOTSTOCK_WORKER_LOG env var — see worker_config.py.)
+        self._stdout_file = tempfile.TemporaryFile()
+        self._stderr_file = tempfile.TemporaryFile()
 
         self._process = subprocess.Popen(
-            cmd,
-            env=env,
+            spec.cmd,
+            env=spec.env,
+            cwd=spec.cwd,
             stdout=self._stdout_file,
             stderr=self._stderr_file,
         )
@@ -192,21 +232,16 @@ class RootstockServer:
             except TimeoutError:
                 # Check if process died
                 if self._process.poll() is not None:
-                    stdout, stderr = self._read_worker_output()
-                    raise RuntimeError(
-                        f"Worker process died with code {self._process.returncode}.\n"
-                        f"stdout: {stdout}\nstderr: {stderr}"
-                    )
+                    raise self._worker_failure_error("Worker process died before connecting")
 
         # Restore original timeout
         self._server_socket.settimeout(self.timeout)
         self._client_socket.settimeout(self.timeout)
 
-        self._protocol = IPIProtocol(self._client_socket, log=self.log)
+        self._protocol = IPIProtocol(self._client_socket)
         self._connected = True
 
-        if self.log:
-            print("Worker connected", file=self.log, flush=True)
+        logger.info("Worker connected")
 
     def _read_worker_output(self) -> tuple[str, str]:
         """Read the worker's captured stdout/stderr from the temp files.
@@ -225,6 +260,36 @@ class RootstockServer:
                 return ""
 
         return _drain(self._stdout_file), _drain(self._stderr_file)
+
+    def _worker_failure_error(self, context: str, exc: Exception | None = None) -> WorkerDiedError:
+        """Build a post-mortem error for a worker failure.
+
+        A worker that dies mid-``calculate`` (GPU OOM, batch-system kill)
+        surfaces as a bare socket timeout or closed socket while the actual
+        traceback sits unread in the captured output files — so read them on
+        *any* worker failure and report the cause, not just the symptom.
+        """
+        if self._process is None:
+            fate = "worker process was never started"
+        elif self._process.poll() is not None:
+            fate = f"worker process exited with code {self._process.returncode}"
+        else:
+            fate = "worker process is still running (hung, or blocked on the device?)"
+
+        lines = [f"{context}: {fate}."]
+        if exc is not None:
+            lines.append(f"Cause: {type(exc).__name__}: {exc}")
+
+        stdout, stderr = self._read_worker_output()
+        captured = False
+        for name, text in (("stdout", stdout), ("stderr", stderr)):
+            text = text.strip()
+            if text:
+                captured = True
+                lines.append(f"--- worker {name} (tail) ---\n{_tail(text)}")
+        if not captured:
+            lines.append("(worker produced no output)")
+        return WorkerDiedError("\n".join(lines))
 
     def calculate(
         self,
@@ -250,43 +315,50 @@ class RootstockServer:
         if not self._connected:
             raise RuntimeError("Server not connected. Call start() first.")
 
-        # Check worker status
-        self._protocol.send_status()
-        status = self._protocol.recv_status()
-
-        if status == "NEEDINIT":
-            # Send INIT with atomic species info
-            init_data = {
-                "numbers": atomic_numbers.tolist() if atomic_numbers is not None else None,
-                "pbc": [bool(p) for p in pbc] if pbc is not None else [True, True, True],
-            }
-            init_bytes = json.dumps(init_data).encode("utf-8")
-            self._protocol.send_init(bead_index=0, init_string=init_bytes)
-
-            # Track what we sent
-            self._init_sent = True
-            self._init_numbers = init_data["numbers"]
-            self._init_pbc = init_data["pbc"]
-
+        # A worker that dies mid-exchange (GPU OOM, batch-system kill) can't
+        # report in-band; the failure shows up here as a socket timeout,
+        # closed socket, or broken pipe. Turn that into a post-mortem that
+        # includes the worker's captured output instead of a bare socket error.
+        try:
+            # Check worker status
             self._protocol.send_status()
             status = self._protocol.recv_status()
 
-        if status != "READY":
-            raise RuntimeError(f"Worker not ready, status: {status}")
+            if status == "NEEDINIT":
+                # Send INIT with atomic species info
+                init_data = {
+                    "numbers": atomic_numbers.tolist() if atomic_numbers is not None else None,
+                    "pbc": [bool(p) for p in pbc] if pbc is not None else [True, True, True],
+                }
+                init_bytes = json.dumps(init_data).encode("utf-8")
+                self._protocol.send_init(bead_index=0, init_string=init_bytes)
 
-        # Send positions
-        self._protocol.send_posdata(cell, positions)
+                # Track what we sent
+                self._init_sent = True
+                self._init_numbers = init_data["numbers"]
+                self._init_pbc = init_data["pbc"]
 
-        # Check status - worker should now be calculating
-        self._protocol.send_status()
-        status = self._protocol.recv_status()
+                self._protocol.send_status()
+                status = self._protocol.recv_status()
 
-        if status != "HAVEDATA":
-            raise RuntimeError(f"Worker failed to calculate, status: {status}")
+            if status != "READY":
+                raise RuntimeError(f"Worker not ready, status: {status}")
 
-        # Get results
-        self._protocol.send_getforce()
-        energy, forces, virial, extra = self._protocol.recv_forceready()
+            # Send positions
+            self._protocol.send_posdata(cell, positions)
+
+            # Check status - worker should now be calculating
+            self._protocol.send_status()
+            status = self._protocol.recv_status()
+
+            if status != "HAVEDATA":
+                raise RuntimeError(f"Worker failed to calculate, status: {status}")
+
+            # Get results
+            self._protocol.send_getforce()
+            energy, forces, virial, extra = self._protocol.recv_forceready()
+        except (TimeoutError, SocketClosed, OSError) as exc:
+            raise self._worker_failure_error("Worker failed mid-calculation", exc) from exc
 
         error = _worker_error_from_extra(extra)
         if error is not None:
@@ -329,28 +401,21 @@ class RootstockServer:
                     pass
                 setattr(self, attr, None)
 
-        # Clean up socket file
-        if os.path.exists(self.socket_path):
-            os.unlink(self.socket_path)
+        # Clean up the socket and its private directory
+        if self._socket_dir is not None:
+            shutil.rmtree(self._socket_dir, ignore_errors=True)
+            self._socket_dir = None
+            self.socket_path = None
 
-        # Clean up wrapper script
-        if self._wrapper_path is not None:
-            try:
-                self._wrapper_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            self._wrapper_path = None
-
-        # Clean up environment manager
-        if self._env_manager is not None:
-            self._env_manager.cleanup()
-            self._env_manager = None
+        # Remove the staged wrapper + sidecar (the worker is gone by now)
+        if self._spawn_stack is not None:
+            self._spawn_stack.close()
+            self._spawn_stack = None
 
         self._connected = False
         self._protocol = None
 
-        if self.log:
-            print("Server stopped", file=self.log, flush=True)
+        logger.info("Server stopped")
 
     def __enter__(self):
         self.start()

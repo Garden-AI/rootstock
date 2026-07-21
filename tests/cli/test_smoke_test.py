@@ -32,7 +32,6 @@ def populated_root(tmp_path: Path, monkeypatch) -> Path:
     manifest = create_manifest(root, "test", cfg)
 
     manifest.environments["mace"] = EnvironmentInfo(
-        status="ready",
         built_at="2026-01-01T00:00:00Z",
         source_hash="sha256:abc",
         source="",
@@ -45,7 +44,6 @@ def populated_root(tmp_path: Path, monkeypatch) -> Path:
         },
     )
     manifest.environments["uma"] = EnvironmentInfo(
-        status="ready",
         built_at="2026-01-01T00:00:00Z",
         source_hash="sha256:def",
         source="",

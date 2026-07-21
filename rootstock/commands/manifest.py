@@ -4,169 +4,12 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
 from ..client import RootstockClient
-from ..clusters import get_cluster_for_root
 from ..config import load_config
-from ..manifest import (
-    EnvironmentInfo,
-    Manifest,
-    compute_source_hash,
-    create_manifest,
-    get_installed_versions,
-    load_manifest,
-    now_iso,
-    save_manifest,
-)
-from ..pep723 import get_dependencies, get_requires_python
+from ..manifest import create_manifest, load_manifest, manifest_lock, save_manifest
+from ..operations import refresh_manifest_environments
 from .common import get_root_or_exit
-
-
-def update_and_push_manifest(
-    root: Path,
-    cluster: str | None = None,
-    quiet: bool = False,
-    push: bool = True,
-) -> bool:
-    """
-    Update manifest with current state and optionally push to backend.
-
-    Called after any state-changing operation.
-
-    Args:
-        root: Rootstock root directory
-        cluster: Cluster name (optional, will try to detect)
-        quiet: Suppress output
-        push: Whether to push to backend (default True)
-
-    Returns:
-        True if push succeeded or was skipped (no API key), False on error
-    """
-    config = load_config()
-
-    # Load existing manifest first
-    manifest = load_manifest(root)
-
-    # Determine cluster: provided > existing manifest > detect from path
-    if cluster is None:
-        if manifest is not None:
-            cluster = manifest.cluster
-        else:
-            cluster = get_cluster_for_root(root)
-
-    if cluster is None:
-        if not quiet:
-            print(
-                "Warning: Cannot update manifest - cluster not specified and "
-                "root doesn't match any known cluster. "
-                "Run 'rootstock manifest init --cluster <name>' first.",
-                file=sys.stderr,
-            )
-        return False
-
-    # Create manifest if it doesn't exist
-    if manifest is None:
-        manifest = create_manifest(root, cluster, config)
-
-    # Refresh environment info from current state
-    manifest = _refresh_manifest_environments(manifest, root)
-
-    # Save locally
-    save_manifest(manifest, root)
-
-    # Skip push if explicitly disabled
-    if not push:
-        if not quiet:
-            print("Manifest saved locally (push disabled via --no-push).")
-        return True
-
-    # Push to backend only if user is maintainer and API is configured
-    if config.is_maintainer and config.is_push_enabled():
-        client = RootstockClient(config)
-        success, message = client.push_manifest(manifest)
-        if not quiet:
-            if success:
-                print(f"Manifest pushed: {message}")
-            else:
-                print(
-                    f"Warning: Failed to push manifest: {message}",
-                    file=sys.stderr,
-                )
-                print(
-                    "Manifest saved locally. Run 'rootstock manifest push' to retry.",
-                    file=sys.stderr,
-                )
-        return success
-    elif not config.is_maintainer and not quiet:
-        print("Manifest saved locally (not pushing - you are not the maintainer).")
-
-    return True  # Not maintainer or no API key = skip push (not an error)
-
-
-def _refresh_manifest_environments(manifest: Manifest, root: Path) -> Manifest:
-    """
-    Update manifest with current environment state.
-
-    Scans built environments and updates their info in the manifest.
-    """
-    from .. import __version__
-    from ..environment import list_built_environments
-
-    # Update rootstock version
-    manifest.rootstock_version = __version__
-
-    # Get current built environments
-    built = list_built_environments(root)
-
-    for env_name, env_path in built:
-        # Check if env_source.py exists
-        source_file = env_path / "env_source.py"
-        if not source_file.exists():
-            continue
-
-        # Get source hash and content
-        source_hash = compute_source_hash(source_file)
-        source_content = source_file.read_text()
-
-        # Get python requires from source
-        python_requires = get_requires_python(source_file) or ">=3.10"
-
-        # Get direct dependencies from source
-        direct_deps = get_dependencies(source_file)
-        # Always track rootstock itself
-        if "rootstock" not in [d.lower() for d in direct_deps]:
-            direct_deps.append("rootstock")
-
-        # Get installed package versions (filtered to direct dependencies)
-        dependencies = get_installed_versions(env_path, only_packages=direct_deps)
-
-        # Get checkpoints (from existing manifest if available)
-        existing_env = manifest.environments.get(env_name)
-        checkpoints = existing_env.checkpoints if existing_env else {}
-
-        manifest.environments[env_name] = EnvironmentInfo(
-            status="ready",
-            built_at=existing_env.built_at if existing_env else now_iso(),
-            source_hash=source_hash,
-            source=source_content,
-            python_requires=python_requires,
-            dependencies=dependencies,
-            checkpoints=checkpoints,
-        )
-
-    return manifest
-
-
-def cmd_manifest(args) -> int:
-    """Handle manifest subcommands."""
-    if args.manifest_action == "show":
-        return cmd_manifest_show(args)
-    elif args.manifest_action == "push":
-        return cmd_manifest_push(args)
-    elif args.manifest_action == "init":
-        return cmd_manifest_init(args)
-    return 0
 
 
 def cmd_manifest_show(args) -> int:
@@ -197,9 +40,10 @@ def cmd_manifest_show(args) -> int:
         print(f"  Environments ({len(manifest.environments)}):")
         for name, env in manifest.environments.items():
             print(f"    {name}:")
-            print(f"      Status:       {env.status}")
             print(f"      Built at:     {env.built_at}")
             print(f"      Source hash:  {env.source_hash[:20]}...")
+            lock_desc = f"{env.lock_hash[:20]}..." if env.lock_hash else "none (pre-lockfile build)"
+            print(f"      Lockfile:     {lock_desc}")
             print(f"      Dependencies: {len(env.dependencies)} packages")
             if env.checkpoints:
                 print(f"      Checkpoints:  {', '.join(env.checkpoints.keys())}")
@@ -266,9 +110,10 @@ def cmd_manifest_init(args) -> int:
         )
 
     # Create and save manifest
-    manifest = create_manifest(root, cluster, config)
-    manifest = _refresh_manifest_environments(manifest, root)
-    save_manifest(manifest, root)
+    with manifest_lock(root):
+        manifest = create_manifest(root, cluster, config)
+        manifest = refresh_manifest_environments(manifest, root)
+        save_manifest(manifest, root)
 
     print(f"Manifest initialized: {root}/manifest.json")
     print(f"  Cluster: {cluster}")
@@ -288,7 +133,5 @@ def cmd_manifest_init(args) -> int:
         else:
             print(f"Warning: Failed to push manifest: {message}", file=sys.stderr)
             print("Run 'rootstock manifest push' to retry.", file=sys.stderr)
-    elif not config.is_maintainer:
-        print("Manifest saved locally (not pushing - you are not the maintainer).")
 
     return 0

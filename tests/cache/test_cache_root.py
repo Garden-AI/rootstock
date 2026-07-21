@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -16,11 +15,8 @@ from rootstock.clusters import (
     get_root_for_cluster,
 )
 from rootstock.commands.common import resolve_cache_root
-from rootstock.environment import (
-    EnvironmentManager,
-    get_model_cache_env,
-    get_user_cache_dir,
-)
+from rootstock.environment import get_model_cache_env, get_user_cache_dir
+from rootstock.spawn import WORKER_WRAPPER, spawn_in_env
 
 # Runtime write-back caches that must NEVER point into the shared roots —
 # non-maintainers can only read there.
@@ -163,6 +159,16 @@ def test_perlmutter_registered_with_split():
     assert "pscratch" in str(pm.cache_root).lower()
 
 
+def test_frontier_registered_with_split():
+    fr = get_cluster("frontier")
+    assert fr.cache_root is not None
+    assert fr.cache_root != fr.root
+    # UMS software area for code (read-only on compute nodes), Lustre for the
+    # cache, which model libraries write to at runtime.
+    assert "/sw/frontier/ums" in str(fr.root)
+    assert "lustre" in str(fr.cache_root).lower()
+
+
 def test_polaris_shares_sophia_eagle_root():
     """Both ALCF machines mount Eagle and share one install."""
     assert get_cluster("polaris").root == get_cluster("sophia").root
@@ -208,25 +214,26 @@ def test_resolve_cache_root_for_unknown_root_returns_root():
     assert resolve_cache_root(custom) == custom
 
 
-# ---------- EnvironmentManager wiring -------------------------------------
+# ---------- spawn_in_env wiring -------------------------------------------
 
 
-def test_environment_manager_passes_cache_root_through(tmp_path: Path):
-    (tmp_path / "envs" / "fake_env").mkdir(parents=True)
+def _make_fake_env(root: Path, name: str = "fake_env") -> None:
+    (root / "envs" / name / "bin").mkdir(parents=True)
+    (root / "envs" / name / "bin" / "python").touch()
+
+
+def test_spawn_in_env_passes_cache_root_through(tmp_path: Path):
+    _make_fake_env(tmp_path)
     cache_dir = tmp_path / "alt_cache"
-    mgr = EnvironmentManager(root=tmp_path, cache_root=cache_dir)
-    env_vars = mgr.get_environment_variables()
-    assert env_vars["XDG_CACHE_HOME"] == str(cache_dir / "cache")
-    assert env_vars["HOME"] == str(cache_dir / "home")
-    mgr.cleanup()
+    with spawn_in_env(tmp_path, "fake_env", WORKER_WRAPPER, {}, cache_root=cache_dir) as spec:
+        assert spec.env["XDG_CACHE_HOME"] == str(cache_dir / "cache")
+        assert spec.env["HOME"] == str(cache_dir / "home")
 
 
-def test_environment_manager_default_cache_root_uses_install_root(tmp_path: Path):
-    (tmp_path / "envs" / "fake_env").mkdir(parents=True)
-    mgr = EnvironmentManager(root=tmp_path)
-    env_vars = mgr.get_environment_variables()
-    assert env_vars["XDG_CACHE_HOME"] == str(tmp_path / "cache")
-    mgr.cleanup()
+def test_spawn_in_env_default_cache_root_uses_install_root(tmp_path: Path):
+    _make_fake_env(tmp_path)
+    with spawn_in_env(tmp_path, "fake_env", WORKER_WRAPPER, {}) as spec:
+        assert spec.env["XDG_CACHE_HOME"] == str(tmp_path / "cache")
 
 
 # ---------- RootstockCalculator wiring ------------------------------------
@@ -312,23 +319,15 @@ def test_calculator_with_root_and_explicit_cache_root(tmp_path: Path):
     assert calc.cache_root == cache
 
 
-# ---------- End-to-end: cache_root reaches the worker wrapper -------------
+# ---------- End-to-end: cache_root reaches the worker spawn ---------------
 
 
-def _extract_kwargs_path(wrapper_text: str) -> Path:
-    match = re.search(r'open\("([^"]+\.json)"\)', wrapper_text)
-    assert match
-    return Path(match.group(1))
-
-
-def test_environment_manager_get_environment_variables_reflects_split(tmp_path: Path):
+def test_spawn_in_env_env_vars_reflect_split(tmp_path: Path):
     """The env vars handed to the worker subprocess use the split cache_root."""
-    (tmp_path / "envs" / "fake_env").mkdir(parents=True)
+    _make_fake_env(tmp_path)
     cache_dir = tmp_path / "alt_cache"
-    mgr = EnvironmentManager(root=tmp_path, cache_root=cache_dir)
 
-    env_vars = mgr.get_environment_variables()
-    # All four cache-related vars must point under cache_dir, not tmp_path.
-    for key in ("HOME", "XDG_CACHE_HOME", "HF_HOME", "HF_HUB_CACHE"):
-        assert env_vars[key].startswith(str(cache_dir)), f"{key} = {env_vars[key]}"
-    mgr.cleanup()
+    with spawn_in_env(tmp_path, "fake_env", WORKER_WRAPPER, {}, cache_root=cache_dir) as spec:
+        # All four cache-related vars must point under cache_dir, not tmp_path.
+        for key in ("HOME", "XDG_CACHE_HOME", "HF_HOME", "HF_HUB_CACHE"):
+            assert spec.env[key].startswith(str(cache_dir)), f"{key} = {spec.env[key]}"

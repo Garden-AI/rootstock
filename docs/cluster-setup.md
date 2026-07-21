@@ -6,7 +6,7 @@ This guide is for administrators setting up Rootstock on a new cluster. Run all 
 
 - SSH access to the cluster
 - Write access to a shared filesystem location
-- Python 3.10 or later
+- Python 3.11 or later
 - `uv` package manager (Rootstock uses it internally)
 
 ## Step 1: Install Rootstock
@@ -30,16 +30,33 @@ Choose a location on a shared filesystem where other users have access:
 
 On most clusters a single shared filesystem hosts both the rootstock install (code, venvs, manifest) and the model-weight cache. Some clusters require these to live on different filesystems — typically because the recommended persistent project filesystem doesn't support `flock`, which the HuggingFace cache requires. NERSC Perlmutter is one such case: code lives on CFS, model weights on PSCRATCH.
 
-The cluster registry (`rootstock/clusters.py`) encodes both paths per cluster:
+The install declares its own cache root in `{root}/layout.json` — `rootstock install` and `rootstock init` record it automatically. Every reader (CLI commands and `RootstockCalculator`, whether given `cluster=` or `root=`) resolves the cache root the same way: an explicit override wins, then the install's declaration, then — for legacy installs that predate the declaration — the cluster registry's entry, then the install root itself.
+
+The cluster registry (`rootstock/clusters.py`) is only a name → install-path bootstrap so users can say `cluster="perlmutter"` instead of remembering a path. Its per-cluster `cache_root` field remains solely as the legacy fallback above; new split-filesystem deployments don't need a registry entry at all, just a declaration in the install:
 
 ```python
 "perlmutter": Cluster(
-    root=Path("/global/cfs/cdirs/m4845/rootstock"),
-    cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),
+    root=Path("/global/cfs/cdirs/m5268/rootstock"),
+    cache_root=Path("/pscratch/sd/o/oprice/rootstock-cache"),  # legacy fallback only
 ),
 ```
 
-When `cache_root` is omitted from the registry, both paths are the same. Users don't need to set environment variables — `RootstockCalculator(cluster="perlmutter", ...)` resolves both automatically.
+Users don't need to set environment variables — `RootstockCalculator(cluster="perlmutter", ...)` resolves both automatically.
+
+### Trust model
+
+Using a shared install means trusting its maintainer. An environment's
+`setup()` function is **maintainer-authored Python executed with the calling
+user's credentials** — inside the worker subprocess, as you, with your
+filesystem access and your HF tokens (forwarded so gated models work).
+Rootstock isolates *dependencies*, not *privilege*: the pre-built venv keeps
+MLIP stacks out of your Python environment, but it is not a sandbox.
+
+Concretely: only use installs whose maintainer you trust, exactly as you
+would a module farm or a shared conda env maintained by your facility. The
+permission recipe below makes installs world-*readable*, and only
+maintainers can modify `env_source.py` — so the code you run is the code the
+maintainer published, but what that code does runs as you.
 
 ### Permissions for shared installs
 
@@ -55,7 +72,7 @@ The setup needs to satisfy:
 `rootstock setup-perms` renders and applies this recipe for you. Run it **once** as the maintainer, before `rootstock init`. Pass a registered cluster name (it resolves both the install root and, where split, the cache root) and your project group:
 
 ```bash
-rootstock setup-perms --cluster perlmutter --group m4845 --apply
+rootstock setup-perms --cluster perlmutter --group m5268 --apply
 ```
 
 Or point it at explicit paths instead of a cluster:
@@ -66,12 +83,14 @@ rootstock setup-perms /path/to/install/root \
   --group <group> --apply
 ```
 
-Omit `--apply` for a **dry run** (the default) that just prints the `chmod` / `chgrp` / `setfacl` commands — useful if you (or a cautious sysadmin) want to review them or paste them into a script before anything touches the filesystem. `--apply` runs them after a confirmation prompt, stopping at the first failure.
+Omit `--apply` for a **dry run** (the default) that just prints the `chmod` / `chgrp` / `setfacl` commands — useful if you (or a cautious sysadmin) want to review them or paste them into a script before anything touches the filesystem. `--apply` runs them after a confirmation prompt, stopping at the first failure, then re-runs the read-only check and reports anything the filesystem didn't actually honour.
 
-If the install or cache root **already has files in it** when you set this up (e.g., you're retrofitting a deployment that started out project-only), add `--retrofit` so the recipe also applies recursively and existing files become world-readable too:
+The order matters: the `chmod` comes **last**. Setting an ACL rewrites a path's mode bits, and on some filesystems (observed on NERSC CFS) that clears the setgid bit — so the mode is asserted after all the `setfacl` work, not before. If you hand-roll the recipe, keep that order.
+
+If the install or cache root **already has files in it** when you set this up (e.g., you're retrofitting a deployment that started out project-only), add `--retrofit` so the recipe also applies recursively — existing files become world-readable, and existing *subdirectories* get setgid so files created under them inherit the project group:
 
 ```bash
-rootstock setup-perms --cluster perlmutter --group m4845 --retrofit --apply
+rootstock setup-perms --cluster perlmutter --group m5268 --retrofit --apply
 ```
 
 `rootstock install` re-checks these permissions up front on every run and prints a warning if the root doesn't look world-readable (wrong mode bits, missing setgid, missing default ACL, or a mask clamp from too-restrictive a umask). The check is read-only and never blocks the build; pass `--no-perm-check` to silence it.
@@ -99,7 +118,7 @@ Per-cluster step-by-step runbooks live in `scripts/runbooks/` — they sequence 
 **Quick check (first line).** `rootstock check-perms` runs the same read-only verification that `rootstock install` performs up front, as a standalone command — plus an ancestor walk, so a restricted project parent directory (which no `chmod` inside the install can fix) shows up too. It stats only the roots and their ancestors, so it is safe and fast on login nodes:
 
 ```bash
-rootstock check-perms --cluster perlmutter --group m4845
+rootstock check-perms --cluster perlmutter --group m5268
 ```
 
 Exit code 0 means the roots look right; 1 means issues were printed (pass `--json` for machine-readable output). It checks only the root directories, not the tree beneath them — for that, use the audit below.
@@ -107,7 +126,7 @@ Exit code 0 means the roots look right; 1 means issues were printed (pass `--jso
 **Static audit (full tree).** `scripts/check_world_readable.sh` checks the world-readable contract across the whole tree without needing rootstock in the caller's Python:
 
 ```bash
-./scripts/check_world_readable.sh /global/cfs/cdirs/m4845/rootstock
+./scripts/check_world_readable.sh /global/cfs/cdirs/m5268/rootstock
 ```
 
 It walks the ancestor directories (every one needs `o+x` — if the project parent on CFS lacks it, that's a facilities ticket, not a chmod), checks other-bits on every file and directory, resolves symlink targets, and scans for per-user ACL entries and mask clamps that `ls -l` won't show. It prints actionable per-path fixes and exits nonzero on any violation.
@@ -246,17 +265,23 @@ After setup, the Rootstock root directory will look like this:
 
 ```
 {root}/
+├── layout.json             # on-disk layout version (future clients check this)
 ├── .python/                # uv-managed Python interpreters
 ├── environments/           # Environment source files (*.py with PEP 723 metadata)
 │   ├── mace.py
+│   ├── mace.py.lock        # uv lockfile — rebuilds resolve from this
 │   ├── uma.py
+│   ├── uma.py.lock
 │   └── tensornet.py
 ├── envs/                   # Pre-built virtual environments
 │   ├── mace/
 │   │   ├── bin/python
 │   │   ├── lib/python3.11/site-packages/
-│   │   └── env_source.py
+│   │   ├── env_source.py
+│   │   └── env_source.py.lock   # what this build was resolved from
 │   └── ...
+├── wheels/                 # Vendored rootstock wheels (rebuilds install from here,
+│                           # so they don't depend on PyPI still serving the release)
 ├── home/                   # Redirected HOME for not-well-behaved libraries
 │   ├── .cache/fairchem/
 │   └── .matgl/
@@ -271,10 +296,11 @@ Some ML libraries (FAIRChem, MatGL) ignore `XDG_CACHE_HOME` and write to `~/.cac
 
 ## Updating environments
 
-To update an environment with new dependencies:
+Rebuilds honor the env's lockfile by default: `rootstock install mace --force` reproduces the dependency stack that was already qualified on the cluster (this is the safe way to roll out an env-source fix). To deliberately move to newer packages, re-resolve with `--upgrade`:
 
 ```bash
-# Rebuild the venv (drops verification timestamps for that env's checkpoints)
+# Rebuild the venv (drops verification timestamps for that env's checkpoints).
+# Add --upgrade to re-resolve dependencies to the latest allowed versions.
 rootstock install mace.py --force
 
 # Re-verify checkpoints after the rebuild, by canonical id
@@ -290,6 +316,25 @@ rootstock manifest push
 ```
 
 Rebuilding an env invalidates prior verifications (the venv changed; weights in `cache/` are unaffected). `rootstock status` will show those checkpoints as **stale** until you re-run `add` or `smoke-test`.
+
+Rebuilds are safe on a live shared install: the new env is built in `{root}/.build/` and swapped into `envs/` only when finished, so users can keep spawning workers from the old env for the whole build, and a **failed** rebuild leaves the old env untouched and working.
+
+### Hotfixing `setup()` without a rebuild
+
+`envs/<name>/env_source.py` is re-read at runtime on both sides of the socket: every worker spawn imports `setup()` from it, and every client resolution AST-parses its `CHECKPOINTS` table. Nothing caches it across runs — which means a maintainer can fix a bug in `setup()` (or adjust a `CHECKPOINTS` entry) by **editing that file in place on the shared filesystem, with no rebuild**. The next worker spawn picks it up. This is the one cheap lever into already-built envs, and it is a supported procedure:
+
+1. **Edit a copy, then move it into place** (an in-progress edit with a syntax error breaks every new worker spawn on the cluster):
+   ```bash
+   cp {root}/envs/mace/env_source.py /tmp/env_source.py
+   $EDITOR /tmp/env_source.py
+   # umask 002 so the result stays world-readable
+   mv /tmp/env_source.py {root}/envs/mace/env_source.py
+   ```
+2. **Apply the same edit to the registered source** `{root}/environments/mace.py` — that file is what rebuilds build from, so skipping this step means the next `install --force` silently reverts your hotfix.
+3. **Verify and refresh the manifest**: `rootstock smoke-test --env mace` (or `rootstock add <id>`) exercises the fixed `setup()` and pushes an updated manifest. Until this runs, the manifest's `source_hash` for the env is stale — it still hashes the pre-hotfix source.
+4. **Contribute the fix back** to the sample env file in the repo so the next cluster doesn't need the same hotfix.
+
+**What a hotfix can and cannot reach.** In-place edits can change anything `setup()` does (model loading logic, upstream URLs/paths, `CHECKPOINTS` values, new optional kwargs) — but they cannot change the env's **dependencies** (the venv is already built; dependency changes need `install --force`) and cannot fix **worker/protocol code** (that's the rootstock pinned inside the venv; only a rebuild replaces it).
 
 ## Troubleshooting
 

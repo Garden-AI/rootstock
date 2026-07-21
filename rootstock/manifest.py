@@ -10,19 +10,163 @@ The manifest tracks the state of a rootstock installation:
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
 import shutil
+import socket
 import subprocess
+import sys
 import tempfile
-from dataclasses import dataclass, field
+import time
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import UserConfig
+from .exceptions import RootstockError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+
+# manifest_lock defaults. The lock is only held across a load → mutate → save
+# cycle (plus the env refresh, which shells out to `uv pip list` per env), so
+# holds are seconds, not minutes; the stale threshold is deliberately far
+# beyond any legitimate hold.
+LOCK_TIMEOUT = 120.0
+LOCK_STALE_AFTER = 600.0
+_LOCK_POLL_INTERVAL = 0.5
+
+
+class ManifestError(RootstockError, RuntimeError):
+    """The manifest exists but cannot be used: corrupt JSON, missing required
+    fields, or a schema this client has no path to. Deliberately NOT treated
+    as "no manifest" — a silent fresh start would let the next save overwrite
+    all fetch/verify history."""
+
+
+class ManifestLockTimeout(ManifestError):
+    """Could not acquire the manifest lock within the timeout. Subclasses
+    ManifestError so the CLI reports it as a clean diagnosis, not a
+    traceback."""
+
+
+def _migrate_v1_to_v2(data: dict) -> tuple[dict, str | None]:
+    """v1 stored ``checkpoints: list[str]``; v2 stores a dict of CheckpointInfo.
+
+    Each listed checkpoint becomes an empty CheckpointInfo — nothing fetched,
+    nothing verified. (Port of the retired scripts/migrate_manifest_v1_to_v2.py.)
+    """
+    for env in data.get("environments", {}).values():
+        env["checkpoints"] = {
+            name: {
+                "fetched_at": None,
+                "verified_at": None,
+                "verified_device": None,
+                "last_error": None,
+            }
+            for name in (env.get("checkpoints") or [])
+        }
+    data["schema_version"] = 2
+    return data, None
+
+
+def _migrate_v2_to_v3(data: dict) -> tuple[dict, str | None]:
+    """v3 renamed checkpoint ids to canonical form (e.g. 'mace-mp-0-small').
+
+    v2 checkpoint keys are env-local names that no longer join against any
+    env's CHECKPOINTS table, so the entries are dropped rather than carried
+    with untrustworthy ids. Environments survive; model weights stay cached.
+    """
+    environments = data.get("environments", {})
+    dropped = sum(len(env.get("checkpoints") or {}) for env in environments.values())
+    for env in environments.values():
+        env["checkpoints"] = {}
+    data["schema_version"] = 3
+
+    note = None
+    if dropped:
+        note = (
+            f"dropped {dropped} checkpoint record(s): v3 switched to canonical "
+            f"checkpoint ids, so v2 ids can't be trusted. Re-run "
+            f"`rootstock add <checkpoint-id>` to re-verify (weights stay cached)."
+        )
+    return data, note
+
+
+def _migrate_v3_to_v4(data: dict) -> tuple[dict, str | None]:
+    """v4 dropped EnvironmentInfo.status and .error_message.
+
+    Nothing ever wrote a status other than "ready" or set an error message,
+    so removing the keys loses no information.
+    """
+    for env in data.get("environments", {}).values():
+        env.pop("status", None)
+        env.pop("error_message", None)
+    data["schema_version"] = 4
+    return data, None
+
+
+# One entry per historical schema version, upgrading one step. A schema bump
+# without a migration here strands every deployed manifest of that vintage —
+# add the migration in the same change as the bump.
+MIGRATIONS = {
+    1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
+    3: _migrate_v3_to_v4,
+}
+
+
+def migrate_manifest_data(data: dict) -> tuple[dict, list[str]]:
+    """Upgrade a raw manifest dict to SCHEMA_VERSION, one step at a time.
+
+    Returns the upgraded dict and human-readable notes about lossy steps
+    (empty when the manifest was already current). Raises ManifestError for
+    manifests from a *newer* rootstock or with no migration path.
+    """
+    version = data.get("schema_version")
+    if isinstance(version, str) and version.isdigit():
+        version = int(version)  # v1 wrote schema_version as a string
+
+    if not isinstance(version, int):
+        raise ManifestError(
+            f"manifest has invalid schema_version={data.get('schema_version')!r}; "
+            f"expected an integer <= {SCHEMA_VERSION}."
+        )
+
+    if version > SCHEMA_VERSION:
+        raise ManifestError(
+            f"manifest is schema_version={version}, but this rootstock only "
+            f"understands up to {SCHEMA_VERSION}. It was written by a newer "
+            f"rootstock — upgrade this client (`pip install -U rootstock`)."
+        )
+
+    if version == SCHEMA_VERSION:
+        if data["schema_version"] != version:  # normalize a coerced string
+            data = {**data, "schema_version": version}
+        return data, []
+
+    # Migrations mutate freely; the caller's dict stays untouched.
+    data = copy.deepcopy(data)
+    data["schema_version"] = version
+
+    notes: list[str] = []
+    while version < SCHEMA_VERSION:
+        migrate = MIGRATIONS.get(version)
+        if migrate is None:
+            raise ManifestError(
+                f"manifest is schema_version={version} and no migration path "
+                f"to {SCHEMA_VERSION} exists."
+            )
+        data, note = migrate(data)
+        notes.append(
+            f"migrated manifest schema v{version} -> v{data['schema_version']}"
+            + (f": {note}" if note else "")
+        )
+        version = data["schema_version"]
+
+    return data, notes
 
 
 @dataclass
@@ -33,7 +177,7 @@ class Maintainer:
     email: str
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "email": self.email}
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> Maintainer:
@@ -50,12 +194,7 @@ class CheckpointInfo:
     last_error: str | None = None       # most recent error from add or smoke-test
 
     def to_dict(self) -> dict:
-        return {
-            "fetched_at": self.fetched_at,
-            "verified_at": self.verified_at,
-            "verified_device": self.verified_device,
-            "last_error": self.last_error,
-        }
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> CheckpointInfo:
@@ -69,30 +208,29 @@ class CheckpointInfo:
 
 @dataclass
 class EnvironmentInfo:
-    """Metadata for a single built environment."""
+    """Metadata for a single built environment.
 
-    status: str  # "ready", "building", "error"
+    An entry exists iff the env is built on disk — there is no status field.
+    A failed build leaves no env directory, so the manifest never has anything
+    to say about it.
+    """
+
     built_at: str  # ISO 8601 timestamp
     source_hash: str  # "sha256:abc123..."
     source: str  # Full source code of the environment file
-    python_requires: str  # ">=3.10"
+    python_requires: str  # ">=3.11"
     dependencies: dict[str, str]  # {"mace-torch": "0.3.6"}
+    # sha256 of the env's uv lockfile (envs/<name>/env_source.py.lock).
+    # None means the env was built without one — either by a pre-lockfile
+    # rootstock or because the env defeats universal resolution — and can
+    # only be re-resolved, not faithfully rebuilt.
+    lock_hash: str | None = None
+    # Field order is the JSON key order (asdict): lock_hash stays ahead of
+    # checkpoints to match the layout pushed manifests have always had.
     checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
-    error_message: str | None = None
 
     def to_dict(self) -> dict:
-        d = {
-            "status": self.status,
-            "built_at": self.built_at,
-            "source_hash": self.source_hash,
-            "source": self.source,
-            "python_requires": self.python_requires,
-            "dependencies": self.dependencies,
-            "checkpoints": {name: ckpt.to_dict() for name, ckpt in self.checkpoints.items()},
-        }
-        if self.error_message:
-            d["error_message"] = self.error_message
-        return d
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> EnvironmentInfo:
@@ -102,14 +240,13 @@ class EnvironmentInfo:
             for name, ckpt_data in checkpoints_data.items()
         }
         return cls(
-            status=data["status"],
             built_at=data["built_at"],
             source_hash=data["source_hash"],
             source=data.get("source", ""),
             python_requires=data["python_requires"],
             dependencies=data["dependencies"],
             checkpoints=checkpoints,
-            error_message=data.get("error_message"),
+            lock_hash=data.get("lock_hash"),
         )
 
 
@@ -134,34 +271,18 @@ class Manifest:
     environments: dict[str, EnvironmentInfo] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {
-            "schema_version": self.schema_version,
-            "cluster": self.cluster,
-            "root": self.root,
-            "maintainer": self.maintainer.to_dict(),
-            "rootstock_version": self.rootstock_version,
-            "python_version": self.python_version,
-            "last_updated": self.last_updated,
-            "environments": {name: env.to_dict() for name, env in self.environments.items()},
-        }
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> Manifest:
-        version = data.get("schema_version")
-        if version != SCHEMA_VERSION:
-            raise RuntimeError(
-                f"manifest is schema_version={version!r}, expected {SCHEMA_VERSION}.\n"
-                f"Older manifests are not auto-migrated. Reinstall environments with "
-                f"`rootstock install <env-file>` and re-add checkpoints with "
-                f"`rootstock add <checkpoint-id>`."
-            )
+        data, _ = migrate_manifest_data(data)
 
         environments = {}
         for name, env_data in data.get("environments", {}).items():
             environments[name] = EnvironmentInfo.from_dict(env_data)
 
         return cls(
-            schema_version=version,
+            schema_version=data["schema_version"],
             cluster=data["cluster"],
             root=data["root"],
             maintainer=Maintainer.from_dict(data["maintainer"]),
@@ -189,12 +310,6 @@ class Manifest:
             return False, "Missing maintainer name"
         if not self.maintainer.email:
             return False, "Missing maintainer email"
-
-        # Validate environment status values
-        valid_statuses = {"ready", "building", "error"}
-        for env_name, env_info in self.environments.items():
-            if env_info.status not in valid_statuses:
-                return False, f"Invalid status '{env_info.status}' for {env_name}"
 
         return True, "OK"
 
@@ -228,11 +343,13 @@ def get_installed_versions(
     def normalize(name: str) -> str:
         return name.lower().replace("-", "_").replace(".", "_")
 
-    filter_set = (
-        {normalize(p.split("==")[0].split(">")[0].split("<")[0].split("~")[0].split("[")[0].strip()) for p in only_packages}
-        if only_packages
-        else None
-    )
+    def base_name(spec: str) -> str:
+        # Strip version specifiers and extras: "torch>=2.0" / "mace[dev]" -> package name
+        for sep in ("==", ">", "<", "~", "["):
+            spec = spec.split(sep)[0]
+        return spec.strip()
+
+    filter_set = {normalize(base_name(p)) for p in only_packages} if only_packages else None
 
     packages_data = []
 
@@ -248,7 +365,7 @@ def get_installed_versions(
 
             if result.returncode == 0:
                 packages_data = json.loads(result.stdout)
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError):
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, OSError):
             pass
 
     # Fallback to python -m pip list
@@ -263,7 +380,7 @@ def get_installed_versions(
 
             if result.returncode == 0:
                 packages_data = json.loads(result.stdout)
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError):
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, OSError):
             pass
 
     if not packages_data:
@@ -305,6 +422,110 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def built_at_estimate(env_path: Path) -> str:
+    """Best-effort build time for an env the manifest doesn't know about.
+
+    The env directory's mtime is set when the build wrote its last top-level
+    entry, so it approximates the true build time. Only ``install`` knows the
+    exact moment; everything else discovering an already-built env must not
+    fabricate ``built_at=now``, which would poison the
+    ``verified_at > built_at`` staleness comparison.
+    """
+    ts = env_path.stat().st_mtime
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def _try_create_lock(lock_path: Path) -> bool:
+    """One atomic O_EXCL attempt; the lock file records who holds it."""
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as f:
+        json.dump(
+            {"pid": os.getpid(), "host": socket.gethostname(), "created": now_iso()},
+            f,
+        )
+    return True
+
+
+def _describe_lock(lock_path: Path) -> str:
+    try:
+        holder = json.loads(lock_path.read_text())
+        return (
+            f"held by pid {holder.get('pid')} on {holder.get('host')} "
+            f"since {holder.get('created')}"
+        )
+    except (OSError, json.JSONDecodeError):
+        return "holder unknown (lock file unreadable)"
+
+
+@contextmanager
+def manifest_lock(
+    root: Path,
+    timeout: float = LOCK_TIMEOUT,
+    stale_after: float = LOCK_STALE_AFTER,
+):
+    """Hold ``{root}/manifest.json.lock`` for a read-modify-write cycle.
+
+    Every writer must load the manifest fresh *inside* this lock, mutate, and
+    save before releasing — holding a manifest object across the lock
+    boundary reintroduces the lost-update race this exists to prevent
+    (nightly smoke-test vs. a co-maintainer's add).
+
+    Deliberately NOT fcntl/flock: the manifest lives on the install root,
+    which can be a filesystem without working POSIX locks (Perlmutter CFS is
+    why the cache_root split exists at all). An O_EXCL create is atomic on
+    the filesystems we care about.
+
+    A lock older than ``stale_after`` (far beyond any legitimate hold) is
+    presumed abandoned by a killed process and broken: unlinked and
+    re-contested. The mtime comes from the fileserver's clock, so
+    ``stale_after`` is generous rather than tight.
+
+    Raises:
+        ManifestLockTimeout: not acquired within ``timeout`` seconds.
+    """
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    lock_path = root / "manifest.json.lock"
+
+    deadline = time.monotonic() + timeout
+    while not _try_create_lock(lock_path):
+        try:
+            seen = lock_path.stat()
+        except FileNotFoundError:
+            continue  # released between attempts — retry immediately
+
+        if time.time() - seen.st_mtime > stale_after:
+            # Presumed abandoned. Re-stat before unlinking so we only break
+            # the lock we judged stale, not one freshly taken since (the
+            # unlink itself can still race another breaker — the loser of
+            # the subsequent O_EXCL just keeps waiting).
+            try:
+                if lock_path.stat().st_mtime == seen.st_mtime:
+                    lock_path.unlink()
+            except FileNotFoundError:
+                pass
+            continue
+
+        if time.monotonic() >= deadline:
+            raise ManifestLockTimeout(
+                f"could not lock {root / 'manifest.json'} after {timeout:.0f}s; "
+                f"lock file {lock_path} is {_describe_lock(lock_path)}. "
+                f"If that process is dead, remove the lock file and retry."
+            )
+        time.sleep(_LOCK_POLL_INTERVAL)
+
+    try:
+        yield
+    finally:
+        # If we exceeded stale_after ourselves, another process may have
+        # broken our lock and taken its own; this unlink would then release
+        # theirs early. Tolerated: stale_after is far above any real hold.
+        lock_path.unlink(missing_ok=True)
+
+
 def load_manifest(root: Path) -> Manifest | None:
     """
     Load manifest from root directory.
@@ -313,7 +534,11 @@ def load_manifest(root: Path) -> Manifest | None:
         root: Rootstock root directory
 
     Returns:
-        Manifest object, or None if not found
+        Manifest object, or None when no manifest.json exists.
+
+    Raises:
+        ManifestError: the file exists but is corrupt or unmigratable —
+            never silently treated as missing.
     """
     manifest_path = root / "manifest.json"
     if not manifest_path.exists():
@@ -322,10 +547,25 @@ def load_manifest(root: Path) -> Manifest | None:
     try:
         with open(manifest_path) as f:
             data = json.load(f)
+        data, notes = migrate_manifest_data(data)
+        if notes:
+            for note in notes:
+                print(f"Note: {note}", file=sys.stderr)
+            print(
+                "Note: the migrated manifest is written back on the next "
+                "state-changing command (install/add/smoke-test).",
+                file=sys.stderr,
+            )
         return Manifest.from_dict(data)
-    except (json.JSONDecodeError, KeyError):
-        # Invalid manifest - could log warning here
-        return None
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+        # A manifest that exists but can't be parsed must NOT read as "no
+        # manifest": callers would create a fresh one and the next save would
+        # silently erase all fetch/verify history.
+        raise ManifestError(
+            f"manifest at {manifest_path} is corrupted "
+            f"({type(exc).__name__}: {exc}); refusing to treat it as missing. "
+            f"Fix the file, or move it aside to start fresh deliberately."
+        ) from exc
 
 
 def save_manifest(manifest: Manifest, root: Path) -> None:

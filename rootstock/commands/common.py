@@ -5,24 +5,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from ..clusters import get_cluster, get_cluster_for_root
-from ..config import load_config
-
-# Environment variable for default root directory
-ROOTSTOCK_ROOT_ENV = "ROOTSTOCK_ROOT"
-
-
-def resolve_cache_root(root: Path) -> Path:
-    """Reverse-lookup the cache root for a given install root.
-
-    If the install root matches a registered cluster, that cluster's
-    ``cache_root`` is returned (defaulting to ``root`` itself when the cluster
-    didn't register a separate cache root). For unknown roots, returns ``root``.
-    """
-    cluster_name = get_cluster_for_root(root)
-    if cluster_name is None:
-        return root
-    return get_cluster(cluster_name).resolved_cache_root
+# Re-exported so command modules keep one import site; the resolution itself
+# lives in rootstock.config / rootstock.layout so the CLI and the calculator
+# share it.
+from ..config import ROOTSTOCK_ROOT_ENV, resolve_default_root  # noqa: F401
+from ..layout import resolve_cache_root  # noqa: F401
 
 
 def get_root_or_exit(args) -> Path:
@@ -39,10 +26,9 @@ def get_root_or_exit(args) -> Path:
     if args.root:
         return Path(args.root)
 
-    # Check config file as fallback
-    config = load_config()
-    if config.root:
-        return Path(config.root)
+    root = resolve_default_root()
+    if root is not None:
+        return root
 
     print(
         f"Error: --root is required (or set {ROOTSTOCK_ROOT_ENV} environment variable, "

@@ -1,4 +1,4 @@
-# Nightly Automated Smoke-Testing
+# Automated Testing
 
 This guide is for **cluster maintainers**. It covers bringing a cluster into the
 automated smoke-test rotation.

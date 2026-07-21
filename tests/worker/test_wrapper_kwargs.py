@@ -1,42 +1,51 @@
-"""Tests for setup_kwargs plumbing through the wrapper script."""
+"""Tests for value plumbing through the spawn sidecar."""
 
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from rootstock.environment import EnvironmentManager
-
-
-def _extract_kwargs_path(wrapper_text: str) -> Path:
-    match = re.search(r'open\("([^"]+)"\)', wrapper_text)
-    assert match, f"could not find kwargs_path in wrapper: {wrapper_text!r}"
-    return Path(match.group(1))
+from rootstock.spawn import WORKER_WRAPPER, spawn_in_env
 
 
 @pytest.fixture
-def env_manager(tmp_path: Path) -> EnvironmentManager:
-    # Pretend an env is "built" — generate_wrapper doesn't actually exec it.
-    (tmp_path / "envs" / "fake_env").mkdir(parents=True)
-    mgr = EnvironmentManager(root=tmp_path)
-    yield mgr
-    mgr.cleanup()
+def fake_root(tmp_path: Path) -> Path:
+    # Pretend an env is "built" — spawn_in_env stages files, it doesn't exec.
+    (tmp_path / "envs" / "fake_env" / "bin").mkdir(parents=True)
+    (tmp_path / "envs" / "fake_env" / "bin" / "python").touch()
+    return tmp_path
 
 
-def test_wrapper_writes_empty_kwargs_sidecar_when_none(env_manager):
-    wrapper = env_manager.generate_wrapper(
-        env_name="fake_env",
-        checkpoint="m",
-        device="cpu",
-        socket_path="/tmp/sock",
-    )
-    kwargs_path = _extract_kwargs_path(wrapper.read_text())
-    assert json.loads(kwargs_path.read_text()) == {}
+def _payload(**setup_kwargs) -> dict:
+    return {
+        "checkpoint": "m",
+        "device": "cpu",
+        "socket_path": "/tmp/sock",
+        "setup_kwargs": setup_kwargs,
+    }
+
+
+def test_wrapper_source_is_static(fake_root):
+    """No runtime value is ever interpolated into Python source — everything
+    travels through the sidecar."""
+    with spawn_in_env(fake_root, "fake_env", WORKER_WRAPPER, _payload(task="omol")) as spec:
+        env_python, wrapper, sidecar = spec.cmd
+        assert Path(wrapper).read_text() == WORKER_WRAPPER
+        spec_data = json.loads(Path(sidecar).read_text())
+        assert spec_data["checkpoint"] == "m"
+        assert spec_data["device"] == "cpu"
+        assert spec_data["socket_path"] == "/tmp/sock"
+        assert spec_data["env_dir"] == str(fake_root / "envs" / "fake_env")
+
+
+def test_empty_setup_kwargs_round_trip(fake_root):
+    with spawn_in_env(fake_root, "fake_env", WORKER_WRAPPER, _payload()) as spec:
+        spec_data = json.loads(Path(spec.cmd[2]).read_text())
+        assert spec_data["setup_kwargs"] == {}
 
 
 @pytest.mark.parametrize(
@@ -49,33 +58,32 @@ def test_wrapper_writes_empty_kwargs_sidecar_when_none(env_manager):
         {"unicode": "ωμα", "quote": 'has "quotes" inside'},
     ],
 )
-def test_wrapper_round_trips_kwargs_through_json_sidecar(env_manager, kwargs):
-    wrapper = env_manager.generate_wrapper(
-        env_name="fake_env",
-        checkpoint="m",
-        device="cpu",
-        socket_path="/tmp/sock",
-        setup_kwargs=kwargs,
-    )
-    kwargs_path = _extract_kwargs_path(wrapper.read_text())
-    assert json.loads(kwargs_path.read_text()) == kwargs
+def test_setup_kwargs_round_trip_through_json_sidecar(fake_root, kwargs):
+    with spawn_in_env(fake_root, "fake_env", WORKER_WRAPPER, _payload(**kwargs)) as spec:
+        spec_data = json.loads(Path(spec.cmd[2]).read_text())
+        assert spec_data["setup_kwargs"] == kwargs
 
 
-def test_wrapper_and_kwargs_files_cleaned_up(env_manager):
-    wrapper = env_manager.generate_wrapper(
-        env_name="fake_env",
-        checkpoint="m",
-        device="cpu",
-        socket_path="/tmp/sock",
-        setup_kwargs={"task": "omol"},
-    )
-    kwargs_path = _extract_kwargs_path(wrapper.read_text())
-    assert wrapper.exists()
-    assert kwargs_path.exists()
+def test_staged_files_removed_on_exit(fake_root):
+    with spawn_in_env(fake_root, "fake_env", WORKER_WRAPPER, _payload()) as spec:
+        wrapper, sidecar = Path(spec.cmd[1]), Path(spec.cmd[2])
+        assert wrapper.exists()
+        assert sidecar.exists()
+    assert not wrapper.parent.exists()
 
-    env_manager.cleanup()
-    assert not wrapper.exists()
-    assert not kwargs_path.exists()
+
+def test_staged_files_removed_on_exception(fake_root):
+    with pytest.raises(RuntimeError, match="boom"):
+        with spawn_in_env(fake_root, "fake_env", WORKER_WRAPPER, _payload()) as spec:
+            wrapper = Path(spec.cmd[1])
+            raise RuntimeError("boom")
+    assert not wrapper.parent.exists()
+
+
+def test_unbuilt_env_raises_before_staging(fake_root):
+    with pytest.raises(RuntimeError, match="not built"):
+        with spawn_in_env(fake_root, "missing_env", WORKER_WRAPPER, _payload()):
+            pass
 
 
 def test_run_worker_forwards_setup_kwargs(tmp_path: Path):

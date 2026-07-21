@@ -39,7 +39,7 @@ Then process the raw JSON yourself. GET-ing the URL returns `{"manifests": [...]
 {
   "schema_version": 3,
   "cluster": "perlmutter",
-  "root": "/global/cfs/cdirs/m4845/rootstock",
+  "root": "/global/cfs/cdirs/m5268/rootstock",
   "cache_root": null,
   "rootstock_version": "0.9.0",
   "python_version": "3.11",
@@ -49,7 +49,7 @@ Then process the raw JSON yourself. GET-ing the URL returns `{"manifests": [...]
     "uma": {
       "status": "ready",
       "built_at": "2026-05-05T20:13:31+00:00",
-      "python_requires": ">=3.10,<3.11",
+      "python_requires": ">=3.11",
       "dependencies": {"fairchem-core": "...", "torch": "...", "ase": "..."},
       "source": "# /// script\n# requires-python = ...\n...def setup(...):\n  ...",
       "source_hash": "sha256:...",
@@ -168,4 +168,4 @@ Out of scope for this skill, but the runtime just needs (a) `rootstock` importab
 - **Login nodes often have no outbound network.** Affects deployment (`rootstock add` fetches checkpoints), not normal use.
 - **First call inside a fresh worker is slow.** Model load dominates wall time for short jobs. Batch into one `with` block.
 - **`last_error != null` in the manifest is real.** If the dashboard shows a checkpoint as broken on a cluster, it's broken. Pick a different one or a different cluster.
-- **Env Python versions differ.** UMA pins `>=3.10,<3.11`; MACE and TensorNet differ. Driver code can run on any Python — Rootstock fires up the right interpreter in the worker — but don't try to share live Python objects across the boundary.
+- **Env Python versions differ.** UMA pins `>=3.11`; other envs differ (some carry upper bounds). Driver code can run on any Python — Rootstock fires up the right interpreter in the worker — but don't try to share live Python objects across the boundary.

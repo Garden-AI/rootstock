@@ -9,11 +9,13 @@ package load time.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from rootstock.commands.install import (
+from rootstock.operations import (
     ROOTSTOCK_GITHUB_URL,
     _rootstock_install_spec,
 )
@@ -101,31 +103,36 @@ def test_install_command_passes_helper_spec_as_final_arg(tmp_path, monkeypatch, 
 
     def fake_run(cmd, **kwargs):
         captured_calls.append(list(cmd))
+        if cmd[:2] == ["uv", "venv"]:
+            Path(cmd[2]).mkdir(parents=True, exist_ok=True)
         result = MagicMock()
         result.returncode = 0
         result.stderr = ""
         result.stdout = ""
         return result
 
-    monkeypatch.setattr("rootstock.commands.install.subprocess.run", fake_run)
-    monkeypatch.setattr("rootstock.commands.install.shutil.copy", lambda *a, **k: None)
+    monkeypatch.setattr("rootstock.operations.subprocess.run", fake_run)
+    monkeypatch.setattr("rootstock.operations.shutil.copy", lambda *a, **k: None)
+    # No vendored wheel available: force the index-spec fallback (also keeps
+    # the test off the network).
+    monkeypatch.setattr("rootstock.operations._vendor_rootstock_wheel", lambda root: None)
+    monkeypatch.setattr("rootstock.operations._precompile_environment", lambda *a, **k: None)
     monkeypatch.setattr(
-        "rootstock.commands.manifest.update_and_push_manifest",
+        "rootstock.operations.update_and_push_manifest",
         lambda *a, **k: None,
     )
 
-    from rootstock.commands.install import _install_single_environment
+    from rootstock.operations import install_environment
 
-    rc = _install_single_environment(
+    install_environment(
         root=tmp_path,
         source=str(env_source),
         force=False,
         verbose=False,
+        progress=print,
     )
 
     captured = capsys.readouterr()
-
-    assert rc == 0
     assert "Installing: rootstock==9.9.9" in captured.out
 
     rootstock_install_calls = [
@@ -175,42 +182,49 @@ def test_dependencies_installed_via_uv_sync_script(tmp_path, monkeypatch, capsys
 
     def fake_run(cmd, **kwargs):
         captured_calls.append((list(cmd), kwargs))
+        if cmd[:2] == ["uv", "venv"]:
+            Path(cmd[2]).mkdir(parents=True, exist_ok=True)
         result = MagicMock()
         result.returncode = 0
         result.stderr = ""
         result.stdout = ""
         return result
 
-    monkeypatch.setattr("rootstock.commands.install.subprocess.run", fake_run)
-    monkeypatch.setattr("rootstock.commands.install.shutil.copy", lambda *a, **k: None)
+    monkeypatch.setattr("rootstock.operations.subprocess.run", fake_run)
+    monkeypatch.setattr("rootstock.operations.shutil.copy", lambda *a, **k: None)
+    monkeypatch.setattr("rootstock.operations._precompile_environment", lambda *a, **k: None)
+    # No vendored wheel available: force the index-spec fallback (also keeps
+    # the test off the network).
+    monkeypatch.setattr("rootstock.operations._vendor_rootstock_wheel", lambda root: None)
     monkeypatch.setattr(
-        "rootstock.commands.manifest.update_and_push_manifest",
+        "rootstock.operations.update_and_push_manifest",
         lambda *a, **k: None,
     )
 
-    from rootstock.commands.install import _install_single_environment
+    from rootstock.operations import install_environment
 
-    rc = _install_single_environment(
+    install_environment(
         root=tmp_path,
         source=str(env_source),
         force=False,
         verbose=False,
+        progress=print,
     )
-    assert rc == 0
 
-    env_target = str(tmp_path / "envs" / "withdeps")
+    # Deps install into the staging build dir, which is swapped into envs/
+    # only once the whole build succeeds.
+    build_dir = str(tmp_path / ".build" / f"withdeps.{os.getpid()}")
 
-    sync_calls = [
-        (cmd, kwargs)
-        for cmd, kwargs in captured_calls
-        if cmd[:2] == ["uv", "sync"]
-    ]
+    sync_calls = [(cmd, kwargs) for cmd, kwargs in captured_calls if cmd[:2] == ["uv", "sync"]]
     assert len(sync_calls) == 1, (
         f"expected exactly one 'uv sync' call, got: {[c for c, _ in captured_calls]!r}"
     )
     cmd, kwargs = sync_calls[0]
-    assert cmd == ["uv", "sync", "--script", str(env_source), "--active"]
-    assert kwargs["env"]["VIRTUAL_ENV"] == env_target
+    # --frozen presence depends on whether a lockfile was resolvable; that
+    # behavior is pinned in test_install_lockfile.py. Here we only care that
+    # deps go through the script interface into the right venv.
+    assert cmd[:5] == ["uv", "sync", "--script", str(env_source), "--active"]
+    assert kwargs["env"]["VIRTUAL_ENV"] == build_dir
 
     # The dependency must NOT be installed through the `uv pip` interface,
     # which would ignore the pinned CUDA index.

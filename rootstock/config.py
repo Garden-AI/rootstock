@@ -17,19 +17,17 @@ Config file format:
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
+import tomli_w
+import tomllib
 
 # Environment variable names
 ROOTSTOCK_API_KEY_ENV = "ROOTSTOCK_API_KEY"
 ROOTSTOCK_API_SECRET_ENV = "ROOTSTOCK_API_SECRET"
 ROOTSTOCK_API_URL_ENV = "ROOTSTOCK_API_URL"
+ROOTSTOCK_ROOT_ENV = "ROOTSTOCK_ROOT"
 
 # Default config location
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / "rootstock"
@@ -109,6 +107,23 @@ def load_config(config_path: Path | None = None) -> UserConfig:
     return config
 
 
+def resolve_default_root() -> Path | None:
+    """The install root a configured machine implies when none is given.
+
+    Priority: the ROOTSTOCK_ROOT environment variable, then ``root`` in the
+    user config file. None when neither is set. This is the shared fallback
+    behind both CLI commands (``get_root_or_exit``) and
+    ``RootstockCalculator`` called without ``cluster=``/``root=``.
+    """
+    env_root = os.environ.get(ROOTSTOCK_ROOT_ENV)
+    if env_root:
+        return Path(env_root)
+    config = load_config()
+    if config.root:
+        return Path(config.root)
+    return None
+
+
 def save_config(config: UserConfig, config_path: Path | None = None) -> None:
     """
     Save user configuration to TOML file.
@@ -120,23 +135,25 @@ def save_config(config: UserConfig, config_path: Path | None = None) -> None:
     path = config_path or DEFAULT_CONFIG_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    lines = []
+    # A real TOML writer, not string concatenation: values containing quotes,
+    # backslashes, or newlines must round-trip through the tomllib reader.
+    data: dict = {}
     if config.root:
-        lines.append(f'root = "{config.root}"')
-    lines.append(f"is_maintainer = {str(config.is_maintainer).lower()}")
+        data["root"] = config.root
+    data["is_maintainer"] = config.is_maintainer
     if config.api_key:
-        lines.append(f'api_key = "{config.api_key}"')
+        data["api_key"] = config.api_key
     if config.api_secret:
-        lines.append(f'api_secret = "{config.api_secret}"')
+        data["api_secret"] = config.api_secret
     if config.api_url:
-        lines.append(f'api_url = "{config.api_url}"')
+        data["api_url"] = config.api_url
 
-    if config.name or config.email:
-        lines.append("")
-        lines.append("[maintainer]")
-        if config.name:
-            lines.append(f'name = "{config.name}"')
-        if config.email:
-            lines.append(f'email = "{config.email}"')
+    maintainer = {}
+    if config.name:
+        maintainer["name"] = config.name
+    if config.email:
+        maintainer["email"] = config.email
+    if maintainer:
+        data["maintainer"] = maintainer
 
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text(tomli_w.dumps(data))

@@ -191,7 +191,7 @@ Each MLIP is defined by a small Python file with [PEP 723](https://peps.python.o
 
 ```python
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["mace-torch>=0.3.14", "ase>=3.22", "torch>=2.0,<2.10"]
 # ///
 
