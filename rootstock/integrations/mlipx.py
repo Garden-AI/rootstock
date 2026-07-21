@@ -17,8 +17,10 @@ Usage inside an MLIPx recipe's ``models.py``::
     from rootstock.integrations.mlipx import RootstockMLIPxModel
 
     MODELS = {
-        "mace":  RootstockMLIPxModel(checkpoint="mace-mp-0-medium", cluster="sophia", device="cuda"),
-        "uma":   RootstockMLIPxModel(checkpoint="uma-s-1p1",        cluster="sophia", device="cuda"),
+        "mace": RootstockMLIPxModel(
+            checkpoint="mace-mp-0-medium", cluster="sophia", device="cuda"
+        ),
+        "uma": RootstockMLIPxModel(checkpoint="uma-s-1p1", cluster="sophia", device="cuda"),
     }
 
 Locally (no cluster), point at an install root instead::
@@ -100,12 +102,11 @@ class RootstockMLIPxModel(zntrack.Node):
         }
         try:
             from ..clusters import get_root_for_cluster
-            from ..environment import find_env_for_checkpoint
+            from ..local_checkpoints import resolve_checkpoint
 
             root = get_root_for_cluster(self.cluster) if self.cluster else self.root
             if root is not None:
-                env_name, _ = find_env_for_checkpoint(root, self.checkpoint)
-                metadata["env"] = env_name
+                metadata["env"] = resolve_checkpoint(root, self.checkpoint).env_name
         except Exception:
             pass
 

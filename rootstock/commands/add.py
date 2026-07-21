@@ -10,13 +10,25 @@ import sys
 from pathlib import Path
 
 from ..environment import CheckpointNotFoundError, list_declared_checkpoints
+from ..local_checkpoints import LocalCheckpointError, local_checkpoints_for_root
 from ..operations import OperationError, add_checkpoint, parse_setup_kwargs
 from .common import get_root_or_exit
 
 
+def _local_checkpoints_or_empty(root: Path) -> dict:
+    """The user's local checkpoints for this root; a corrupt registry warns
+    instead of breaking a read-only listing."""
+    try:
+        return local_checkpoints_for_root(root)
+    except LocalCheckpointError as exc:
+        print(f"Warning: ignoring local-checkpoint registry: {exc}", file=sys.stderr)
+        return {}
+
+
 def _print_checkpoint_catalog(root: Path) -> int:
     """Print every canonical checkpoint id ``rootstock add`` accepts, grouped
-    by hosting env. Returns a process exit code."""
+    by hosting env, plus the user's registered local checkpoints. Returns a
+    process exit code."""
     declared = list_declared_checkpoints(root)
     if not declared:
         print(
@@ -33,6 +45,12 @@ def _print_checkpoint_catalog(root: Path) -> int:
             continue
         for ckpt_id in ckpts:
             print(f"    {ckpt_id}")
+
+    local = _local_checkpoints_or_empty(root)
+    if local:
+        print("  local (this user — already registered, no add needed):")
+        for ckpt_id, entry in sorted(local.items()):
+            print(f"    {ckpt_id}  (env: {entry.env})")
     return 0
 
 
@@ -71,7 +89,17 @@ def cmd_add(args) -> int:
             progress=print,
         )
     except (CheckpointNotFoundError, OperationError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        if isinstance(exc, CheckpointNotFoundError) and args.checkpoint in (
+            _local_checkpoints_or_empty(root)
+        ):
+            print(
+                f"Error: '{args.checkpoint}' is a locally-registered "
+                f"checkpoint — it needs no `rootstock add`. Use it directly, "
+                f"or re-verify it with `rootstock smoke-test`.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     return 0

@@ -94,6 +94,7 @@ class RootstockServer:
         cache_root: Path | None = None,
         timeout: float = 600.0,
         setup_kwargs: dict | None = None,
+        checkpoint_path: str | None = None,
     ):
         """
         Initialize the server.
@@ -117,6 +118,9 @@ class RootstockServer:
                 torch.compile or large neighbor lists — runs under the
                 same envelope verification exercised.
             setup_kwargs: Extra keyword arguments forwarded to setup()
+            checkpoint_path: Path to a local (user-registered) weights file.
+                When set, the worker loads via the env's setup_from_path()
+                hook instead of setup(); ``checkpoint`` is then only a label.
         """
         if root is None:
             raise ValueError("root is required for pre-built environments")
@@ -130,6 +134,7 @@ class RootstockServer:
 
         self.env_name = env_name
         self.checkpoint = checkpoint
+        self.checkpoint_path = checkpoint_path
         self.device = device
         self.root = Path(root)
         self.cache_root = Path(cache_root) if cache_root is not None else None
@@ -192,6 +197,7 @@ class RootstockServer:
                 WORKER_WRAPPER,
                 {
                     "checkpoint": self.checkpoint,
+                    "checkpoint_path": self.checkpoint_path,
                     "device": self.device,
                     "socket_path": self.socket_path,
                     "setup_kwargs": self.setup_kwargs,

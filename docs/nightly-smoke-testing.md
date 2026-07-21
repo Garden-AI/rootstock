@@ -9,6 +9,13 @@ automated smoke-test rotation.
 pass each) and pushes the refreshed `manifest.json` to the backend. Running it
 on a schedule keeps each cluster's manifest honest about checkpoint health.
 
+It also covers the running user's **local checkpoints** (`rootstock
+add-local`): each is re-hashed against its registered sha256 (a swapped file
+fails without being verified) and then verified with its registered kwargs;
+those outcomes are written to the per-user registry, not the shared manifest.
+A run that tests only local checkpoints never writes the manifest at all, so
+non-maintainers can schedule their own re-verification too.
+
 The mechanism is a **self-scheduling batch job**: a single GPU job that first
 re-queues its own next run, then runs the smoke-test. The only state that
 persists between runs is "a job is queued for next time," which the job

@@ -54,6 +54,7 @@ import sys
 from . import __version__
 from .commands import (
     cmd_add,
+    cmd_add_local,
     cmd_benchmark,
     cmd_check_perms,
     cmd_init,
@@ -63,6 +64,7 @@ from .commands import (
     cmd_manifest_push,
     cmd_manifest_show,
     cmd_new_env,
+    cmd_remove_local,
     cmd_resolve,
     cmd_serve,
     cmd_setup_perms,
@@ -235,14 +237,85 @@ def main():
     )
     add_parser.set_defaults(func=cmd_add)
 
+    # add-local command
+    add_local_parser = subparsers.add_parser(
+        "add-local",
+        help="Register a local weights file (e.g. a fine-tune) as a checkpoint",
+        description=(
+            "Register a user-supplied weights file under a checkpoint id, "
+            "bound to an installed env. The env must declare a "
+            "setup_from_path(path, device, **kwargs) function (opt-in; see "
+            "docs/environments.md). Nothing is written to the shared install "
+            "— the registration lives in the per-user registry "
+            "(~/.config/rootstock/local-checkpoints.json) and the weights "
+            "file stays where it is. The id then works everywhere a "
+            "canonical id does."
+        ),
+    )
+    add_local_parser.add_argument("path", help="Path to the weights file")
+    add_local_parser.add_argument(
+        "--env",
+        required=True,
+        help="Installed env that hosts this checkpoint (must declare setup_from_path)",
+    )
+    add_local_parser.add_argument(
+        "--id",
+        required=True,
+        help="Checkpoint id to register (must not collide with a canonical id)",
+    )
+    add_local_parser.add_argument(
+        "--kwarg",
+        action="append",
+        metavar="KEY=VAL",
+        help=(
+            "Default kwarg passed to setup_from_path() whenever this "
+            "checkpoint is used (repeatable). Value is JSON-decoded first, "
+            "then falls back to a string. E.g., --kwarg task=omol"
+        ),
+    )
+    add_local_parser.add_argument(
+        "--device", default="cuda", help="Device for verify (default: cuda)"
+    )
+    add_local_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip the verify phase. Login-node escape hatch.",
+    )
+    add_local_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    add_local_parser.set_defaults(func=cmd_add_local)
+
+    # remove-local command
+    remove_local_parser = subparsers.add_parser(
+        "remove-local",
+        help="Remove a locally-registered checkpoint (never deletes weights)",
+        description=(
+            "Delete a local checkpoint's registry entry. The weights file is "
+            "never touched — the registry records it, it doesn't own it."
+        ),
+    )
+    remove_local_parser.add_argument("checkpoint", help="Registered checkpoint id")
+    remove_local_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    remove_local_parser.set_defaults(func=cmd_remove_local)
+
     # smoke-test command
     smoke_parser = subparsers.add_parser(
         "smoke-test",
         help="Re-verify checkpoints already registered in the manifest",
         description=(
             "Re-verify checkpoints by running a forward pass on each. Never downloads. "
-            "Always uses setup_kwargs={} — checkpoints requiring non-default kwargs "
-            "may show as failing here even if they work in practice."
+            "Canonical checkpoints always use setup_kwargs={} — checkpoints requiring "
+            "non-default kwargs may show as failing here even if they work in practice. "
+            "The user's local checkpoints (rootstock add-local) are also tested: "
+            "re-hashed against their registered sha256, then verified with their "
+            "registered kwargs; outcomes go to the per-user registry, not the manifest."
         ),
     )
     smoke_parser.add_argument("--env", help="Filter to a single environment")

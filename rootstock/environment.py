@@ -215,6 +215,23 @@ def parse_checkpoints_dict(env_source_path: Path) -> dict[str, str]:
     )
 
 
+def declares_setup_from_path(env_source_path: Path) -> bool:
+    """
+    Return True when the env source declares a module-level ``setup_from_path``.
+
+    ``setup_from_path(path, device="cuda", **kwargs)`` is the opt-in hook that
+    lets an env load user-supplied weights files (local checkpoints). Presence
+    is all that's checked — the signature is trusted the same way ``setup``'s
+    is.
+    """
+    tree = ast.parse(env_source_path.read_text(), filename=str(env_source_path))
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "setup_from_path"
+        for node in tree.body
+    )
+
+
 def list_declared_checkpoints(root: Path | str) -> dict[str, dict[str, str]]:
     """
     Walk ``{root}/envs/*/env_source.py`` and return ``{env_name: CHECKPOINTS}``

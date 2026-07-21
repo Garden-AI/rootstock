@@ -15,8 +15,8 @@ from ase.stress import full_3x3_to_voigt_6_stress
 
 from .clusters import get_cluster
 from .config import resolve_default_root
-from .environment import find_env_for_checkpoint
 from .layout import ensure_layout_compatible, resolve_cache_root
+from .local_checkpoints import LocalCheckpointError, resolve_checkpoint
 from .server import RootstockServer, WorkerDiedError
 
 
@@ -56,7 +56,9 @@ class RootstockCalculator(Calculator):
     Note:
         Environments must be pre-built with `rootstock install` before use.
         The hosting env is resolved automatically by walking the installed envs
-        and matching the checkpoint id against each env file's `CHECKPOINTS`.
+        and matching the checkpoint id against each env file's `CHECKPOINTS`,
+        then against the user's local-checkpoint registry (weights files
+        registered with `rootstock add-local`).
     """
 
     implemented_properties = ["energy", "free_energy", "forces", "stress"]
@@ -129,7 +131,6 @@ class RootstockCalculator(Calculator):
 
         self.checkpoint = checkpoint
         self.device = device
-        self.setup_kwargs = setup_kwargs
         self.timeout = timeout
 
         # Resolve the install root: the cluster name is only a name -> path
@@ -160,10 +161,25 @@ class RootstockCalculator(Calculator):
         # misleading resolution error.
         ensure_layout_compatible(self.root)
 
-        # Resolve env name from the canonical checkpoint id by walking the
-        # installed envs at self.root. Raises CheckpointNotFoundError with a
-        # helpful listing if no env declares this id.
-        self.env_name, _ = find_env_for_checkpoint(self.root, checkpoint)
+        # Resolve the checkpoint id: env-declared canonical ids first, then
+        # the user's local-checkpoint registry. Raises CheckpointNotFoundError
+        # with a listing of both namespaces if nothing matches.
+        resolved = resolve_checkpoint(self.root, checkpoint)
+        self.env_name = resolved.env_name
+        self.checkpoint_path = resolved.path
+        # Registered defaults for a local checkpoint; per-call kwargs win.
+        # Registration already rejected reserved keys in the defaults.
+        self.setup_kwargs = {**resolved.setup_kwargs, **setup_kwargs}
+
+        if resolved.is_local and not Path(resolved.path).exists():
+            # Fail at construction, not as a WorkerDiedError post-mortem
+            # minutes into a batch job.
+            raise LocalCheckpointError(
+                f"local checkpoint '{checkpoint}' points at {resolved.path}, "
+                f"which no longer exists. Re-register it with `rootstock "
+                f"add-local` or remove it with `rootstock remove-local "
+                f"{checkpoint}`."
+            )
 
         # Generate unique socket name to avoid conflicts
         self._socket_name = f"rootstock_{uuid.uuid4().hex[:8]}"
@@ -181,6 +197,7 @@ class RootstockCalculator(Calculator):
                 cache_root=self.cache_root,
                 setup_kwargs=self.setup_kwargs,
                 timeout=self.timeout,
+                checkpoint_path=self.checkpoint_path,
             )
             self._server.start()
 
