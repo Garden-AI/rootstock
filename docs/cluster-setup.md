@@ -36,8 +36,8 @@ The cluster registry (`rootstock/clusters.py`) is only a name → install-path b
 
 ```python
 "perlmutter": Cluster(
-    root=Path("/global/cfs/cdirs/m4845/rootstock"),
-    cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),  # legacy fallback only
+    root=Path("/global/cfs/cdirs/m5268/rootstock"),
+    cache_root=Path("/pscratch/sd/o/oprice/rootstock-cache"),  # legacy fallback only
 ),
 ```
 
@@ -72,7 +72,7 @@ The setup needs to satisfy:
 `rootstock setup-perms` renders and applies this recipe for you. Run it **once** as the maintainer, before `rootstock init`. Pass a registered cluster name (it resolves both the install root and, where split, the cache root) and your project group:
 
 ```bash
-rootstock setup-perms --cluster perlmutter --group m4845 --apply
+rootstock setup-perms --cluster perlmutter --group m5268 --apply
 ```
 
 Or point it at explicit paths instead of a cluster:
@@ -90,7 +90,7 @@ The order matters: the `chmod` comes **last**. Setting an ACL rewrites a path's 
 If the install or cache root **already has files in it** when you set this up (e.g., you're retrofitting a deployment that started out project-only), add `--retrofit` so the recipe also applies recursively — existing files become world-readable, and existing *subdirectories* get setgid so files created under them inherit the project group:
 
 ```bash
-rootstock setup-perms --cluster perlmutter --group m4845 --retrofit --apply
+rootstock setup-perms --cluster perlmutter --group m5268 --retrofit --apply
 ```
 
 `rootstock install` re-checks these permissions up front on every run and prints a warning if the root doesn't look world-readable (wrong mode bits, missing setgid, missing default ACL, or a mask clamp from too-restrictive a umask). The check is read-only and never blocks the build; pass `--no-perm-check` to silence it.
@@ -118,7 +118,7 @@ Per-cluster step-by-step runbooks live in `scripts/runbooks/` — they sequence 
 **Quick check (first line).** `rootstock check-perms` runs the same read-only verification that `rootstock install` performs up front, as a standalone command — plus an ancestor walk, so a restricted project parent directory (which no `chmod` inside the install can fix) shows up too. It stats only the roots and their ancestors, so it is safe and fast on login nodes:
 
 ```bash
-rootstock check-perms --cluster perlmutter --group m4845
+rootstock check-perms --cluster perlmutter --group m5268
 ```
 
 Exit code 0 means the roots look right; 1 means issues were printed (pass `--json` for machine-readable output). It checks only the root directories, not the tree beneath them — for that, use the audit below.
@@ -126,7 +126,7 @@ Exit code 0 means the roots look right; 1 means issues were printed (pass `--jso
 **Static audit (full tree).** `scripts/check_world_readable.sh` checks the world-readable contract across the whole tree without needing rootstock in the caller's Python:
 
 ```bash
-./scripts/check_world_readable.sh /global/cfs/cdirs/m4845/rootstock
+./scripts/check_world_readable.sh /global/cfs/cdirs/m5268/rootstock
 ```
 
 It walks the ancestor directories (every one needs `o+x` — if the project parent on CFS lacks it, that's a facilities ticket, not a chmod), checks other-bits on every file and directory, resolves symlink targets, and scans for per-user ACL entries and mask clamps that `ls -l` won't show. It prints actionable per-path fixes and exits nonzero on any violation.

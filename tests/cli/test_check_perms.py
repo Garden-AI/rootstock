@@ -102,8 +102,8 @@ def test_cluster_resolves_split_roots(monkeypatch):
 
     rc = cmd_check_perms(_args(cluster="perlmutter"))
     assert rc == 0
-    assert checked["install"] == Path("/global/cfs/cdirs/m4845/rootstock")
-    assert checked["cache"] == Path("/pscratch/sd/w/wengler/rootstock-cache")
+    assert checked["install"] == Path("/global/cfs/cdirs/m5268/rootstock")
+    assert checked["cache"] == Path("/pscratch/sd/o/oprice/rootstock-cache")
 
 
 def test_unknown_cluster_errors(capsys):

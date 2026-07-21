@@ -39,7 +39,7 @@ Then process the raw JSON yourself. GET-ing the URL returns `{"manifests": [...]
 {
   "schema_version": 3,
   "cluster": "perlmutter",
-  "root": "/global/cfs/cdirs/m4845/rootstock",
+  "root": "/global/cfs/cdirs/m5268/rootstock",
   "cache_root": null,
   "rootstock_version": "0.9.0",
   "python_version": "3.11",

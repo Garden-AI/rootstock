@@ -46,8 +46,8 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
         root=Path("/eagle/Garden-Ai/rootstock"),
     ),
     "perlmutter": Cluster(
-        root=Path("/global/cfs/cdirs/m4845/rootstock"),
-        cache_root=Path("/pscratch/sd/w/wengler/rootstock-cache"),
+        root=Path("/global/cfs/cdirs/m5268/rootstock"),
+        cache_root=Path("/pscratch/sd/o/oprice/rootstock-cache"),
     ),
     "delta": Cluster(root=Path("/work/hdd/data/rootstock")),
     # ORNL Frontier (AMD MI250X). The install root is a User-Managed Software

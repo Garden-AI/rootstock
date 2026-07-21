@@ -114,7 +114,7 @@ predate the declaration. Most clusters use the same path for both.
 | `della` | `/scratch/gpfs/ROSENGROUP/common/rootstock` | (same as install root) |
 | `sophia` | `/eagle/Garden-Ai/rootstock` | (same as install root) |
 | `polaris` | `/eagle/Garden-Ai/rootstock` (shared with sophia) | (same as install root) |
-| `perlmutter` | `/global/cfs/cdirs/m4845/rootstock` | `/pscratch/sd/w/wengler/rootstock-cache` |
+| `perlmutter` | `/global/cfs/cdirs/m5268/rootstock` | `/pscratch/sd/o/oprice/rootstock-cache` |
 | `delta` | `/work/hdd/data/rootstock` | (same as install root) |
 | `frontier` | `/sw/frontier/ums/ums047/rootstock` | `/lustre/orion/ums047/world-shared/rootstock-cache` |
 

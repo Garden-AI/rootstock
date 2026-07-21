@@ -15,30 +15,34 @@ from .common import ROOTSTOCK_ROOT_ENV, resolve_cache_root
 def _resolve_roots(args) -> tuple[Path, Path | None] | None:
     """Resolve (install_root, cache_root) to check.
 
-    Priority: --cluster, then --root or the positional root (whose argparse
-    default is $ROOTSTOCK_ROOT), then the config file. When the root isn't given via
-    --cluster, the cache root comes from --cache-root or a reverse lookup in
-    the cluster registry. Returns None (after printing an error) on bad input.
+    Priority for the install root: --cluster, then --root or the positional
+    root (whose argparse default is $ROOTSTOCK_ROOT), then the config file. The
+    cache root always comes from ``resolve_cache_root`` (--cache-root, then the
+    install's layout.json declaration, then the cluster registry's legacy
+    entry), and equals the install root when the cache isn't split. Returns
+    None (after printing an error) on bad input.
     """
     if args.cluster:
         try:
-            cluster = get_cluster(args.cluster)
+            install_root = get_cluster(args.cluster).root
         except ValueError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return None
-        return cluster.root, cluster.cache_root
+    else:
+        root = getattr(args, "root_flag", None) or args.root or load_config().root
+        if not root:
+            print(
+                "Error: provide an install root path, --cluster <name>, "
+                f"or set {ROOTSTOCK_ROOT_ENV}.",
+                file=sys.stderr,
+            )
+            return None
+        install_root = Path(root)
 
-    root = getattr(args, "root_flag", None) or args.root or load_config().root
-    if not root:
-        print(
-            f"Error: provide an install root path, --cluster <name>, or set {ROOTSTOCK_ROOT_ENV}.",
-            file=sys.stderr,
-        )
-        return None
-
-    install_root = Path(root)
-    cache_root = Path(args.cache_root) if args.cache_root else resolve_cache_root(install_root)
-    return install_root, cache_root
+    # Resolve the cache root the same way on both paths: a --cluster whose
+    # install declares its cache in layout.json must win over the registry's
+    # legacy entry, which is exactly what new split deployments rely on.
+    return install_root, resolve_cache_root(install_root, args.cache_root)
 
 
 def cmd_check_perms(args) -> int:

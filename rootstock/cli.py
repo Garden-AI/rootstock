@@ -38,13 +38,13 @@ Commands:
     rootstock setup-perms [<root>] [--cluster <name>] --group <group> [--apply] [--retrofit]
         Render (dry-run) or apply the world-readable shared-install permission
         recipe for an install root (and split cache root):
-            rootstock setup-perms --cluster perlmutter --group m4845 --apply
+            rootstock setup-perms --cluster perlmutter --group m5268 --apply
 
     rootstock check-perms [<root>] [--cluster <name>] [--group <group>] [--json]
         Read-only check that the install root, split cache root, and their
         ancestor directories satisfy the shared-install permission recipe.
         Exits 0 when clean, 1 when issues are found:
-            rootstock check-perms --cluster perlmutter --group m4845
+            rootstock check-perms --cluster perlmutter --group m5268
 """
 
 import argparse
@@ -335,7 +335,7 @@ def main():
     setup_perms_parser.add_argument(
         "--group",
         required=True,
-        help="Project group that owns the install (e.g., m4845)",
+        help="Project group that owns the install (e.g., m5268)",
     )
     setup_perms_parser.add_argument(
         "--apply",
