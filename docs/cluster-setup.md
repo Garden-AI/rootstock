@@ -169,7 +169,7 @@ This will interactively prompt you for:
 
 | Setting | Description |
 |---------|-------------|
-| **root** | The shared directory path, or a registered cluster name (`perlmutter`, `della`, etc.) |
+| **root** | The shared directory path, or a registered cluster name (`perlmutter`, delta`, etc.) |
 | **api_key / api_secret** | Optional credentials for pushing the cluster manifest to the dashboard |
 | **maintainer name / email** | Identifies the maintainer for this installation |
 
@@ -262,13 +262,13 @@ To create or reinitialize a manifest for a cluster:
 
 ```bash
 # Create a new manifest
-rootstock manifest init --cluster della
+rootstock manifest init --cluster delta
 
 # Overwrite existing manifest
-rootstock manifest init --cluster della --force
+rootstock manifest init --cluster delta --force
 
 # Skip automatic push to backend
-rootstock manifest init --cluster della --no-push
+rootstock manifest init --cluster delta --no-push
 ```
 
 ## Verifying the installation

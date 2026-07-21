@@ -9,7 +9,7 @@ The skill covers two phases:
 1. **Discover** what's deployed where, by reading the live dashboard manifest.
 2. **Call** `RootstockCalculator` with a `(cluster, checkpoint)` pair, including how to forward `setup_kwargs` and avoid common pitfalls (login nodes without GPUs, cold-start model loads, stale checkpoints).
 
-It triggers on requests like "compute an adsorption energy on Perlmutter", "relax this structure with MACE on Della", or "what MLIPs are available on this cluster" — even when the user doesn't say "Rootstock" by name.
+It triggers on requests like "compute an adsorption energy on Perlmutter", "relax this structure with MACE on Perlmutter", or "what MLIPs are available on this cluster" — even when the user doesn't say "Rootstock" by name.
 
 ## Using the skill
 

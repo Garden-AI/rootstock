@@ -37,7 +37,7 @@ class RootstockCalculator(Calculator):
 
         with RootstockCalculator(
             checkpoint="mace-mp-0-medium",
-            cluster="della",
+            cluster="delta",
             device="cuda",
         ) as calc:
             atoms.calc = calc
@@ -46,7 +46,7 @@ class RootstockCalculator(Calculator):
         # Forward extra kwargs to the env's setup() function:
         with RootstockCalculator(
             checkpoint="uma-s-1p1",
-            cluster="della",
+            cluster="delta",
             device="cuda",
             setup_kwargs={"task": "omol"},
         ) as calc:
@@ -84,7 +84,7 @@ class RootstockCalculator(Calculator):
             checkpoint: Canonical checkpoint id (e.g., "mace-mp-0-medium",
                         "uma-s-1p1"). Required. The hosting env is resolved
                         from the installed envs at ``root``.
-            cluster: Known cluster name (e.g., "della", "perlmutter"). Mutually
+            cluster: Known cluster name (e.g., "delta", "perlmutter"). Mutually
                      exclusive with root; a name -> install-path bootstrap.
             root: Path to rootstock install directory. Mutually exclusive with
                   cluster. When neither is given, the ROOTSTOCK_ROOT

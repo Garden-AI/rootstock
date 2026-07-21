@@ -53,7 +53,7 @@ boundary        p p p
 
 read_data       structure.data
 
-pair_style      rootstock cluster della checkpoint mace-mp-0-medium device cuda
+pair_style      rootstock cluster delta checkpoint mace-mp-0-medium device cuda
 pair_coeff      * * Cu
 
 thermo_style    custom step temp pe press

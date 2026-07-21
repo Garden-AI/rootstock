@@ -13,7 +13,7 @@ from rootstock import RootstockCalculator
 atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
 
 with RootstockCalculator(
-    cluster="della",
+    cluster="delta",
     checkpoint="mace-mp-0-medium",
     device="cuda",
 ) as calc:
@@ -28,7 +28,7 @@ with RootstockCalculator(
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `checkpoint` | `str` | Yes | Canonical checkpoint id (e.g., `"mace-mp-0-medium"`, `"uma-s-1p1"`). The hosting env is resolved automatically by walking the installed envs and matching against each env's `CHECKPOINTS` table |
-| `cluster` | `str` | Yes* | Cluster name (e.g., `"della"`, `"perlmutter"`) |
+| `cluster` | `str` | Yes* | Cluster name (e.g., `"delta"`, `"perlmutter"`) |
 | `root` | `str` | Yes* | Custom install-root path instead of a known cluster |
 | `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. When omitted, the install's own declaration (`{root}/layout.json`) decides, falling back to the cluster registry for legacy roots, then to `root` |
 | `device` | `str` | No | `"cuda"` (default) or `"cpu"` |
@@ -41,22 +41,10 @@ with RootstockCalculator(
 
 ```python
 # Using a known cluster
-RootstockCalculator(cluster="della", checkpoint="mace-mp-0-medium")
+RootstockCalculator(cluster="delta", checkpoint="mace-mp-0-medium")
 
-# Perlmutter — cluster name bootstraps the install path; the install itself
-# declares where its cache lives (layout.json), e.g. PSCRATCH
-RootstockCalculator(cluster="perlmutter", checkpoint="uma-s-1p1")
-
-# Custom install root (cache_root from the install's declaration, else the root)
+# Custom install root
 RootstockCalculator(root="/scratch/gpfs/specific/install/rootstock", checkpoint="mace-mp-0-medium")
-
-# Explicit split between install root and cache root
-RootstockCalculator(
-    root="/global/cfs/cdirs/myproj/rootstock",
-    cache_root="/pscratch/sd/u/me/rootstock-cache",
-    checkpoint="uma-s-1p1",
-    setup_kwargs={"task": "omol"},
-)
 ```
 
 ### Context manager
@@ -152,10 +140,10 @@ Look up the root directory for a known cluster.
 
 ```bash
 # Human-readable output
-rootstock resolve --cluster della
+rootstock resolve --cluster delta
 
 # JSON output
-rootstock resolve --cluster della --json
+rootstock resolve --cluster delta --json
 ```
 
 ### Administrator commands
@@ -305,6 +293,6 @@ rootstock manifest show --json
 rootstock manifest push
 
 # Initialize new manifest
-rootstock manifest init --cluster della
-rootstock manifest init --cluster della --force
+rootstock manifest init --cluster delta
+rootstock manifest init --cluster delta --force
 ```

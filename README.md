@@ -4,15 +4,19 @@ Rootstock lets you run many machine-learned interatomic potentials (MLIPs) on an
 
 Each MLIP family runs in its own pre-built, isolated Python environment that a maintainer has already installed and verified on the cluster. Swapping models is a one-line change to the `checkpoint` argument, even when the MLIPs need different Python or library versions.
 
-Full documentation: [garden-ai.github.io/rootstock](https://garden-ai.github.io/rootstock/). The current model-by-cluster coverage lives in the [Matter Model Almanac](https://garden-ai.github.io/almanac).
+Full documentation: [garden-ai.github.io/rootstock](https://garden-ai.github.io/rootstock/). See which models are supported on which clusters on the [Matter Model Almanac](https://garden-ai.github.io/almanac).
+
+## Support
+
+This work is supported by NSF Award [#2514142](https://www.nsf.gov/awardsearch/show-award?AWD_ID=2514142): “Collaborative Research: Frameworks: SINAPSE: Scalable Infrastructure for AI-coupled Predictive Simulation Enhancement”
 
 ## Availability
 
-Rootstock is deployed on a growing set of HPC clusters. Which checkpoints are installed and verified where lives in the [Matter Model Almanac](https://garden-ai.github.io/almanac) and the live dashboard. To deploy Rootstock on your cluster or use it for a specific project, contact Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
+Rootstock is deployed on a growing set of HPC clusters. Which checkpoints are installed where lives in the [Matter Model Almanac](https://garden-ai.github.io/almanac). If your cluster isn't supported but you want it to be, please reach out to Will Engler at [willengler@uchicago.edu](mailto:willengler@uchicago.edu).
 
 ## Quick Start
 
-Rootstock is designed for use on an HPC cluster where it has already been set up by a maintainer. The code below runs in your normal Python environment — inside a SLURM job script, an interactive session, or a Jupyter notebook on the cluster. Rootstock handles the MLIP environment isolation.
+Rootstock is designed for use on an HPC cluster where models have been set up by a maintainer. The code below runs in a Python environment with rootstock and ASE installed. This could be inside a SLURM job script, an interactive session, a Jupyter notebook on the cluster, etc..
 
 ```python
 from ase.build import bulk
@@ -21,7 +25,7 @@ from rootstock import RootstockCalculator
 atoms = bulk("Cu", "fcc", a=3.6) * (5, 5, 5)
 
 with RootstockCalculator(
-    cluster="della",
+    cluster="delta",
     checkpoint="mace-mp-0-medium",
     device="cuda",
 ) as calc:
@@ -48,10 +52,10 @@ uv pip install rootstock
 
 ```python
 # Pick a checkpoint by canonical id; env is resolved automatically.
-RootstockCalculator(cluster="della", checkpoint="mace-mp-0-medium")
+RootstockCalculator(cluster="delta", checkpoint="mace-mp-0-medium")
 
 # Forward extra kwargs to the env's setup() function:
-RootstockCalculator(cluster="della", checkpoint="uma-s-1p1", setup_kwargs={"task": "omol"})
+RootstockCalculator(cluster="delta", checkpoint="uma-s-1p1", setup_kwargs={"task": "omol"})
 
 # Custom root path instead of a known cluster
 RootstockCalculator(root="/scratch/gpfs/specific/install/path/rootstock", checkpoint="mace-mp-0-medium")

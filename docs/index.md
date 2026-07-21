@@ -48,12 +48,4 @@ Maintainers define each model family as a Python file: a [PEP 723](https://peps.
 
     [:octicons-arrow-right-24: Agents](run-agents.md)
 
--   :material-test-tube:{ .lg .middle } **Nightly Smoke-Testing**
-
-    ---
-
-    Keep a cluster's manifest current with automated nightly checks.
-
-    [:octicons-arrow-right-24: Nightly Smoke-Testing](nightly-smoke-testing.md)
-
 </div>

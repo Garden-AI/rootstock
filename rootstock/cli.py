@@ -503,7 +503,7 @@ def main():
     manifest_init_parser.add_argument(
         "--cluster",
         required=True,
-        help="Cluster name (e.g., della, modal)",
+        help="Cluster name (e.g., delta or perlmutter)",
     )
     manifest_init_parser.add_argument(
         "--force",
