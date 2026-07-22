@@ -397,18 +397,19 @@ def main(argv=None) -> int:
 
     # Resolve root and cache_root (needed even with --cluster: the in-env arm
     # builds its cache env from these paths directly, never going through
-    # RootstockCalculator's cluster resolution — so a registered split
-    # cache_root (e.g. Perlmutter's PSCRATCH) must be threaded through here or
-    # that arm looks for weights under `root`).
+    # RootstockCalculator's cluster resolution — so a split cache_root must be
+    # threaded through here or that arm looks for weights under `root`).
+    # cache_root resolves through resolve_cache_root like every other entry
+    # point, so a split cache declared in {root}/layout.json (e.g. Frontier:
+    # root on read-only /sw, weights on Lustre) is honored with a bare --root,
+    # not only via --cache-root or the cluster registry.
     cluster_info = None
     if args.cluster:
         from rootstock.clusters import get_cluster
         cluster_info = get_cluster(args.cluster)
     root = Path(args.root) if args.root else Path(cluster_info.root)
-    if args.cache_root:
-        cache_root = Path(args.cache_root)
-    else:
-        cache_root = cluster_info.cache_root if cluster_info else None
+    from rootstock.layout import resolve_cache_root
+    cache_root = resolve_cache_root(root, explicit=args.cache_root)
 
     if args.list:
         return list_available(root)

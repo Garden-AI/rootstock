@@ -16,6 +16,7 @@ from rootstock.clusters import (
 )
 from rootstock.commands.common import resolve_cache_root
 from rootstock.environment import get_model_cache_env, get_user_cache_dir
+from rootstock.layout import write_layout_marker
 from rootstock.spawn import WORKER_WRAPPER, spawn_in_env
 
 # Runtime write-back caches that must NEVER point into the shared roots —
@@ -317,6 +318,75 @@ def test_calculator_with_root_and_explicit_cache_root(tmp_path: Path):
     )
     assert calc.root == install
     assert calc.cache_root == cache
+
+
+# ---------- benchmark entry point ------------------------------------------
+#
+# benchmark.py threads root/cache_root to its in-env arm directly (never
+# through RootstockCalculator), so it must resolve the cache root the same
+# way every other entry point does — including a split cache declared in
+# {root}/layout.json (e.g. Frontier: root on /sw, read-only on compute
+# nodes; weights on Lustre). Regression: it used to honor only --cache-root
+# and the cluster registry, sending the in-env arm to {root}/cache.
+
+
+def _capture_benchmark_roots(monkeypatch, argv) -> dict:
+    """Run benchmark.main with benchmark_one stubbed to capture its roots."""
+    from rootstock import benchmark
+
+    captured: dict = {}
+
+    def fake_benchmark_one(checkpoint, device, root, cache_root, *args, **kwargs):
+        captured["root"] = root
+        captured["cache_root"] = cache_root
+        raise RuntimeError("captured")  # per-checkpoint errors don't abort main
+
+    monkeypatch.setattr(benchmark, "benchmark_one", fake_benchmark_one)
+    assert benchmark.main(argv + ["--checkpoints", "x", "--calls", "1", "--warmup", "0"]) == 0
+    return captured
+
+
+def test_benchmark_honors_layout_declared_cache_root(tmp_path: Path, monkeypatch):
+    root = tmp_path / "install"
+    cache = tmp_path / "cache"
+    root.mkdir()
+    write_layout_marker(root, cache_root=cache)
+
+    got = _capture_benchmark_roots(monkeypatch, ["--root", str(root)])
+    assert got["root"] == root
+    assert got["cache_root"] == cache
+
+
+def test_benchmark_cache_root_flag_overrides_declaration(tmp_path: Path, monkeypatch):
+    root = tmp_path / "install"
+    root.mkdir()
+    write_layout_marker(root, cache_root=tmp_path / "declared")
+    override = tmp_path / "override"
+
+    got = _capture_benchmark_roots(
+        monkeypatch, ["--root", str(root), "--cache-root", str(override)]
+    )
+    assert got["cache_root"] == override
+
+
+def test_benchmark_bare_root_defaults_cache_root_to_root(tmp_path: Path, monkeypatch):
+    """No declaration, no registry entry: cache root is the install root."""
+    got = _capture_benchmark_roots(monkeypatch, ["--root", str(tmp_path)])
+    assert got["cache_root"] == tmp_path
+
+
+def test_benchmark_cluster_registry_still_resolves(tmp_path: Path, monkeypatch):
+    install = tmp_path / "install"
+    cache = tmp_path / "cache"
+    monkeypatch.setitem(
+        CLUSTER_REGISTRY,
+        "_test_split",
+        Cluster(root=install, cache_root=cache),
+    )
+
+    got = _capture_benchmark_roots(monkeypatch, ["--cluster", "_test_split"])
+    assert got["root"] == install
+    assert got["cache_root"] == cache
 
 
 # ---------- End-to-end: cache_root reaches the worker spawn ---------------
