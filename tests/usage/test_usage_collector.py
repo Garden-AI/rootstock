@@ -28,7 +28,14 @@ def _spool(tmp_path):
     return spool
 
 
-def _write(cache_root, month="2026-07", checkpoint="mace-mp-0-medium", n=10, duration=60.0):
+def _write(
+    cache_root,
+    month="2026-07",
+    checkpoint="mace-mp-0-medium",
+    n=10,
+    duration=60.0,
+    client="calculator",
+):
     path = record_session(
         root=cache_root,
         cache_root=cache_root,
@@ -36,6 +43,7 @@ def _write(cache_root, month="2026-07", checkpoint="mace-mp-0-medium", n=10, dur
         checkpoint=checkpoint,
         is_local=False,
         device="cuda",
+        client=client,
         started_at=f"{month}-23T01:02:03+00:00",
         duration_s=duration,
         n_calculations=n,
@@ -59,6 +67,24 @@ def test_summarize_aggregates_by_month_and_checkpoint(tmp_path):
         ("2026-06", "mace-mp-0-medium", 1, 1),
         ("2026-07", "mace-mp-0-medium", 2, 15),
         ("2026-07", "uma-s-1p1", 1, 2),
+    ]
+
+
+def test_serve_rows_stay_distinct_and_null_calls_sum_as_zero(tmp_path):
+    """client is a rollup key — serve/LAMMPS adoption must stay visible after
+    compaction — and serve's n_calculations=null (the parent process never
+    sees the i-PI traffic) counts the session while summing nothing."""
+    _spool(tmp_path)
+    _write(tmp_path, n=10)
+    _write(tmp_path, client="serve", n=None)
+    compact_spool(tmp_path)
+    _write(tmp_path, client="serve", n=None)  # fresh record after compaction
+
+    summary = summarize_spool(tmp_path)
+    rows = [(r["client"], r["sessions"], r["n_calculations"]) for r in summary.rows]
+    assert rows == [
+        ("calculator", 1, 10),
+        ("serve", 2, 0),
     ]
 
 

@@ -194,7 +194,9 @@ ROLLUP_SCHEMA_VERSION = 1
 
 # One aggregated row per distinct combination of these; every other record
 # field is either summed (n_calculations, duration_s) or counted (sessions).
-_KEY_FIELDS = ("month", "cluster", "env", "checkpoint", "device")
+# client is a key so entry-point adoption (calculator vs serve/LAMMPS) stays
+# visible after compaction — rollups discard everything not keyed or summed.
+_KEY_FIELDS = ("month", "cluster", "env", "checkpoint", "device", "client")
 _REQUIRED_RECORD_FIELDS = ("started_at", "env", "checkpoint", "device", "n_calculations")
 
 
@@ -308,7 +310,9 @@ def summarize_spool(cache_root: Path | str) -> SpoolSummary | None:
             rows,
             _record_key(record),
             1,
-            record["n_calculations"],
+            # serve records carry n_calculations=null (the parent process
+            # never sees the i-PI traffic): count the session, sum nothing.
+            record["n_calculations"] or 0,
             float(record.get("duration_s") or 0.0),
             _record_users(record),
         )
@@ -363,7 +367,7 @@ def compact_spool(cache_root: Path | str) -> SpoolSummary | None:
             new_rows,
             _record_key(record),
             1,
-            record["n_calculations"],
+            record["n_calculations"] or 0,  # null for serve records
             float(record.get("duration_s") or 0.0),
             _record_users(record),
         )

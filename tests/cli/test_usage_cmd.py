@@ -24,6 +24,7 @@ def _seed(tmp_path):
         checkpoint="mace-mp-0-medium",
         is_local=False,
         device="cuda",
+        client="calculator",
         started_at="2026-07-23T01:02:03+00:00",
         duration_s=60.0,
         n_calculations=42,
