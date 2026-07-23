@@ -85,3 +85,26 @@ def setup(checkpoint: str, device: str = "cuda"):
 
     orbff = load_fn(weights_path=str(weights), device=torch.device(device))
     return ORBCalculator(orbff, device=torch.device(device))
+
+
+def setup_from_path(path: str, device: str = "cuda", arch: str = "orb-v2"):
+    # Local checkpoints (`rootstock add-local`). A weights file doesn't say
+    # which orb architecture produced it, so `arch` names the pretrained
+    # loader to instantiate — register the right one at add-local time
+    # (--kwarg arch=...). Handing the loader a local path also means no
+    # network and no cached_path locking (see setup()).
+    import torch
+    from orb_models.forcefield import pretrained
+    from orb_models.forcefield.calculator import ORBCalculator
+
+    fn_name = arch.replace("-", "_")
+    try:
+        load_fn = getattr(pretrained, fn_name)
+    except AttributeError:
+        raise ValueError(
+            f"unknown orb architecture {arch!r}; expected a loader name from "
+            f"orb_models.forcefield.pretrained, e.g. {', '.join(CHECKPOINTS)}"
+        ) from None
+
+    orbff = load_fn(weights_path=path, device=torch.device(device))
+    return ORBCalculator(orbff, device=torch.device(device))
