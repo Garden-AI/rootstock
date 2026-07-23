@@ -51,7 +51,10 @@ def test_report_json(tmp_path, capsys):
     assert cmd_usage_report(_args(tmp_path, json=True)) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["rows"][0]["n_calculations"] == 42
+    assert data["rows"][0]["unique_users"] == 1
+    assert data["unique_users"] == 1
     assert data["skipped"] == 0
+    assert "users" not in data["rows"][0]  # counts only, never hashes
 
 
 def test_compact_then_report(tmp_path, capsys):

@@ -89,7 +89,7 @@ def test_compact_rolls_up_and_removes_raw_records(tmp_path):
     assert result.raw_files == 3
     assert result.kept == 0
 
-    names = sorted(p.name for p in spool.iterdir())
+    names = sorted(p.name for p in spool.glob("*.json"))
     assert names == [f"{ROLLUP_PREFIX}2026-06.json", f"{ROLLUP_PREFIX}2026-07.json"]
 
     july = json.loads((spool / f"{ROLLUP_PREFIX}2026-07.json").read_text())
@@ -119,6 +119,40 @@ def test_report_sees_rollups_plus_fresh_raw_records(tmp_path):
 
     (row,) = summarize_spool(tmp_path).rows
     assert (row["sessions"], row["n_calculations"]) == (2, 17)
+
+
+def test_unique_users_survive_compaction_without_double_count(tmp_path, monkeypatch):
+    """Distinct-user counting is a set union: the same hash arriving via a
+    rollup and via a fresh raw record must count once, and per-row hashes
+    never appear in summaries — only counts do."""
+    spool = _spool(tmp_path)
+    _write(tmp_path)  # the real user
+    monkeypatch.setattr("rootstock.usage.getpass.getuser", lambda: "user-b")
+    _write(tmp_path)
+    compact_spool(tmp_path)
+    _write(tmp_path)  # user-b again, arriving after the compaction
+
+    summary = summarize_spool(tmp_path)
+    (row,) = summary.rows
+    assert row["sessions"] == 3
+    assert row["unique_users"] == 2
+    assert summary.unique_users == 2
+    assert "users" not in row  # hashes stay in the spool, not in summaries
+
+    compact_spool(tmp_path)
+    rollup = json.loads((spool / f"{ROLLUP_PREFIX}2026-07.json").read_text())
+    assert len(rollup["rows"][0]["users"]) == 2  # exact union persisted
+
+
+def test_records_without_user_hash_still_count_sessions(tmp_path, monkeypatch):
+    monkeypatch.setattr("rootstock.usage._user_hash", lambda spool: None)
+    _spool(tmp_path)
+    _write(tmp_path)
+
+    summary = summarize_spool(tmp_path)
+    (row,) = summary.rows
+    assert row["sessions"] == 1
+    assert row["unique_users"] == 0
 
 
 @pytest.mark.skipif(os.getuid() == 0, reason="root ignores directory modes")

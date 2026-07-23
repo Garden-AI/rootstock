@@ -21,7 +21,17 @@ def _print_rows(summary: SpoolSummary) -> None:
         print("No usage recorded yet.")
         return
 
-    headers = ("month", "cluster", "env", "checkpoint", "device", "sessions", "calls", "hours")
+    headers = (
+        "month",
+        "cluster",
+        "env",
+        "checkpoint",
+        "device",
+        "sessions",
+        "calls",
+        "hours",
+        "users",
+    )
     table = [
         (
             row["month"],
@@ -32,6 +42,7 @@ def _print_rows(summary: SpoolSummary) -> None:
             str(row["sessions"]),
             str(row["n_calculations"]),
             f"{row['duration_s'] / 3600:.1f}",
+            str(row["unique_users"]),
         )
         for row in summary.rows
     ]
@@ -55,11 +66,18 @@ def cmd_usage_report(args) -> int:
         return 1
 
     if args.json:
-        print(json.dumps({"rows": summary.rows, "skipped": summary.skipped}, indent=2))
+        payload = {
+            "rows": summary.rows,
+            "unique_users": summary.unique_users,
+            "skipped": summary.skipped,
+        }
+        print(json.dumps(payload, indent=2))
         return 0
 
     print(f"Usage spool: {usage_dir(cache_root)}")
     _print_rows(summary)
+    if summary.rows:
+        print(f"Unique users overall: {summary.unique_users}")
     if summary.skipped:
         print(f"({summary.skipped} unreadable file(s) skipped)", file=sys.stderr)
     return 0

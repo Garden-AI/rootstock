@@ -200,12 +200,19 @@ _REQUIRED_RECORD_FIELDS = ("started_at", "env", "checkpoint", "device", "n_calcu
 
 @dataclass
 class SpoolSummary:
-    """Aggregated view of a spool: rollup rows merged with raw records."""
+    """Aggregated view of a spool: rollup rows merged with raw records.
+
+    Each row carries ``unique_users``, a count derived from the salted user
+    hashes; the hashes themselves stay in the spool (raw records and rollup
+    files need them for exact set-union merging) and are never part of a
+    summary — counts are what may leave the cluster.
+    """
 
     rows: list[dict]
     raw_files: int  # raw records aggregated (report) or compacted (compact)
     skipped: int  # unreadable/malformed/newer-schema files left in place
     kept: int = 0  # compact only: undeletable raw files left for the owner
+    unique_users: int = 0  # distinct user hashes across every row
 
 
 def _record_key(record: dict) -> tuple:
@@ -213,14 +220,16 @@ def _record_key(record: dict) -> tuple:
     return (month,) + tuple(record.get(f) for f in _KEY_FIELDS[1:])
 
 
-def _merge_record(rows: dict[tuple, dict], key: tuple, sessions, calls, seconds) -> None:
+def _merge_record(rows: dict[tuple, dict], key: tuple, sessions, calls, seconds, users) -> None:
     row = rows.setdefault(
         key,
-        dict(zip(_KEY_FIELDS, key)) | {"sessions": 0, "n_calculations": 0, "duration_s": 0.0},
+        dict(zip(_KEY_FIELDS, key))
+        | {"sessions": 0, "n_calculations": 0, "duration_s": 0.0, "users": set()},
     )
     row["sessions"] += sessions
     row["n_calculations"] += calls
     row["duration_s"] = round(row["duration_s"] + seconds, 1)
+    row["users"].update(u for u in users if isinstance(u, str))
 
 
 def _load_json(path: Path) -> dict | None:
@@ -257,11 +266,23 @@ def _load_rollup_rows(rollup_paths: list[Path], rows: dict[tuple, dict]) -> int:
         for row in data["rows"]:
             try:
                 key = tuple(row[f] for f in _KEY_FIELDS)
-                _merge_record(rows, key, row["sessions"], row["n_calculations"], row["duration_s"])
+                _merge_record(
+                    rows,
+                    key,
+                    row["sessions"],
+                    row["n_calculations"],
+                    row["duration_s"],
+                    row.get("users", []),
+                )
             except (KeyError, TypeError):
                 skipped += 1
                 break
     return skipped
+
+
+def _record_users(record: dict) -> list[str]:
+    user = record.get("user")
+    return [user] if isinstance(user, str) else []
 
 
 def summarize_spool(cache_root: Path | str) -> SpoolSummary | None:
@@ -289,11 +310,20 @@ def summarize_spool(cache_root: Path | str) -> SpoolSummary | None:
             1,
             record["n_calculations"],
             float(record.get("duration_s") or 0.0),
+            _record_users(record),
         )
         raw_count += 1
 
     ordered = sorted(rows.values(), key=lambda r: tuple(str(r[f]) for f in _KEY_FIELDS))
-    return SpoolSummary(rows=ordered, raw_files=raw_count, skipped=skipped)
+    # Summaries expose counts, never the hashes themselves.
+    all_users: set[str] = set()
+    for row in ordered:
+        users = row.pop("users")
+        all_users |= users
+        row["unique_users"] = len(users)
+    return SpoolSummary(
+        rows=ordered, raw_files=raw_count, skipped=skipped, unique_users=len(all_users)
+    )
 
 
 def compact_spool(cache_root: Path | str) -> SpoolSummary | None:
@@ -335,6 +365,7 @@ def compact_spool(cache_root: Path | str) -> SpoolSummary | None:
             1,
             record["n_calculations"],
             float(record.get("duration_s") or 0.0),
+            _record_users(record),
         )
         compacted += 1
 
@@ -348,10 +379,18 @@ def compact_spool(cache_root: Path | str) -> SpoolSummary | None:
         for key, row in new_rows.items():
             if key[0] == month:
                 _merge_record(
-                    month_rows, key, row["sessions"], row["n_calculations"], row["duration_s"]
+                    month_rows,
+                    key,
+                    row["sessions"],
+                    row["n_calculations"],
+                    row["duration_s"],
+                    row["users"],
                 )
         ordered = sorted(month_rows.values(), key=lambda r: tuple(str(r[f]) for f in _KEY_FIELDS))
-        payload = {"schema_version": ROLLUP_SCHEMA_VERSION, "month": month, "rows": ordered}
+        # Rollups keep the hashes (sorted for stable diffs): exact set-union
+        # merging on later compactions needs them. They stay in the spool.
+        serial = [dict(row, users=sorted(row["users"])) for row in ordered]
+        payload = {"schema_version": ROLLUP_SCHEMA_VERSION, "month": month, "rows": serial}
         # Atomic replace, same recipe as save_manifest: a reader (or a
         # concurrent report) never sees a half-written rollup.
         fd, temp_path = tempfile.mkstemp(dir=spool, suffix=".tmp")
