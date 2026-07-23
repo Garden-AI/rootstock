@@ -5,6 +5,7 @@ from __future__ import annotations
 import signal
 import subprocess
 import sys
+import time
 
 from .common import get_root_or_exit
 
@@ -24,8 +25,10 @@ def cmd_serve(args) -> int:
 
     from ..environment import CheckpointNotFoundError, get_env_python
     from ..local_checkpoints import resolve_checkpoint
+    from ..manifest import now_iso
     from ..operations import parse_setup_kwargs
     from ..spawn import WORKER_WRAPPER, spawn_in_env
+    from ..usage import record_session
     from .common import resolve_cache_root
 
     root = get_root_or_exit(args)
@@ -100,6 +103,8 @@ def cmd_serve(args) -> int:
         },
         cache_root=cache_root,
     ) as spec:
+        started_at = now_iso()
+        started = time.monotonic()
         proc = subprocess.Popen(spec.cmd, env=spec.env, cwd=spec.cwd)
 
         # Forward signals to worker
@@ -110,4 +115,24 @@ def cmd_serve(args) -> int:
         signal.signal(signal.SIGINT, forward_signal)
 
         # Block until worker exits
-        return proc.wait()
+        rc = proc.wait()
+
+    # One anonymous usage record per serve session (see usage.py) — the only
+    # entry point not covered by the RootstockServer hook, because here the
+    # i-PI server is external (e.g. the LAMMPS fix). This parent survives a
+    # walltime SIGTERM (the handler above only forwards it), so killed runs
+    # still record. The worker's force-call count isn't visible from here:
+    # n_calculations is null; sessions and wall-time still count.
+    record_session(
+        root=root,
+        cache_root=cache_root,
+        env_name=env_name,
+        checkpoint=checkpoint,
+        is_local=resolved.is_local,
+        device=device,
+        client="serve",
+        started_at=started_at,
+        duration_s=time.monotonic() - started,
+        n_calculations=None,
+    )
+    return rc

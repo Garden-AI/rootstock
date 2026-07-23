@@ -95,6 +95,10 @@ def verify_checkpoint(
         setup_kwargs=setup_kwargs,
         timeout=600.0,
         checkpoint_path=checkpoint_path,
+        # Verification sessions are synthetic — the nightly smoke-test cron
+        # would otherwise spool one fake "session" per checkpoint per night,
+        # and rollups merge irreversibly.
+        usage_client=None,
     )
 
     try:

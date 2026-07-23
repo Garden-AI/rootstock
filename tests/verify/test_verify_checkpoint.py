@@ -193,3 +193,18 @@ def test_smoke_test_atoms_breaks_symmetry():
     atoms = verify._smoke_test_atoms()
     # The y-perturbation we apply means atom 1 is not exactly on the x-axis.
     assert abs(atoms.positions[1, 1]) > 1e-6
+
+
+def test_verify_opts_out_of_usage_recording(monkeypatch):
+    """Verification sessions are synthetic — the nightly smoke-test cron must
+    not spool one fake usage record per checkpoint (rollups merge
+    irreversibly, so pollution could never be filtered out later)."""
+    captured = {}
+
+    def factory(**ctor_kwargs):
+        captured.update(ctor_kwargs)
+        return _StubServer(energy=-10.5, forces=_ok_forces(), virial=_ok_virial())
+
+    monkeypatch.setattr("rootstock.server.RootstockServer", factory)
+    verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
+    assert captured["usage_client"] is None
