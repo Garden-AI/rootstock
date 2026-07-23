@@ -23,13 +23,21 @@ dir missing or unwritable, cache root on a read-only mount, name collision —
 is swallowed and logged at DEBUG. Users opt out with
 ``ROOTSTOCK_DISABLE_USAGE_STATS=1``.
 
-The records are anonymous: no username, no job id. Local (user-registered)
+The records carry no raw username and no job id. Local (user-registered)
 checkpoint ids are user-chosen names and may carry meaning, so they are
-recorded as ``(local)``.
+recorded as ``(local)``. For distinct-user counts, each record carries a
+salted, truncated hash of the username (see ``_user_hash``): pseudonymous
+rather than strictly anonymous — but reversing it requires the per-install
+salt, which never leaves the cluster, and on-cluster the raw record files
+already reveal their writer through file ownership anyway. The hashes exist
+so the collector can count unique users; anything pushed off-cluster should
+carry only the counts, never the hashes.
 """
 
 from __future__ import annotations
 
+import getpass
+import hashlib
 import json
 import logging
 import os
@@ -42,6 +50,7 @@ logger = logging.getLogger("rootstock.usage")
 USAGE_DIR_NAME = "usage"
 RECORD_SCHEMA_VERSION = 1
 DISABLE_ENV_VAR = "ROOTSTOCK_DISABLE_USAGE_STATS"
+SALT_FILE_NAME = "salt"
 
 # Recorded in place of a local checkpoint's id: ids registered with
 # `rootstock add-local` are user-chosen and may leak what someone is working
@@ -52,6 +61,41 @@ LOCAL_CHECKPOINT_LABEL = "(local)"
 def usage_dir(cache_root: Path | str) -> Path:
     """The spool directory for an install's cache root."""
     return Path(cache_root) / USAGE_DIR_NAME
+
+
+def _user_hash(spool: Path) -> str | None:
+    """Salted, truncated hash of the username, for distinct-user counting.
+
+    A bare hash of a username is reversible by enumeration — usernames are
+    low-entropy and public on a cluster — so the hash is salted with a random
+    per-install value living at ``{spool}/salt``. The salt is created lazily
+    by whichever session writes first (O_EXCL, so exactly one writer wins)
+    and must be world-readable, since every writer needs it; that means the
+    hashes are reversible *on* the cluster (where record-file ownership
+    already names the writer) but opaque anywhere the salt doesn't go.
+
+    Returns None when anything fails — the record is then simply written
+    without a user field.
+    """
+    try:
+        salt_path = spool / SALT_FILE_NAME
+        try:
+            salt = salt_path.read_bytes()
+        except FileNotFoundError:
+            salt = uuid.uuid4().bytes + uuid.uuid4().bytes
+            try:
+                fd = os.open(salt_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
+                with os.fdopen(fd, "wb") as f:
+                    f.write(salt)
+            except FileExistsError:
+                salt = salt_path.read_bytes()
+        if not salt:
+            return None
+        username = getpass.getuser()
+        return hashlib.sha256(salt + username.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        logger.debug("user hash skipped", exc_info=True)
+        return None
 
 
 def usage_disabled() -> bool:
@@ -115,6 +159,7 @@ def record_session(
             "device": device,
             "rootstock_version": __version__,
             "n_calculations": n_calculations,
+            "user": _user_hash(spool),
         }
 
         # Timestamp + host + pid + random suffix: unique without coordination.

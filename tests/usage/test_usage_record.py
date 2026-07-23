@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 
 import pytest
 
@@ -58,6 +59,7 @@ def test_record_written_when_spool_provisioned(tmp_path):
         "device": "cuda",
         "rootstock_version": record["rootstock_version"],
         "n_calculations": 7,
+        "user": record["user"],
     }
 
 
@@ -97,6 +99,77 @@ def test_env_var_opt_out(tmp_path, monkeypatch):
 def test_usage_disabled_parsing(monkeypatch, value, disabled):
     monkeypatch.setenv(DISABLE_ENV_VAR, value)
     assert usage_disabled() is disabled
+
+
+# --------------------------------------------------------------------------- #
+# User hash (distinct-user counting)
+# --------------------------------------------------------------------------- #
+
+
+def _user_of(path):
+    return json.loads(path.read_text())["user"]
+
+
+def test_user_hash_is_salted_stable_and_truncated(tmp_path):
+    usage_dir(tmp_path).mkdir()
+    first = _user_of(_write(tmp_path))
+    second = _user_of(_write(tmp_path))
+
+    assert first == second  # stable per user per install: distinct counts work
+    assert len(first) == 16
+    int(first, 16)  # hex, i.e. a hash — not a raw username
+
+    import getpass
+    import hashlib
+
+    # Salted: the raw and unsalted-hashed username must not appear anywhere.
+    username = getpass.getuser()
+    assert first != username
+    assert first != hashlib.sha256(username.encode()).hexdigest()[:16]
+
+
+def test_user_hash_differs_per_user_and_per_install(tmp_path, monkeypatch):
+    install_a = tmp_path / "a"
+    install_b = tmp_path / "b"
+    for install in (install_a, install_b):
+        install.mkdir()
+        usage_dir(install).mkdir()
+
+    alice_a = _user_of(_write(install_a))
+    monkeypatch.setattr("rootstock.usage.getpass.getuser", lambda: "somebody-else")
+    bob_a = _user_of(_write(install_a))
+    bob_b = _user_of(_write(install_b))
+
+    assert alice_a != bob_a  # different users, same install
+    assert bob_a != bob_b  # same user, different installs (different salts)
+
+
+def test_salt_created_once_world_readable(tmp_path):
+    usage_dir(tmp_path).mkdir()
+    _write(tmp_path)
+    salt_path = usage_dir(tmp_path) / "salt"
+    assert salt_path.is_file()
+    assert stat.S_IMODE(salt_path.stat().st_mode) == 0o444
+    salt = salt_path.read_bytes()
+    assert len(salt) == 32
+
+    _write(tmp_path)
+    assert salt_path.read_bytes() == salt  # first writer won; never rewritten
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="root ignores file modes")
+def test_unreadable_salt_drops_user_field_not_the_record(tmp_path):
+    usage_dir(tmp_path).mkdir()
+    salt_path = usage_dir(tmp_path) / "salt"
+    salt_path.write_bytes(b"x" * 32)
+    salt_path.chmod(0o000)
+    try:
+        path = _write(tmp_path)
+    finally:
+        salt_path.chmod(0o444)
+
+    assert path is not None  # the session is still counted
+    assert json.loads(path.read_text())["user"] is None
 
 
 @pytest.mark.skipif(os.getuid() == 0, reason="root ignores directory modes")
@@ -180,7 +253,7 @@ def test_stop_writes_a_real_record_end_to_end(tmp_path):
     _fake_session(server)
     server.stop()
 
-    (path,) = usage_dir(tmp_path).iterdir()
+    (path,) = usage_dir(tmp_path).glob("*.json")
     record = json.loads(path.read_text())
     assert record["env"] == "mace"
     assert record["n_calculations"] == 5
