@@ -49,6 +49,16 @@ def cmd_serve(args) -> int:
     # Registered defaults for a local checkpoint; explicit --kwarg wins.
     setup_kwargs = {**resolved.setup_kwargs, **cli_kwargs}
 
+    if resolved.is_local and "path" in cli_kwargs:
+        # setup_from_path's first parameter — fail here, not as a TypeError
+        # inside the worker.
+        print(
+            "Error: --kwarg path=... is reserved for local checkpoints; the "
+            "registered weights path is passed automatically.",
+            file=sys.stderr,
+        )
+        return 2
+
     # Validate environment exists before printing the startup banner
     try:
         get_env_python(root, env_name)

@@ -111,6 +111,15 @@ def test_canonical_id_has_no_checkpoint_path(fake_root, registry, recording_serv
     assert recording_server.ctor_kwargs["checkpoint_path"] is None
 
 
+def test_per_call_path_kwarg_rejected_for_local(fake_root, registered):
+    # "path" is setup_from_path's first parameter; fail at construction, not
+    # as a TypeError inside the worker.
+    with pytest.raises(TypeError, match="path"):
+        RootstockCalculator(
+            checkpoint=registered, root=fake_root, setup_kwargs={"path": "/x"}
+        )
+
+
 def test_missing_weights_file_raises_at_construction(
     fake_root, registered, weights, recording_server
 ):

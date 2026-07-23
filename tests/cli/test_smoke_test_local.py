@@ -165,6 +165,58 @@ def test_missing_file_fails_without_verify(fake_root, weights, registry, registe
     assert "missing" in entry.last_error
 
 
+def test_unreadable_file_fails_without_verify(
+    fake_root, weights, registry, registered, monkeypatch
+):
+    def unexpected_verify(**kw):
+        raise AssertionError("verify must not run on an unreadable file")
+
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", unexpected_verify)
+    weights.chmod(0o000)
+
+    rc = cmd_smoke_test(_make_args(fake_root))
+    assert rc == 1
+    entry = local_checkpoints_for_root(fake_root)["my-uma-ft"]
+    assert "unreadable" in entry.last_error
+
+
+def test_unreadable_local_does_not_lose_canonical_outcomes(
+    fake_root, weights, registry, registered, monkeypatch
+):
+    # The local loop runs between the canonical loop and the manifest write;
+    # a per-file OSError must not abort the run and drop canonical outcomes.
+    from rootstock.manifest import CheckpointInfo
+
+    manifest = load_manifest(fake_root)
+    manifest.environments["uma"].checkpoints["uma-s-1p1"] = CheckpointInfo(
+        fetched_at="2026-01-02T00:00:00+00:00"
+    )
+    save_manifest(manifest, fake_root)
+    weights.chmod(0o000)
+
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", lambda **kw: (True, None))
+    rc = cmd_smoke_test(_make_args(fake_root))
+    assert rc == 1  # the unreadable local failed
+
+    fresh = load_manifest(fake_root)
+    assert fresh.environments["uma"].checkpoints["uma-s-1p1"].verified_at is not None
+
+
+def test_failed_local_revokes_earlier_verification(
+    fake_root, weights, registry, registered, monkeypatch
+):
+    from rootstock.local_checkpoints import record_local_verification
+
+    record_local_verification(fake_root, "my-uma-ft", ok=True, device="cuda")
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", lambda **kw: (False, "boom"))
+
+    rc = cmd_smoke_test(_make_args(fake_root))
+    assert rc == 1
+    entry = local_checkpoints_for_root(fake_root)["my-uma-ft"]
+    assert entry.verified_at is None
+    assert entry.last_error == "smoke-test: boom"
+
+
 def test_env_filter_applies_to_locals(
     fake_root, weights, registry, registered, monkeypatch, capsys
 ):

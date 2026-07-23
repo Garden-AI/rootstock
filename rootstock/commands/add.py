@@ -89,8 +89,8 @@ def cmd_add(args) -> int:
             progress=print,
         )
     except (CheckpointNotFoundError, OperationError) as exc:
-        if isinstance(exc, CheckpointNotFoundError) and args.checkpoint in (
-            _local_checkpoints_or_empty(root)
+        if isinstance(exc, CheckpointNotFoundError) and (
+            args.checkpoint in _local_checkpoints_or_empty(root)
         ):
             print(
                 f"Error: '{args.checkpoint}' is a locally-registered "

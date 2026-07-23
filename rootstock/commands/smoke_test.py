@@ -72,7 +72,12 @@ def _check_local_weights(entry: LocalCheckpointEntry) -> str | None:
     path = Path(entry.path)
     if not path.exists():
         return f"weights file missing: {entry.path}"
-    sha256, size = hash_weights_file(path)
+    try:
+        sha256, size = hash_weights_file(path)
+    except OSError as exc:
+        # Revoked permissions, stale NFS handles, etc. — a per-file failure
+        # must not abort the run (canonical outcomes are recorded after this).
+        return f"weights file unreadable: {exc}"
     if sha256 != entry.sha256 or size != entry.size:
         return (
             "weights file changed on disk (sha256 mismatch); "

@@ -348,6 +348,10 @@ def record_local_verification(
         entry.verified_device = device
         entry.last_error = None
     else:
+        # Same semantics as the manifest's smoke-test path: a failure revokes
+        # verified state, so `status` can never show ✓ alongside last_error.
+        entry.verified_at = None
+        entry.verified_device = None
         entry.last_error = error
     save_local_registry(roots, registry_path)
 

@@ -293,6 +293,15 @@ def benchmark_one(checkpoint: str, device: str, root: Path, cache_root: Path | N
     from rootstock.local_checkpoints import resolve_checkpoint
 
     resolved = resolve_checkpoint(root, checkpoint)
+    if resolved.is_local and not Path(resolved.path).exists():
+        # Same guard as the calculator — fail before either arm spawns,
+        # not as a raw subprocess traceback from the in-env worker.
+        raise RuntimeError(
+            f"local checkpoint '{checkpoint}' points at {resolved.path}, "
+            f"which no longer exists. Re-register it with `rootstock "
+            f"add-local` or remove it with `rootstock remove-local "
+            f"{checkpoint}`."
+        )
     env_name = resolved.env_name
     env_dir = root / "envs" / env_name
     # Registered defaults for a local checkpoint; explicit --setup-kwargs
@@ -372,7 +381,8 @@ def list_available(root: Path) -> int:
         print(f"  {env:<16} {ids}")
     try:
         local = local_checkpoints_for_root(root)
-    except LocalCheckpointError:
+    except LocalCheckpointError as exc:
+        print(f"Warning: ignoring local-checkpoint registry: {exc}", file=sys.stderr)
         local = {}
     if local:
         ids = ", ".join(sorted(local))

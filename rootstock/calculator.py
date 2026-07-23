@@ -171,6 +171,14 @@ class RootstockCalculator(Calculator):
         # Registration already rejected reserved keys in the defaults.
         self.setup_kwargs = {**resolved.setup_kwargs, **setup_kwargs}
 
+        if resolved.is_local and "path" in setup_kwargs:
+            # setup_from_path's first parameter — fail here, not as a
+            # TypeError inside the worker.
+            raise TypeError(
+                "setup_kwargs cannot contain 'path' for a local checkpoint; "
+                "the registered weights path is passed at the top level."
+            )
+
         if resolved.is_local and not Path(resolved.path).exists():
             # Fail at construction, not as a WorkerDiedError post-mortem
             # minutes into a batch job.

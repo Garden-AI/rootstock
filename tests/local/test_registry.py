@@ -246,6 +246,25 @@ def test_record_verification_failure(fake_root, weights, registry):
     assert entry.last_error == "verify: boom"
 
 
+def test_record_verification_failure_revokes_earlier_success(fake_root, weights, registry):
+    # Same semantics as the manifest: a failure clears verified state, so a
+    # previously-verified checkpoint can't show ✓ alongside last_error.
+    register_local_checkpoint(fake_root, "my-ft", "uma", weights, registry_path=registry)
+    record_local_verification(fake_root, "my-ft", ok=True, device="cuda", registry_path=registry)
+    record_local_verification(
+        fake_root,
+        "my-ft",
+        ok=False,
+        device="cuda",
+        error="smoke-test: boom",
+        registry_path=registry,
+    )
+    entry = local_checkpoints_for_root(fake_root, registry_path=registry)["my-ft"]
+    assert entry.verified_at is None
+    assert entry.verified_device is None
+    assert entry.last_error == "smoke-test: boom"
+
+
 def test_record_verification_for_removed_id_is_noop(fake_root, registry):
     # Outcome for an id removed meanwhile has nothing to attach to.
     record_local_verification(fake_root, "gone", ok=True, device="cuda", registry_path=registry)
