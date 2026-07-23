@@ -118,6 +118,33 @@ def test_verify_rejects_nonfinite_forces(stub_server):
     assert "forces" in err
 
 
+def test_verify_forwards_checkpoint_path(monkeypatch):
+    captured = {}
+
+    def factory(**ctor_kwargs):
+        captured.update(ctor_kwargs)
+        return _StubServer(energy=-10.5, forces=_ok_forces(), virial=_ok_virial())
+
+    monkeypatch.setattr("rootstock.server.RootstockServer", factory)
+    ok, _ = verify.verify_checkpoint(
+        Path("/tmp"), "uma", "my-ft", "cuda", checkpoint_path="/scratch/me/ft.pt"
+    )
+    assert ok is True
+    assert captured["checkpoint_path"] == "/scratch/me/ft.pt"
+
+
+def test_verify_defaults_checkpoint_path_to_none(monkeypatch):
+    captured = {}
+
+    def factory(**ctor_kwargs):
+        captured.update(ctor_kwargs)
+        return _StubServer(energy=-10.5, forces=_ok_forces(), virial=_ok_virial())
+
+    monkeypatch.setattr("rootstock.server.RootstockServer", factory)
+    verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
+    assert captured["checkpoint_path"] is None
+
+
 def test_verify_rejects_all_zero_forces(stub_server):
     """The silent-failure guard — model returned zeros for everything."""
     stub_server(energy=-1.0, forces=np.zeros((3, 3)), virial=_ok_virial())

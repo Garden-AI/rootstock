@@ -58,6 +58,7 @@ def verify_checkpoint(
     device: str,
     setup_kwargs: dict | None = None,
     cache_root: Path | None = None,
+    checkpoint_path: str | None = None,
 ) -> tuple[bool, str | None]:
     """
     Run a single forward pass to verify a checkpoint loads and computes.
@@ -70,6 +71,8 @@ def verify_checkpoint(
         setup_kwargs: Extra keyword arguments forwarded to setup().
         cache_root: Optional separate root for the model-weight cache and
                     redirected HOME. Defaults to ``root``.
+        checkpoint_path: Path to a local (user-registered) weights file; the
+                    worker then loads via setup_from_path() instead of setup().
 
     Returns:
         (success, error_message). On success, error_message is None.
@@ -91,6 +94,7 @@ def verify_checkpoint(
         cache_root=Path(cache_root) if cache_root is not None else None,
         setup_kwargs=setup_kwargs,
         timeout=600.0,
+        checkpoint_path=checkpoint_path,
     )
 
     try:

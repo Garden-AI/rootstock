@@ -129,6 +129,43 @@ Signature: `setup(checkpoint: str, device: str = "cuda", **extra)`.
 
 Return: an ASE-compatible calculator.
 
+### `setup_from_path()` function (optional — enables local checkpoints)
+
+Declaring a module-level `setup_from_path` opts the env into **local
+checkpoints**: user-supplied weights files (e.g. fine-tunes) registered with
+`rootstock add-local`. Envs without it don't support them, and registration
+fails with a clear error. Like `CHECKPOINTS`, presence is detected by parsing
+the source — the module is not executed.
+
+Signature: `setup_from_path(path: str, device: str = "cuda", **extra)`.
+
+- `path`: Absolute filesystem path to the weights file. Loading a file is
+  usually a *different* upstream call than loading a registry name — e.g.
+  FAIRChem's `load_predict_unit(path)` vs `get_predict_unit(name)` — which is
+  why this is a separate function rather than a path-shaped `checkpoint`.
+- `device`, extra kwargs: as for `setup()`. Give extras defaults where
+  possible; a fine-tune needing a required kwarg still works (the kwarg is
+  recorded at `rootstock add-local --kwarg ...` time), but defaults make
+  registration friendlier.
+
+Return: an ASE-compatible calculator.
+
+```python
+def setup_from_path(path: str, device: str = "cuda", task: str = "omat"):
+    from fairchem.core import FAIRChemCalculator
+    from fairchem.core.units.mlip_unit import load_predict_unit
+
+    predictor = load_predict_unit(path, device=device)
+    return FAIRChemCalculator(predictor, task_name=task)
+```
+
+One rebuild hazard to know about: registration checks the env source at
+registration time. If the env is later rebuilt (`rootstock install --force`)
+from a source that dropped `setup_from_path`, existing registrations break at
+worker startup. `rootstock status` flags registered checkpoints as stale
+after any env rebuild, and `rootstock smoke-test` re-verifies them — that's
+the detection path.
+
 ## Examples
 
 ### MACE (MP-0 and OFF23 in one env)

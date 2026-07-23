@@ -64,6 +64,13 @@ def test_setup_kwargs_round_trip_through_json_sidecar(fake_root, kwargs):
         assert spec_data["setup_kwargs"] == kwargs
 
 
+def test_checkpoint_path_round_trip(fake_root):
+    payload = {**_payload(), "checkpoint_path": "/scratch/me/ft.pt"}
+    with spawn_in_env(fake_root, "fake_env", WORKER_WRAPPER, payload) as spec:
+        spec_data = json.loads(Path(spec.cmd[2]).read_text())
+        assert spec_data["checkpoint_path"] == "/scratch/me/ft.pt"
+
+
 def test_staged_files_removed_on_exit(fake_root):
     with spawn_in_env(fake_root, "fake_env", WORKER_WRAPPER, _payload()) as spec:
         wrapper, sidecar = Path(spec.cmd[1]), Path(spec.cmd[2])

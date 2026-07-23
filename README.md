@@ -150,6 +150,15 @@ rootstock add uma-s-1p1 --kwarg task=omat
 
 `rootstock status` shows a per-checkpoint grid of fetched/verified/stale state. See the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for environment files that are known to work.
 
+Users can also bring their own weights (e.g. a fine-tuned UMA model) without any write access to the shared install — `rootstock add-local` registers a local file under a checkpoint id that then works everywhere a canonical id does:
+
+```bash
+rootstock add-local /scratch/me/my-uma-ft.pt --env uma --id my-uma-ft --kwarg task=omol
+rootstock remove-local my-uma-ft   # delete the registration (never the file)
+```
+
+The registration lives in the per-user registry (`~/.config/rootstock/local-checkpoints.json`); the hosting env must declare a `setup_from_path()` function (see [docs/environments.md](docs/environments.md)).
+
 ### 5. Register with the dashboard (optional)
 
 If you configured API credentials during `rootstock init`, the manifest is pushed automatically when you install or update environments. If the push failed (e.g., due to network issues), you can retry:

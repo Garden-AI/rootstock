@@ -39,12 +39,22 @@ with open(sys.argv[1]) as f:
     spec = json.load(f)
 
 sys.path.insert(0, spec["env_dir"])
-from env_source import setup
 from rootstock.worker import run_worker
 
+# Local checkpoints (user-supplied weights) load through the env's opt-in
+# setup_from_path hook; the path travels through run_worker's existing
+# checkpoint parameter, so workers frozen inside built envs need no change.
+# The imports are one-sided: canonical mode must not require the hook.
+if spec.get("checkpoint_path"):
+    from env_source import setup_from_path as setup_fn
+    target = spec["checkpoint_path"]
+else:
+    from env_source import setup as setup_fn
+    target = spec["checkpoint"]
+
 run_worker(
-    setup_fn=setup,
-    checkpoint=spec["checkpoint"],
+    setup_fn=setup_fn,
+    checkpoint=target,
     device=spec["device"],
     socket_path=spec["socket_path"],
     setup_kwargs=spec["setup_kwargs"],

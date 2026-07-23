@@ -24,7 +24,9 @@ def test_get_calculator_reaches_env_boundary():
     # Without an installed env, construction gets all the way to the checkpoint
     # lookup and raises. This proves the wiring reaches Rootstock without
     # requiring a built environment (so it runs in CI).
-    model = RootstockMLIPxModel(checkpoint="mace-mp-0-medium", root="/tmp/no_env_here", device="cpu")
+    model = RootstockMLIPxModel(
+        checkpoint="mace-mp-0-medium", root="/tmp/no_env_here", device="cpu"
+    )
     with pytest.raises(CheckpointNotFoundError):
         model.get_calculator()
 

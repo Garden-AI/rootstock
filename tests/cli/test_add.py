@@ -289,3 +289,42 @@ def test_add_without_checkpoint_or_list_returns_2(fake_root):
     """Omitting both the checkpoint and --list is a usage error."""
     rc = cmd_add(_make_args(fake_root, checkpoint=None))
     assert rc == 2
+
+
+# ---------- local checkpoints in cmd_add ------------------------------------
+
+
+@pytest.fixture
+def local_registered(fake_root, tmp_path, monkeypatch) -> str:
+    """A local checkpoint registered for fake_root, in an isolated registry."""
+    from rootstock import local_checkpoints
+    from rootstock.local_checkpoints import LocalCheckpointEntry, save_local_registry
+
+    registry = tmp_path / "registry.json"
+    monkeypatch.setattr(local_checkpoints, "DEFAULT_LOCAL_REGISTRY_FILE", registry)
+    entry = LocalCheckpointEntry(
+        env="mace",
+        path=str(tmp_path / "ft.pt"),
+        sha256="sha256:abc",
+        size=1,
+        registered_at="2026-07-21T00:00:00+00:00",
+    )
+    save_local_registry({str(fake_root.resolve()): {"my-ft": entry}})
+    return "my-ft"
+
+
+def test_add_list_includes_local_section(fake_root, local_registered, capsys):
+    rc = cmd_add(_make_args(fake_root, list=True, checkpoint=None))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "local (this user" in out
+    assert "my-ft" in out
+
+
+def test_add_of_local_id_explains_no_add_needed(fake_root, local_registered, capsys):
+    """`rootstock add <local-id>` is a category error — point at direct use."""
+    rc = cmd_add(_make_args(fake_root, checkpoint="my-ft"))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "locally-registered" in err
+    assert "smoke-test" in err

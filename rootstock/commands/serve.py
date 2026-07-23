@@ -20,11 +20,10 @@ def cmd_serve(args) -> int:
         0: Clean shutdown
         1: Error
     """
-    from ..environment import (
-        CheckpointNotFoundError,
-        find_env_for_checkpoint,
-        get_env_python,
-    )
+    from pathlib import Path
+
+    from ..environment import CheckpointNotFoundError, get_env_python
+    from ..local_checkpoints import resolve_checkpoint
     from ..operations import parse_setup_kwargs
     from ..spawn import WORKER_WRAPPER, spawn_in_env
     from .common import resolve_cache_root
@@ -36,16 +35,29 @@ def cmd_serve(args) -> int:
     device = args.device
 
     try:
-        setup_kwargs = parse_setup_kwargs(getattr(args, "kwarg", None))
+        cli_kwargs = parse_setup_kwargs(getattr(args, "kwarg", None))
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
 
     try:
-        env_name, _ = find_env_for_checkpoint(root, checkpoint)
+        resolved = resolve_checkpoint(root, checkpoint)
     except CheckpointNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    env_name = resolved.env_name
+    # Registered defaults for a local checkpoint; explicit --kwarg wins.
+    setup_kwargs = {**resolved.setup_kwargs, **cli_kwargs}
+
+    if resolved.is_local and "path" in cli_kwargs:
+        # setup_from_path's first parameter — fail here, not as a TypeError
+        # inside the worker.
+        print(
+            "Error: --kwarg path=... is reserved for local checkpoints; the "
+            "registered weights path is passed automatically.",
+            file=sys.stderr,
+        )
+        return 2
 
     # Validate environment exists before printing the startup banner
     try:
@@ -54,9 +66,22 @@ def cmd_serve(args) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
+    if resolved.is_local and not Path(resolved.path).exists():
+        print(
+            f"Error: local checkpoint '{checkpoint}' points at "
+            f"{resolved.path}, which no longer exists. Re-register it with "
+            f"`rootstock add-local` or remove it with "
+            f"`rootstock remove-local {checkpoint}`.",
+            file=sys.stderr,
+        )
+        return 1
+
     print("Starting rootstock worker:")
     print(f"  Env: {env_name}")
-    print(f"  Checkpoint: {checkpoint}")
+    if resolved.is_local:
+        print(f"  Checkpoint: {checkpoint} (local: {resolved.path})")
+    else:
+        print(f"  Checkpoint: {checkpoint}")
     print(f"  Device: {device}")
     print(f"  Socket: {socket_path}")
 
@@ -68,6 +93,7 @@ def cmd_serve(args) -> int:
         WORKER_WRAPPER,
         {
             "checkpoint": checkpoint,
+            "checkpoint_path": resolved.path,
             "device": device,
             "socket_path": socket_path,
             "setup_kwargs": setup_kwargs,
