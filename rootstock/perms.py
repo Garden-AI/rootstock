@@ -28,7 +28,11 @@ The recipe:
   still prune everything when collecting. Existence of the directory is what
   turns usage collection on for an install, so ``--no-usage-spool`` skips it
   and a *missing* spool is never flagged as an issue — only a present one
-  with the wrong mode is.
+  with the wrong mode is. ``--usage-dir <path>`` redirects the spool: the
+  real 1777 directory is created at ``<path>`` and ``{cache_root}/usage``
+  becomes a symlink to it — for clusters where the maintainer's write access
+  to the install is temporary (e.g. Delta), so collection keeps working from
+  a directory they permanently control (their home, say) after access lapses.
 * ``--retrofit`` — recursive ``setfacl -R`` variants so an install that already
   has files in it becomes world-readable, not just future files, plus a
   ``find -type d ... chmod g+s`` so existing subdirectories inherit too.
@@ -68,6 +72,7 @@ def render_commands(
     group: str,
     retrofit: bool = False,
     usage_spool: bool = True,
+    usage_dir: Path | str | None = None,
 ) -> list[list[str]]:
     """Render the permission recipe as a list of argv lists.
 
@@ -75,7 +80,11 @@ def render_commands(
     differs from ``install_root`` (a single-filesystem cluster needs nothing
     extra for the cache). ``retrofit`` appends the recursive variants.
     ``usage_spool`` provisions the world-writable usage-record spool (its
-    existence opts the install into usage collection).
+    existence opts the install into usage collection). ``usage_dir``
+    redirects it: the real directory is created (and moded) there, and
+    ``{cache_root}/usage`` becomes a symlink to it — for clusters where the
+    maintainer's write access to the install is temporary (e.g. Delta), so
+    the spool lives somewhere they keep control of, like their home.
     """
     install_root = Path(install_root)
     cmds: list[list[str]] = [
@@ -95,8 +104,16 @@ def render_commands(
     # runtime-writable side (on Frontier the install root is under /sw, which
     # must not take writes from user jobs).
     spool = usage_spool_dir(install_root, cache_root)
+    # With a redirect, the path every writer and reader uses is unchanged —
+    # {cache_root}/usage — it just resolves through a symlink to a directory
+    # the maintainer keeps control of. -sfn so re-running setup-perms is
+    # idempotent (replaces a stale link; fails loudly if a real directory is
+    # already in the way rather than silently nesting).
+    spool_target = Path(usage_dir) if usage_dir is not None else spool
     if usage_spool:
-        cmds.insert(0, ["mkdir", "-p", str(spool)])
+        cmds.insert(0, ["mkdir", "-p", str(spool_target)])
+        if spool_target != spool:
+            cmds.insert(1, ["ln", "-sfn", str(spool_target), str(spool)])
 
     if separate_cache:
         cache_root = Path(cache_root)
@@ -144,8 +161,10 @@ def render_commands(
         cmds += [["chmod", CACHE_ROOT_MODE, str(cache_root)]]
     if usage_spool:
         # After the retrofit setfacl/find pass, which would otherwise rewrite
-        # the spool's mode along with everything else under the root.
-        cmds += [["chmod", USAGE_SPOOL_MODE, str(spool)]]
+        # the spool's mode along with everything else under the root. Moded
+        # on the target: with a redirect the mode belongs to the real
+        # directory, not the symlink.
+        cmds += [["chmod", USAGE_SPOOL_MODE, str(spool_target)]]
 
     return cmds
 
@@ -376,12 +395,25 @@ def _check_usage_spool(install_root: Path, cache_root: Path | None) -> list[Perm
     A *missing* spool is not an issue — its absence is how an install opts
     out of usage collection. A present one, though, must be world-writable
     (or users' sessions silently fail to record) and sticky (or any user can
-    delete everyone else's records).
+    delete everyone else's records). A redirected spool (a symlink from
+    setup-perms --usage-dir) is checked through the link — same rules apply
+    to the target — except a *dangling* link, which is flagged: someone set
+    up collection and its target has since vanished.
     """
     spool = usage_spool_dir(install_root, cache_root)
     try:
         mode = spool.stat().st_mode
-    except (FileNotFoundError, PermissionError):
+    except FileNotFoundError:
+        if spool.is_symlink():
+            return [
+                PermIssue(
+                    spool,
+                    "usage spool is a dangling symlink (redirect target is "
+                    "missing); users' sessions can't record usage",
+                )
+            ]
+        return []
+    except PermissionError:
         return []
 
     issues: list[PermIssue] = []

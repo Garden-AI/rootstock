@@ -47,12 +47,23 @@ def cmd_setup_perms(args) -> int:
         return 1
     install_root, cache_root = resolved
 
+    no_usage_spool = getattr(args, "no_usage_spool", False)
+    usage_dir = getattr(args, "usage_dir", None)
+    if no_usage_spool and usage_dir:
+        print(
+            "Error: --usage-dir provisions the usage spool; it can't be "
+            "combined with --no-usage-spool.",
+            file=sys.stderr,
+        )
+        return 2
+
     commands = render_commands(
         install_root,
         cache_root,
         group=args.group,
         retrofit=args.retrofit,
-        usage_spool=not getattr(args, "no_usage_spool", False),
+        usage_spool=not no_usage_spool,
+        usage_dir=usage_dir,
     )
 
     if not args.apply:

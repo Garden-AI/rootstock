@@ -438,6 +438,15 @@ def main():
             "collection off for this install"
         ),
     )
+    setup_perms_parser.add_argument(
+        "--usage-dir",
+        help=(
+            "Redirect the usage-record spool: create the real 1777 directory "
+            "at this path and symlink {cache_root}/usage to it. For clusters "
+            "where maintainer write access to the install is temporary — put "
+            "the spool somewhere you keep control of (e.g. under your home)"
+        ),
+    )
     setup_perms_parser.set_defaults(func=cmd_setup_perms)
 
     # check-perms command
