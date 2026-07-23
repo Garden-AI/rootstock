@@ -97,6 +97,7 @@ class RootstockServer:
         timeout: float = 600.0,
         setup_kwargs: dict | None = None,
         checkpoint_path: str | None = None,
+        usage_client: str | None = "calculator",
     ):
         """
         Initialize the server.
@@ -123,6 +124,10 @@ class RootstockServer:
             checkpoint_path: Path to a local (user-registered) weights file.
                 When set, the worker loads via the env's setup_from_path()
                 hook instead of setup(); ``checkpoint`` is then only a label.
+            usage_client: Client label written into the session's anonymous
+                usage record (see usage.py), or None to record nothing —
+                verification passes None so synthetic smoke-test sessions
+                never pollute the spool.
         """
         if root is None:
             raise ValueError("root is required for pre-built environments")
@@ -141,6 +146,7 @@ class RootstockServer:
         self.root = Path(root)
         self.cache_root = Path(cache_root) if cache_root is not None else None
         self.setup_kwargs = setup_kwargs or {}
+        self.usage_client = usage_client
 
         self._server_socket: socket.socket | None = None
         self._client_socket: socket.socket | None = None
@@ -395,7 +401,7 @@ class RootstockServer:
         can't-fail guarantees live in record_session; the only job here is
         gathering the fields and making the write once per session.
         """
-        if self._session_started_at is None:
+        if self.usage_client is None or self._session_started_at is None:
             return
         started_at = self._session_started_at
         duration_s = time.monotonic() - self._session_started_monotonic
@@ -413,6 +419,7 @@ class RootstockServer:
             # until it merges, no session is local.
             is_local=getattr(self, "checkpoint_path", None) is not None,
             device=self.device,
+            client=self.usage_client,
             started_at=started_at,
             duration_s=duration_s,
             n_calculations=self._n_calculations,

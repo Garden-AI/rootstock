@@ -33,6 +33,7 @@ def _write(cache_root, **overrides):
         checkpoint="mace-mp-0-medium",
         is_local=False,
         device="cuda",
+        client="calculator",
         started_at="2026-07-23T01:02:03+00:00",
         duration_s=12.34,
         n_calculations=7,
@@ -57,10 +58,21 @@ def test_record_written_when_spool_provisioned(tmp_path):
         "env": "mace",
         "checkpoint": "mace-mp-0-medium",
         "device": "cuda",
+        "client": "calculator",
         "rootstock_version": record["rootstock_version"],
         "n_calculations": 7,
         "user": record["user"],
     }
+
+
+def test_serve_record_carries_client_and_null_call_count(tmp_path):
+    """serve's parent process can't see the i-PI traffic, so its records
+    carry n_calculations=null — the client field still says who it was."""
+    usage_dir(tmp_path).mkdir()
+    path = _write(tmp_path, client="serve", n_calculations=None)
+    record = json.loads(path.read_text())
+    assert record["client"] == "serve"
+    assert record["n_calculations"] is None
 
 
 def test_unprovisioned_spool_is_a_silent_noop(tmp_path):
@@ -221,8 +233,22 @@ def test_stop_records_one_session(tmp_path, monkeypatch):
     assert kw["checkpoint"] == "mace-mp-0-medium"
     assert kw["is_local"] is False
     assert kw["device"] == "cpu"
+    assert kw["client"] == "calculator"
     assert kw["n_calculations"] == 5
     assert kw["started_at"] == "2026-07-23T01:02:03+00:00"
+
+
+def test_stop_with_usage_client_none_records_nothing(tmp_path, monkeypatch):
+    """usage_client=None opts a server out of recording entirely — verify.py
+    passes it so nightly smoke-test sessions never pollute the spool."""
+    calls = []
+    monkeypatch.setattr("rootstock.server.record_session", lambda **kw: calls.append(kw))
+
+    server = _server(tmp_path, usage_client=None)
+    _fake_session(server)
+    server.stop()
+
+    assert calls == []
 
 
 def test_stop_without_session_records_nothing(tmp_path, monkeypatch):

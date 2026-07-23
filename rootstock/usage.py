@@ -112,9 +112,10 @@ def record_session(
     checkpoint: str,
     is_local: bool,
     device: str,
+    client: str,
     started_at: str,
     duration_s: float,
-    n_calculations: int,
+    n_calculations: int | None,
 ) -> Path | None:
     """Best-effort: write one usage record for a finished worker session.
 
@@ -130,9 +131,13 @@ def record_session(
             ``is_local`` — user-chosen ids must not leak into the spool.
         is_local: Whether the checkpoint was a user-registered weights file.
         device: Device string the worker ran on.
-        started_at: ISO 8601 UTC timestamp of worker connect.
+        client: Which entry point ran the session ("calculator", "serve").
+        started_at: ISO 8601 UTC timestamp of session start (worker connect,
+            or worker spawn when the connect isn't observable).
         duration_s: Wall-clock session length in seconds.
-        n_calculations: Completed force calls served by the session.
+        n_calculations: Completed force calls served by the session, or None
+            when the entry point can't count them (serve's parent process
+            never sees the i-PI traffic).
     """
     try:
         if usage_disabled():
@@ -157,6 +162,7 @@ def record_session(
             "env": env_name,
             "checkpoint": LOCAL_CHECKPOINT_LABEL if is_local else checkpoint,
             "device": device,
+            "client": client,
             "rootstock_version": __version__,
             "n_calculations": n_calculations,
             "user": _user_hash(spool),
