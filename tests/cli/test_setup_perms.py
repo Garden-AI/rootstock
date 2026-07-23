@@ -36,6 +36,22 @@ def test_dry_run_single_filesystem(capsys):
     assert "/cache" not in out
 
 
+def test_usage_dir_renders_the_redirect(capsys):
+    rc = cmd_setup_perms(_args(root="/install/root", usage_dir="/home/maint/rs-usage"))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "ln -sfn /home/maint/rs-usage /install/root/usage" in out
+    assert "chmod 1777 /home/maint/rs-usage" in out
+
+
+def test_usage_dir_conflicts_with_no_usage_spool(capsys):
+    rc = cmd_setup_perms(
+        _args(root="/install/root", usage_dir="/home/maint/rs-usage", no_usage_spool=True)
+    )
+    assert rc == 2
+    assert "--no-usage-spool" in capsys.readouterr().err
+
+
 def test_dry_run_split_filesystem(capsys):
     rc = cmd_setup_perms(_args(root="/install/root", cache_root="/cache/root"))
     assert rc == 0
@@ -112,8 +128,11 @@ def test_apply_runs_commands_after_confirmation(monkeypatch, capsys):
 
     rc = cmd_setup_perms(_args(root="/install/root", apply=True))
     assert rc == 0
-    # The mode bits are asserted last, after the ACL work that can clear setgid.
-    assert calls[-1] == ["chmod", "2775", "/install/root"]
+    # The mode bits are asserted after the ACL work that can clear setgid;
+    # the usage spool's 1777 is the very last command (after the retrofit pass
+    # that would otherwise rewrite it).
+    assert calls[-2] == ["chmod", "2775", "/install/root"]
+    assert calls[-1] == ["chmod", "1777", "/install/root/usage"]
     assert "Permissions applied." in capsys.readouterr().out
 
 
