@@ -50,9 +50,18 @@ def setup(checkpoint: str, device: str = "cuda"):
         ASE-compatible OCPCalculator.
     """
     import os
+
     from fairchem.core import OCPCalculator
     from fairchem.core.models.model_registry import model_name_to_local_file
 
     cache_dir = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
     local_path = model_name_to_local_file(CHECKPOINTS[checkpoint], local_cache=cache_dir)
     return OCPCalculator(checkpoint_path=local_path, cpu=(device == "cpu"))
+
+
+def setup_from_path(path: str, device: str = "cuda"):
+    # Local checkpoints (`rootstock add-local`): OCPCalculator loads a
+    # checkpoint file natively — this is setup() minus the registry download.
+    from fairchem.core import OCPCalculator
+
+    return OCPCalculator(checkpoint_path=path, cpu=(device == "cpu"))

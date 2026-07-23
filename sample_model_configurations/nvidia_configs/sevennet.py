@@ -66,3 +66,13 @@ def setup(checkpoint: str, device: str = "cuda", modal: str | None = None):
         modal = MULTI_FIDELITY_DEFAULT_MODAL.get(checkpoint)
     kwargs = {"modal": modal} if modal is not None else {}
     return SevenNetCalculator(model=CHECKPOINTS[checkpoint], device=device, **kwargs)
+
+
+def setup_from_path(path: str, device: str = "cuda", modal: str | None = None):
+    # Local checkpoints (`rootstock add-local`): SevenNetCalculator loads a
+    # checkpoint file directly. A multi-fidelity fine-tune must register its
+    # fidelity (--kwarg modal=mpa); single-fidelity ones need no kwargs.
+    from sevenn.calculator import SevenNetCalculator
+
+    kwargs = {"modal": modal} if modal is not None else {}
+    return SevenNetCalculator(model=path, device=device, **kwargs)

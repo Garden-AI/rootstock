@@ -28,6 +28,18 @@ _AMD = _SAMPLES / "amd_configs"
 
 _DUAL_VENDOR_ENVS = sorted(p.stem for p in _AMD.glob("*.py") if (_NVIDIA / p.name).exists())
 
+# Every config that declares the hook, in either vendor dir — all of them
+# must honor the signature contract, dual-vendor or not.
+_HOOK_DECLARING_CONFIGS = sorted(
+    (
+        p
+        for vendor in (_NVIDIA, _AMD)
+        for p in vendor.glob("*.py")
+        if declares_setup_from_path(p)
+    ),
+    key=lambda p: (p.parent.name, p.name),
+)
+
 
 def _hook_args(config: Path) -> ast.arguments | None:
     tree = ast.parse(config.read_text(), filename=str(config))
@@ -54,12 +66,15 @@ def test_dual_vendor_envs_declare_hook(env, vendor_dir):
     )
 
 
-@pytest.mark.parametrize("vendor_dir", [_NVIDIA, _AMD], ids=["nvidia", "amd"])
-@pytest.mark.parametrize("env", _DUAL_VENDOR_ENVS)
-def test_hook_signature_contract(env, vendor_dir):
+@pytest.mark.parametrize(
+    "config",
+    _HOOK_DECLARING_CONFIGS,
+    ids=[f"{p.parent.name}/{p.stem}" for p in _HOOK_DECLARING_CONFIGS],
+)
+def test_hook_signature_contract(config):
     """First param `path`, then `device` with a default, extras all defaulted
     — so `add-local` without --kwarg works for every env."""
-    args = _hook_args(vendor_dir / f"{env}.py")
+    args = _hook_args(config)
     names = [a.arg for a in args.args]
     assert names[:2] == ["path", "device"]
     # Everything after `path` has a default.
