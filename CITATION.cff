@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Rootstock"
+type: software
+authors:
+  - family-names: Engler
+    given-names: Will
+    orcid: "https://orcid.org/0009-0005-3372-080X"
+    affiliation: "University of Chicago"
+  - family-names: Holbrook
+    given-names: Hayden
+    affiliation: "University of Chicago"
+  - family-names: Price Skelly
+    given-names: Owen
+    affiliation: "University of Chicago"
+  - family-names: Chhabra
+    given-names: Aryan
+  - family-names: Viswanath
+    given-names: Pranav
+  - family-names: Rosen
+    given-names: Andrew
+    orcid: "https://orcid.org/0000-0002-0141-7006"
+    affiliation: "Princeton University"
+  - family-names: Blaiszik
+    given-names: Ben
+    orcid: "https://orcid.org/0000-0002-5326-4902"
+    affiliation: "University of Chicago"
+abstract: "MLIP calculators with isolated Python environments"
+repository-code: "https://github.com/Garden-AI/rootstock"
+license: MIT
+date-released: "2026-07-17"
+keywords:
+  - machine-learning-interatomic-potentials
+  - molecular-dynamics
+  - materials-science
+  - hpc
