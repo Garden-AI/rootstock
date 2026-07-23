@@ -7,11 +7,11 @@ authors:
     given-names: Will
     orcid: "https://orcid.org/0009-0005-3372-080X"
     affiliation: "University of Chicago"
-  - family-names: Holbrook
-    given-names: Hayden
-    affiliation: "University of Chicago"
   - family-names: Price Skelly
     given-names: Owen
+    affiliation: "University of Chicago"
+  - family-names: Holbrook
+    given-names: Hayden
     affiliation: "University of Chicago"
   - family-names: Chhabra
     given-names: Aryan
