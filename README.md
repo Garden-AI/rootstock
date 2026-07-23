@@ -87,6 +87,18 @@ This design takes out the pain of environment conflicts when experimenting with 
 
 Rootstock ships an experimental LAMMPS `fix` that spawns a worker subprocess, giving a LAMMPS run access to a Rootstock-managed MLIP for molecular dynamics. It is far less tested than the ASE path. See [LAMMPS Integration](https://garden-ai.github.io/rootstock/lammps/) in the docs for the fix syntax and current limitations.
 
+## Usage Statistics
+
+On shared installs where the maintainer has provisioned it, each worker session drops one small anonymous JSON record into the install's `{cache_root}/usage/` directory: which environment/checkpoint/device ran, when, for how long, how many force calls it served, and which entry point started it. Nothing phones home — records stay on the cluster's shared filesystem until the install's maintainer aggregates them (`rootstock usage report`). No job ids, no simulation data, and no raw usernames are recorded: the only per-person field is a salted hash used to count distinct users, and checkpoints you register yourself with `rootstock add-local` appear as `(local)`, never by name.
+
+If any of this rubs you the wrong way, opt out for all of your sessions with:
+
+```bash
+export ROOTSTOCK_DISABLE_USAGE_STATS=1
+```
+
+Maintainers opt an entire install out by not provisioning the spool (`rootstock setup-perms --no-usage-spool`) — if the directory doesn't exist, nothing is ever recorded.
+
 ## Setting Up a New Cluster
 
 This section is for people setting up Rootstock on a new cluster. All commands below are run **on the cluster itself** (SSH in first). You'll need write access to a shared filesystem location visible to your users.
