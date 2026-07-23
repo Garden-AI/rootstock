@@ -22,6 +22,13 @@ The recipe:
   <group>``. The mode bits already give group r-x and world r-x; the setgid bit
   handles group-ownership inheritance. No named-group ACL (maintainer-only-write
   on the cache is the accepted default).
+* Usage spool — ``mkdir -p {cache_root}/usage`` + ``chmod 1777`` (sticky,
+  /tmp-style): any user's session can drop an anonymous usage record, nobody
+  can delete anyone else's, and the dir owner (whoever ran setup-perms) can
+  still prune everything when collecting. Existence of the directory is what
+  turns usage collection on for an install, so ``--no-usage-spool`` skips it
+  and a *missing* spool is never flagged as an issue — only a present one
+  with the wrong mode is.
 * ``--retrofit`` — recursive ``setfacl -R`` variants so an install that already
   has files in it becomes world-readable, not just future files, plus a
   ``find -type d ... chmod g+s`` so existing subdirectories inherit too.
@@ -42,6 +49,11 @@ from pathlib import Path
 # Mode bits for each root. setgid (2) + rwx owner + rwx/r-x group + r-x other.
 INSTALL_ROOT_MODE = "2775"
 CACHE_ROOT_MODE = "2755"
+# The usage spool: sticky + world-writable, like /tmp. Name matches
+# rootstock/usage.py's USAGE_DIR_NAME (kept literal here so this change
+# doesn't depend on the writer landing first).
+USAGE_DIR_NAME = "usage"
+USAGE_SPOOL_MODE = "1777"
 
 
 # --------------------------------------------------------------------------- #
@@ -55,12 +67,15 @@ def render_commands(
     *,
     group: str,
     retrofit: bool = False,
+    usage_spool: bool = True,
 ) -> list[list[str]]:
     """Render the permission recipe as a list of argv lists.
 
     The cache-root commands are emitted only when ``cache_root`` is given and
     differs from ``install_root`` (a single-filesystem cluster needs nothing
     extra for the cache). ``retrofit`` appends the recursive variants.
+    ``usage_spool`` provisions the world-writable usage-record spool (its
+    existence opts the install into usage collection).
     """
     install_root = Path(install_root)
     cmds: list[list[str]] = [
@@ -76,6 +91,13 @@ def render_commands(
     ]
 
     separate_cache = cache_root is not None and Path(cache_root) != install_root
+    # The spool lives on the cache half of the install — that's the
+    # runtime-writable side (on Frontier the install root is under /sw, which
+    # must not take writes from user jobs).
+    spool = usage_spool_dir(install_root, cache_root)
+    if usage_spool:
+        cmds.insert(0, ["mkdir", "-p", str(spool)])
+
     if separate_cache:
         cache_root = Path(cache_root)
         cmds += [
@@ -120,8 +142,19 @@ def render_commands(
     cmds += [["chmod", INSTALL_ROOT_MODE, str(install_root)]]
     if separate_cache:
         cmds += [["chmod", CACHE_ROOT_MODE, str(cache_root)]]
+    if usage_spool:
+        # After the retrofit setfacl/find pass, which would otherwise rewrite
+        # the spool's mode along with everything else under the root.
+        cmds += [["chmod", USAGE_SPOOL_MODE, str(spool)]]
 
     return cmds
+
+
+def usage_spool_dir(install_root: Path | str, cache_root: Path | str | None = None) -> Path:
+    """Where an install's usage spool lives: under the cache root when the
+    install has a separate one, else under the install root itself."""
+    parent = cache_root if cache_root is not None else install_root
+    return Path(parent) / USAGE_DIR_NAME
 
 
 def _setgid_dirs(root: Path) -> list[str]:
@@ -334,6 +367,42 @@ def _check_root(
     return issues
 
 
+def _check_usage_spool(install_root: Path, cache_root: Path | None) -> list[PermIssue]:
+    """Flag a usage spool that exists but can't do its job.
+
+    A *missing* spool is not an issue — its absence is how an install opts
+    out of usage collection. A present one, though, must be world-writable
+    (or users' sessions silently fail to record) and sticky (or any user can
+    delete everyone else's records).
+    """
+    spool = usage_spool_dir(install_root, cache_root)
+    try:
+        mode = spool.stat().st_mode
+    except (FileNotFoundError, PermissionError):
+        return []
+
+    issues: list[PermIssue] = []
+    if not stat_module.S_ISDIR(mode):
+        return [PermIssue(spool, "usage spool is not a directory")]
+    if (mode & 0o007) != 0o007:
+        issues.append(
+            PermIssue(
+                spool,
+                f"usage spool not world-writable (mode should be {USAGE_SPOOL_MODE}); "
+                "users' sessions can't record usage",
+            )
+        )
+    if not (mode & stat_module.S_ISVTX):
+        issues.append(
+            PermIssue(
+                spool,
+                f"usage spool lacks the sticky bit (mode should be {USAGE_SPOOL_MODE}); "
+                "any user can delete other users' records",
+            )
+        )
+    return issues
+
+
 def check_permissions(
     install_root: Path | str,
     cache_root: Path | str | None = None,
@@ -364,5 +433,7 @@ def check_permissions(
             seen = {issue.path for issue in issues}
             issues += [i for i in _check_ancestors(cache_root) if i.path not in seen]
         issues += _check_root(cache_root, kind="cache", group=group, require_group_acl=False)
+
+    issues += _check_usage_spool(install_root, Path(cache_root) if cache_root else None)
 
     return issues

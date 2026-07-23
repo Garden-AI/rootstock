@@ -112,8 +112,11 @@ def test_apply_runs_commands_after_confirmation(monkeypatch, capsys):
 
     rc = cmd_setup_perms(_args(root="/install/root", apply=True))
     assert rc == 0
-    # The mode bits are asserted last, after the ACL work that can clear setgid.
-    assert calls[-1] == ["chmod", "2775", "/install/root"]
+    # The mode bits are asserted after the ACL work that can clear setgid;
+    # the usage spool's 1777 is the very last command (after the retrofit pass
+    # that would otherwise rewrite it).
+    assert calls[-2] == ["chmod", "2775", "/install/root"]
+    assert calls[-1] == ["chmod", "1777", "/install/root/usage"]
     assert "Permissions applied." in capsys.readouterr().out
 
 

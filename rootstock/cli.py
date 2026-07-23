@@ -429,6 +429,15 @@ def main():
         action="store_true",
         help="Also apply recursively so existing files become world-readable",
     )
+    setup_perms_parser.add_argument(
+        "--no-usage-spool",
+        action="store_true",
+        help=(
+            "Skip provisioning the world-writable usage-record spool "
+            "({cache_root}/usage, mode 1777); its absence keeps usage "
+            "collection off for this install"
+        ),
+    )
     setup_perms_parser.set_defaults(func=cmd_setup_perms)
 
     # check-perms command

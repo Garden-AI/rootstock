@@ -52,6 +52,7 @@ def cmd_setup_perms(args) -> int:
         cache_root,
         group=args.group,
         retrofit=args.retrofit,
+        usage_spool=not getattr(args, "no_usage_spool", False),
     )
 
     if not args.apply:
