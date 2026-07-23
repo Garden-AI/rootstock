@@ -46,13 +46,13 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .usage import usage_dir
+
 # Mode bits for each root. setgid (2) + rwx owner + rwx/r-x group + r-x other.
 INSTALL_ROOT_MODE = "2775"
 CACHE_ROOT_MODE = "2755"
-# The usage spool: sticky + world-writable, like /tmp. Name matches
-# rootstock/usage.py's USAGE_DIR_NAME (kept literal here so this change
-# doesn't depend on the writer landing first).
-USAGE_DIR_NAME = "usage"
+# The usage spool: sticky + world-writable, like /tmp. Its location comes
+# from usage.py's usage_dir(), so provisioning and the writer can't disagree.
 USAGE_SPOOL_MODE = "1777"
 
 
@@ -152,9 +152,12 @@ def render_commands(
 
 def usage_spool_dir(install_root: Path | str, cache_root: Path | str | None = None) -> Path:
     """Where an install's usage spool lives: under the cache root when the
-    install has a separate one, else under the install root itself."""
-    parent = cache_root if cache_root is not None else install_root
-    return Path(parent) / USAGE_DIR_NAME
+    install has a separate one, else under the install root itself.
+
+    Delegates to usage.py's ``usage_dir`` — this wrapper only supplies the
+    perms-side convention that a missing cache_root means the install root
+    doubles as the cache half."""
+    return usage_dir(cache_root if cache_root is not None else install_root)
 
 
 def _setgid_dirs(root: Path) -> list[str]:
