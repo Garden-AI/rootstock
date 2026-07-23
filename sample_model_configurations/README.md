@@ -20,9 +20,7 @@ sample_model_configurations/
     ├── escn.py         # eSCN (OC20 catalysis)
     ├── esen.py         # eSEN — FAIRChem single-task (OMol25/OC25/ODAC25)
     ├── gemnet.py       # GemNet-OC / GemNet-dT (OC20 catalysis)
-    ├── m3gnet.py       # M3GNet → uses CHGNet (M3GNet-PES unavailable)
-    ├── mace.py         # MACE-MP-0 / MACE-Large (inorganic universal)
-    ├── mace_off23.py   # MACE-OFF23 (organic molecules)
+    ├── mace.py         # MACE-MP-0/Large + MACE-OFF23 (one mace-torch env)
     ├── mace_polar.py   # MACE-POLAR-1 (electrostatic MACE, git-main + graph-longrange)
     ├── mattersim.py    # MatterSim-v1 (Microsoft universal)
     ├── nequip.py       # NequIP (system-specific, deployed model required)
@@ -31,7 +29,6 @@ sample_model_configurations/
     ├── schnet.py       # SchNet (OC20 catalysis)
     ├── scn.py          # SCN (OC20 catalysis)
     ├── tensornet.py    # TensorNet (MatPES PBE/r2SCAN via matgl 2.x+HF)
-    ├── torchmdnet.py   # TorchMD-Net (custom checkpoint required)
     ├── uma.py          # UMA — FAIRChem multi-task (OMAT/OC/ODAC)
     └── chgnet.py       # CHGNet (inorganic, charge-informed)
 ```

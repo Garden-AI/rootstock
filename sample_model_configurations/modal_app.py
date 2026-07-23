@@ -161,20 +161,6 @@ def probe_allscaip(checkpoint: str = "allscaip-md-conserving-all-omol", system: 
 
 
 # -----------------------------------------------------------------------------
-# M3GNet — MatGL universal potential (Materials Project / materialyze HF)
-# -----------------------------------------------------------------------------
-
-
-@probe_image(
-    "m3gnet.py",
-    ["chgnet>=0.4.0", "ase>=3.22", "torch>=2.0"],
-)
-def probe_m3gnet(checkpoint: str = "m3gnet-mp-2021-2-8-pes", system: str = "crystal"):
-    """M3GNet-PES unavailable in modern matgl; loads CHGNet as substitute."""
-    return _run_probe_subprocess(checkpoint, system)
-
-
-# -----------------------------------------------------------------------------
 # CHGNet — charge-informed universal potential
 # -----------------------------------------------------------------------------
 
@@ -218,20 +204,6 @@ def probe_chgnet(checkpoint: str = "chgnet-default", system: str = "crystal"):
 )
 def probe_tensornet(checkpoint: str = "tensornet-matpes-pbe-2025-2", system: str = "crystal"):
     """Probe a TensorNet/MatGL checkpoint. Default: MatPES PBE on Cu bulk."""
-    return _run_probe_subprocess(checkpoint, system)
-
-
-# -----------------------------------------------------------------------------
-# MACE-OFF23 — MACE force field for organic molecules
-# -----------------------------------------------------------------------------
-
-
-@probe_image(
-    "mace_off23.py",
-    ["mace-torch>=0.3.0", "ase>=3.22", "torch>=2.4.0,<2.10"],
-)
-def probe_mace_off23(checkpoint: str = "mace-off23-medium", system: str = "molecule"):
-    """Probe a MACE-OFF23 checkpoint. Default: medium model on H2O."""
     return _run_probe_subprocess(checkpoint, system)
 
 
@@ -347,29 +319,6 @@ def probe_nequip(checkpoint: str, system: str = "crystal"):
 # Allegro model file is provided. Install with:
 #   uv pip install --no-deps "allegro @ git+https://github.com/mir-group/allegro.git"
 # -----------------------------------------------------------------------------
-
-
-# -----------------------------------------------------------------------------
-# TorchMD-Net — equivariant transformer for MD
-# -----------------------------------------------------------------------------
-
-
-@probe_image(
-    "torchmdnet.py",
-    [
-        "ase>=3.22",
-        "torch>=2.0",
-        "torch-geometric",
-        "torch-scatter",
-        "torch-sparse",
-        "torch-cluster",
-    ],
-    no_deps=["torchmd-net>=2.0.0"],
-    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
-)
-def probe_torchmdnet(checkpoint: str, system: str = "molecule"):
-    """Probe a TorchMD-Net checkpoint (.ckpt path or HF repo ID)."""
-    return _run_probe_subprocess(checkpoint, system)
 
 
 # -----------------------------------------------------------------------------

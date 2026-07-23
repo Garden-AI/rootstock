@@ -45,3 +45,12 @@ def setup(checkpoint: str, device: str = "cuda"):
     from mace.calculators import mace_mp
 
     return mace_mp(model=arg, device=device, default_dtype="float32")
+
+
+def setup_from_path(path: str, device: str = "cuda"):
+    # Local checkpoints (`rootstock add-local`): fine-tunes load through
+    # MACECalculator directly — the mp/off dispatch in setup() only exists
+    # to pick which pretrained file to download.
+    from mace.calculators import MACECalculator
+
+    return MACECalculator(model_paths=path, device=device, default_dtype="float32")
