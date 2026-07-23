@@ -238,6 +238,19 @@ def test_stop_records_one_session(tmp_path, monkeypatch):
     assert kw["started_at"] == "2026-07-23T01:02:03+00:00"
 
 
+def test_stop_marks_local_checkpoint_sessions(tmp_path, monkeypatch):
+    """A server running a user-registered weights file reports is_local, so
+    record_session masks the user-chosen id."""
+    calls = []
+    monkeypatch.setattr("rootstock.server.record_session", lambda **kw: calls.append(kw))
+
+    server = _server(tmp_path, checkpoint_path="/home/someone/weights.pt")
+    _fake_session(server)
+    server.stop()
+
+    assert calls[0]["is_local"] is True
+
+
 def test_stop_with_usage_client_none_records_nothing(tmp_path, monkeypatch):
     """usage_client=None opts a server out of recording entirely — verify.py
     passes it so nightly smoke-test sessions never pollute the spool."""

@@ -415,9 +415,7 @@ class RootstockServer:
             cache_root=resolve_cache_root(self.root, explicit=self.cache_root),
             env_name=self.env_name,
             checkpoint=self.checkpoint,
-            # checkpoint_path arrives with the local-checkpoints branch;
-            # until it merges, no session is local.
-            is_local=getattr(self, "checkpoint_path", None) is not None,
+            is_local=self.checkpoint_path is not None,
             device=self.device,
             client=self.usage_client,
             started_at=started_at,
