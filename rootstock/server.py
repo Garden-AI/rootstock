@@ -13,6 +13,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +25,7 @@ from .protocol import (
     create_private_socket_path,
     create_server_socket,
 )
+from .usage import record_session
 
 logger = logging.getLogger("rootstock.server")
 
@@ -161,6 +163,13 @@ class RootstockServer:
         # the life of the worker process; stop() closes it.
         self._spawn_stack: contextlib.ExitStack | None = None
 
+        # Usage-record state: a session is a worker that actually connected.
+        # stop() writes one anonymous record per session (see usage.py) and
+        # resets these, so repeated stop() calls can't double-count.
+        self._session_started_at: str | None = None
+        self._session_started_monotonic: float | None = None
+        self._n_calculations = 0
+
     def start(self):
         """Start the server and launch the worker process."""
         # Create server socket inside a fresh private (0700) directory
@@ -246,6 +255,12 @@ class RootstockServer:
 
         self._protocol = IPIProtocol(self._client_socket)
         self._connected = True
+
+        from .manifest import now_iso
+
+        self._session_started_at = now_iso()
+        self._session_started_monotonic = time.monotonic()
+        self._n_calculations = 0
 
         logger.info("Worker connected")
 
@@ -370,10 +385,43 @@ class RootstockServer:
         if error is not None:
             raise RuntimeError(f"Worker calculation failed:\n{error}")
 
+        self._n_calculations += 1
         return energy, forces, virial
+
+    def _record_usage(self):
+        """Write the session's anonymous usage record, if there was a session.
+
+        Called from stop() while the session state is still intact. All the
+        can't-fail guarantees live in record_session; the only job here is
+        gathering the fields and making the write once per session.
+        """
+        if self._session_started_at is None:
+            return
+        started_at = self._session_started_at
+        duration_s = time.monotonic() - self._session_started_monotonic
+        self._session_started_at = None
+        self._session_started_monotonic = None
+
+        from .layout import resolve_cache_root
+
+        record_session(
+            root=self.root,
+            cache_root=resolve_cache_root(self.root, explicit=self.cache_root),
+            env_name=self.env_name,
+            checkpoint=self.checkpoint,
+            # checkpoint_path arrives with the local-checkpoints branch;
+            # until it merges, no session is local.
+            is_local=getattr(self, "checkpoint_path", None) is not None,
+            device=self.device,
+            started_at=started_at,
+            duration_s=duration_s,
+            n_calculations=self._n_calculations,
+        )
 
     def stop(self):
         """Stop the server and terminate the worker process."""
+        self._record_usage()
+
         if self._protocol is not None:
             try:
                 self._protocol.send_exit()
