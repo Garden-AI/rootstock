@@ -6,6 +6,7 @@ This is the main user-facing interface for Rootstock.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from .config import resolve_default_root
 from .layout import ensure_layout_compatible, resolve_cache_root
 from .local_checkpoints import LocalCheckpointError, resolve_checkpoint
 from .server import RootstockServer, WorkerDiedError
+
+logger = logging.getLogger("rootstock.calculator")
 
 
 class RootstockCalculator(Calculator):
@@ -243,7 +246,17 @@ class RootstockCalculator(Calculator):
             # this instance being permanently bricked by one GPU OOM mid-MD.
             # No automatic retry — the same configuration would likely fail
             # the same way; the caller decides whether to try again.
-            self.close()
+            # Teardown is best-effort: the post-mortem in the exception is
+            # the user's only diagnostic, so a cleanup failure must never
+            # mask it.
+            try:
+                self.close()
+            except Exception:
+                logger.warning(
+                    "Server teardown after worker death failed; raising the original error anyway",
+                    exc_info=True,
+                )
+                self._server = None
             raise
 
         # Store results

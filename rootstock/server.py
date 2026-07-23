@@ -447,7 +447,19 @@ class RootstockServer:
                 self._process.wait(timeout=5.0)
             except subprocess.TimeoutExpired:
                 self._process.kill()
-                self._process.wait()
+                try:
+                    self._process.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    # A worker in uninterruptible sleep (D state — dead Lustre
+                    # mount, swap thrash) ignores SIGKILL until its syscall
+                    # returns. Waiting here would hang teardown forever, so
+                    # abandon the process; the kernel reaps it when it wakes.
+                    logger.warning(
+                        "Worker process %d did not exit after SIGKILL "
+                        "(likely stuck in uninterruptible I/O); "
+                        "abandoning it and continuing teardown",
+                        self._process.pid,
+                    )
             self._process = None
 
         # Close worker output temp files
