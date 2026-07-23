@@ -45,6 +45,12 @@ Commands:
         ancestor directories satisfy the shared-install permission recipe.
         Exits 0 when clean, 1 when issues are found:
             rootstock check-perms --cluster perlmutter --group m5268
+
+    rootstock usage report [--root <path>] [--json]
+    rootstock usage compact [--root <path>]
+        Aggregate (read-only) or compact the anonymous usage-record spool at
+        {cache_root}/usage/. The spool is provisioned by setup-perms; without
+        it, usage collection is off.
 """
 
 import argparse
@@ -70,6 +76,8 @@ from .commands import (
     cmd_setup_perms,
     cmd_smoke_test,
     cmd_status,
+    cmd_usage_compact,
+    cmd_usage_report,
 )
 from .commands.common import ROOTSTOCK_ROOT_ENV
 from .config import DEFAULT_CONFIG_FILE
@@ -589,6 +597,53 @@ def main():
         help="Don't push manifest to backend (useful during development)",
     )
     manifest_init_parser.set_defaults(func=cmd_manifest_init)
+
+    # usage command
+    usage_parser = subparsers.add_parser(
+        "usage",
+        help="Report on or compact the usage-record spool",
+        description=(
+            "Maintainer-side view of the anonymous usage records that "
+            "calculator sessions spool to {cache_root}/usage/. 'report' "
+            "aggregates read-only; 'compact' folds raw records into "
+            "per-month rollup files."
+        ),
+    )
+    usage_subparsers = usage_parser.add_subparsers(
+        dest="usage_action",
+        required=True,
+    )
+
+    usage_report_parser = usage_subparsers.add_parser(
+        "report",
+        help="Aggregate the spool (read-only)",
+    )
+    usage_report_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    usage_report_parser.add_argument(
+        "--cache-root",
+        help="Cache root override (default: the install's own declaration)",
+    )
+    usage_report_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    usage_report_parser.set_defaults(func=cmd_usage_report)
+
+    usage_compact_parser = usage_subparsers.add_parser(
+        "compact",
+        help="Fold raw records into per-month rollup files",
+    )
+    usage_compact_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    usage_compact_parser.add_argument(
+        "--cache-root",
+        help="Cache root override (default: the install's own declaration)",
+    )
+    usage_compact_parser.set_defaults(func=cmd_usage_compact)
 
     # parse_known_args instead of parse_args so `rootstock benchmark ...` can
     # forward arbitrary flags to the benchmark's own parser. Every other

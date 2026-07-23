@@ -13,6 +13,7 @@ from .serve import cmd_serve
 from .setup_perms import cmd_setup_perms
 from .smoke_test import cmd_smoke_test
 from .status import cmd_list, cmd_status
+from .usage import cmd_usage_compact, cmd_usage_report
 
 __all__ = [
     "cmd_add",
@@ -32,4 +33,6 @@ __all__ = [
     "cmd_setup_perms",
     "cmd_smoke_test",
     "cmd_status",
+    "cmd_usage_compact",
+    "cmd_usage_report",
 ]
