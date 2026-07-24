@@ -1,9 +1,10 @@
-"""``rootstock usage`` — report on and compact the usage-record spool.
+"""``rootstock usage`` — report on, compact, and push the usage-record spool.
 
 The spool ({cache_root}/usage/) fills with one small JSON record per
 calculator session (see rootstock/usage.py). ``report`` aggregates it
 read-only; ``compact`` folds raw records into per-month rollup files so the
-spool doesn't accumulate thousands of tiny files. Both are login-node,
+spool doesn't accumulate thousands of tiny files; ``push`` sends the
+aggregated rollup rows to the dashboard backend. All are login-node,
 maintainer-side operations — the write side never needs them.
 """
 
@@ -12,6 +13,9 @@ from __future__ import annotations
 import json
 import sys
 
+from ..client import RootstockClient
+from ..config import load_config
+from ..manifest import load_manifest
 from ..usage import SpoolSummary, compact_spool, summarize_spool, usage_dir
 from .common import get_root_or_exit, resolve_cache_root
 
@@ -82,6 +86,75 @@ def cmd_usage_report(args) -> int:
         print(f"Unique users overall: {summary.unique_users}")
     if summary.skipped:
         print(f"({summary.skipped} unreadable file(s) skipped)", file=sys.stderr)
+    return 0
+
+
+def cmd_usage_push(args) -> int:
+    """Push the aggregated rollup rows to the dashboard backend.
+
+    Pushes the same aggregation ``report`` shows — rollup files plus any
+    not-yet-compacted raw records — filed under the manifest's cluster name.
+    The backend stores rollups per month and replaces only the months
+    present in the push, so pushing repeatedly (e.g. from the smoke-test
+    cron) is idempotent and never erases previously pushed history. Only
+    derived counts are sent; the salted user hashes stay in the spool.
+    """
+    root = get_root_or_exit(args)
+    cache_root = resolve_cache_root(root, args.cache_root)
+    config = load_config()
+
+    valid, error = config.validate()
+    if not valid:
+        print(f"Error: {error}", file=sys.stderr)
+        print(
+            "Configure API credentials in ~/.config/rootstock/config.toml",
+            file=sys.stderr,
+        )
+        return 1
+    url = config.resolve_usage_api_url()
+    if not url:
+        print(
+            "Error: no usage endpoint — api_url doesn't follow the standard "
+            "rootstock-admin naming, so set usage_api_url in "
+            "~/.config/rootstock/config.toml explicitly.",
+            file=sys.stderr,
+        )
+        return 1
+
+    manifest = load_manifest(root)
+    if manifest is None or not manifest.cluster:
+        print(
+            f"No manifest at {root}/manifest.json — the push is filed under "
+            "the manifest's cluster name; run 'rootstock manifest init "
+            "--cluster <name>' first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    summary = summarize_spool(cache_root)
+    if summary is None:
+        print(
+            f"No usage spool at {usage_dir(cache_root)} — usage collection is "
+            "off for this install (rootstock setup-perms provisions it).",
+            file=sys.stderr,
+        )
+        return 1
+    if not summary.rows:
+        print("No usage recorded yet — nothing to push.")
+        return 0
+
+    if args.dry_run:
+        payload = {"cluster": manifest.cluster, "rows": summary.rows}
+        print(f"Would POST to {url}:")
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    client = RootstockClient(config)
+    success, message = client.push_usage(manifest.cluster, summary.rows)
+    if not success:
+        print(f"Error: {message}", file=sys.stderr)
+        return 1
+    print(message)
     return 0
 
 
