@@ -181,6 +181,76 @@ def test_apply_aborts_without_confirmation(monkeypatch, capsys):
     assert "Aborted." in capsys.readouterr().out
 
 
+def test_apply_skips_acl_commands_when_setfacl_is_missing(monkeypatch, capsys):
+    """No setfacl on the host (e.g. Frontier login nodes) skips ACLs, not chmod.
+
+    The recipe orders chmod last, so a crash on the first setfacl used to
+    abort before the mode bits were ever asserted."""
+    calls = []
+
+    def fake_run(argv, capture_output=False, text=False):
+        if argv[0] == "setfacl":
+            raise FileNotFoundError(2, "No such file or directory", "setfacl")
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr("rootstock.commands.setup_perms.subprocess.run", fake_run)
+    monkeypatch.setattr("rootstock.commands.setup_perms.check_permissions", lambda *a, **k: [])
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    rc = cmd_setup_perms(_args(root="/install/root", apply=True, retrofit=True))
+    assert rc == 0
+    # The rest of the recipe still ran, chmod included.
+    assert ["chgrp", "m4845", "/install/root"] in calls
+    assert ["chmod", "2775", "/install/root"] in calls
+    captured = capsys.readouterr()
+    assert "Permissions applied." in captured.out
+    # One warning, even though --retrofit renders many setfacl commands.
+    assert captured.err.count("setfacl not found") == 1
+
+
+def test_apply_skipped_setfacl_still_reports_surviving_issues(monkeypatch, capsys):
+    """Skipping ACLs defers to the post-apply re-check, which must still run."""
+
+    def fake_run(argv, capture_output=False, text=False):
+        if argv[0] == "setfacl":
+            raise FileNotFoundError(2, "No such file or directory", "setfacl")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr("rootstock.commands.setup_perms.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "rootstock.commands.setup_perms.check_permissions",
+        lambda *a, **k: [PermIssue(Path("/install/root"), "no default ACL")],
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    rc = cmd_setup_perms(_args(root="/install/root", apply=True))
+    assert rc == 1
+    assert "still look wrong" in capsys.readouterr().err
+
+
+def test_apply_aborts_cleanly_when_another_binary_is_missing(monkeypatch, capsys):
+    """A missing chgrp is a broken host, not a known configuration: clean abort."""
+    calls = []
+
+    def fake_run(argv, capture_output=False, text=False):
+        calls.append(argv)
+        if argv[0] == "chgrp":
+            raise FileNotFoundError(2, "No such file or directory", "chgrp")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr("rootstock.commands.setup_perms.subprocess.run", fake_run)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    rc = cmd_setup_perms(_args(root="/install/root", apply=True))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "command not found: chgrp" in err
+    assert "Traceback" not in err
+    # Stopped at the missing binary — nothing after chgrp was attempted.
+    assert not any(c[0] == "setfacl" for c in calls)
+
+
 def test_apply_bails_on_first_failure(monkeypatch, capsys):
     calls = []
 
