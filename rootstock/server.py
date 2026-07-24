@@ -242,9 +242,19 @@ class RootstockServer:
         )
 
     def _accept_connection(self):
-        """Accept connection from worker process."""
+        """Accept connection from worker process.
+
+        Bounded by ``self.timeout``: the socket timeouts below only start
+        counting once a connection exists, so without a deadline here a
+        worker that is alive but never connects — wedged in setup() on
+        stalled filesystem I/O, say — would hang this loop forever with no
+        way for the caller's timeout to fire (observed on Delta, workers
+        blocked in Lustre reads of /work/hdd during model load).
+        """
         # Use short timeout for accept so we can check if process died
         self._server_socket.settimeout(1.0)
+        deadline = time.monotonic() + self.timeout
+        next_heartbeat = 30.0
 
         while True:
             try:
@@ -254,6 +264,28 @@ class RootstockServer:
                 # Check if process died
                 if self._process.poll() is not None:
                     raise self._worker_failure_error("Worker process died before connecting")
+                waited = self.timeout - (deadline - time.monotonic())
+                if waited >= next_heartbeat:
+                    logger.info(
+                        "Still waiting for worker %d to connect (%.0fs elapsed, "
+                        "typically loading the model)",
+                        self._process.pid,
+                        waited,
+                    )
+                    next_heartbeat += 30.0
+                if time.monotonic() >= deadline:
+                    # Read the post-mortem (live output tails) before stop()
+                    # closes the capture files, then tear the worker down —
+                    # stop()'s bounded waits make that safe even when the
+                    # worker is stuck in uninterruptible I/O.
+                    error = self._worker_failure_error(
+                        f"Worker did not connect within timeout ({self.timeout:g}s). "
+                        "The worker never finished setup() — a slow or stalled "
+                        "model load (cold cache, degraded filesystem). If the "
+                        "load is genuinely slow, raise `timeout`"
+                    )
+                    self.stop()
+                    raise error
 
         # Restore original timeout
         self._server_socket.settimeout(self.timeout)
