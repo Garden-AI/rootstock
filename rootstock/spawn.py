@@ -33,10 +33,23 @@ from pathlib import Path
 from .environment import get_env_python, get_model_cache_env
 
 WORKER_WRAPPER = """\
-import json, sys
+import json, os, sys
 
 with open(sys.argv[1]) as f:
     spec = json.load(f)
+
+# Warm the page cache before the heavy imports below fault their way
+# through multi-GB mmap'd libraries at network-round-trip speed (#167).
+# The helper is staged next to this wrapper; best-effort, never fatal.
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _here)
+try:
+    import prewarm
+    prewarm.prewarm_from_spec(spec)
+except ImportError:
+    pass  # wrapper run without staged helper (e.g. tests); warming is optional
+finally:
+    sys.path.remove(_here)
 
 sys.path.insert(0, spec["env_dir"])
 from rootstock.worker import run_worker
@@ -62,10 +75,22 @@ run_worker(
 """
 
 DOWNLOAD_WRAPPER = """\
-import json, sys
+import json, os, sys
 
 with open(sys.argv[1]) as f:
     spec = json.load(f)
+
+# Same cold-cache prewarm as WORKER_WRAPPER — setup() below imports the
+# same multi-GB libraries before it can download anything.
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _here)
+try:
+    import prewarm
+    prewarm.prewarm_from_spec(spec)
+except ImportError:
+    pass  # wrapper run without staged helper (e.g. tests); warming is optional
+finally:
+    sys.path.remove(_here)
 
 sys.path.insert(0, spec["env_dir"])
 from env_source import setup
@@ -117,6 +142,12 @@ def spawn_in_env(
     try:
         wrapper = Path(tmp_dir) / "wrapper.py"
         wrapper.write_text(wrapper_source)
+        # The prewarm helper runs inside the env's (different) Python, so it
+        # travels as staged source next to the wrapper rather than being
+        # imported from the client's installation.
+        (Path(tmp_dir) / "prewarm.py").write_text(
+            (Path(__file__).parent / "prewarm.py").read_text()
+        )
         sidecar = Path(tmp_dir) / "spec.json"
         sidecar.write_text(json.dumps({**payload, "env_dir": str(env_dir)}))
 
