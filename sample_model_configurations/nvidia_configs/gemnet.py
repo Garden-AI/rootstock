@@ -32,6 +32,8 @@ CHECKPOINTS = {
     "gemnet-oc-s2ef-oc20-all-md": "GemNet-OC-S2EF-OC20-All+MD",
     "gemnet-oc-s2ef-oc20-all": "GemNet-OC-S2EF-OC20-All",
     "gemnet-dt-s2ef-oc20-all": "GemNet-dT-S2EF-OC20-All",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "gemnet:custom": None,
 }
 
 

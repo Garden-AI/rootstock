@@ -17,6 +17,8 @@ CHECKPOINTS = {
     "uma-s-1p1": "uma-s-1p1",
     "uma-s-1p2": "uma-s-1p2",
     "uma-m-1p1": "uma-m-1p1",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "uma:custom": None,
 }
 
 

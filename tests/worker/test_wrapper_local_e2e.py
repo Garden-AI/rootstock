@@ -85,6 +85,16 @@ def test_local_mode_uses_setup_from_path(staged):
     assert record["kwargs"] == {"task": "omol"}
 
 
+def test_custom_mode_uses_setup_from_path(staged):
+    # A '<family>:custom' id travels the same plumbing as a registry local:
+    # the calculator binds weights= to checkpoint_path, and the wrapper
+    # never inspects the id itself.
+    record = staged(_spec(checkpoint="canon:custom", checkpoint_path="/scratch/me/ft.pt"))
+    assert record["fn"] == "setup_from_path"
+    assert record["target"] == "/scratch/me/ft.pt"
+    assert record["kwargs"] == {"task": "omol"}
+
+
 def test_null_checkpoint_path_is_canonical(staged):
     # The server always includes the key; null must mean canonical.
     record = staged(_spec(checkpoint_path=None))

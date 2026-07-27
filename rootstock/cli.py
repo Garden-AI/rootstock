@@ -517,7 +517,11 @@ def main():
     )
     serve_parser.add_argument(
         "checkpoint",
-        help="Canonical checkpoint id (e.g., 'mace-mp-0-medium', 'uma-s-1p1')",
+        help=(
+            "Canonical checkpoint id (e.g., 'mace-mp-0-medium', 'uma-s-1p1'), "
+            "or a ':custom' entry (e.g. 'uma:custom') with --weights to run "
+            "your own fine-tune"
+        ),
     )
     serve_parser.add_argument(
         "--root",
@@ -533,6 +537,15 @@ def main():
         help=(
             "Extra kwarg passed to setup() (repeatable). Same JSON-then-string "
             "parsing as 'rootstock add'."
+        ),
+    )
+    serve_parser.add_argument(
+        "--weights",
+        metavar="PATH",
+        help=(
+            "Path to your own weights file (must be visible from the compute "
+            "nodes). Required with — and only valid with — a ':custom' "
+            "checkpoint id; loaded via the env's setup_from_path hook."
         ),
     )
     serve_parser.set_defaults(func=cmd_serve)

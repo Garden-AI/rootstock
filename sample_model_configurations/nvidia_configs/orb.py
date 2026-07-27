@@ -29,6 +29,8 @@ CHECKPOINTS = {
     "orb-v2": "orb-v2",
     "orb-d3-v2": "orb-d3-v2",
     "orb-mptraj-only-v2": "orb-mptraj-only-v2",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "orb:custom": None,
 }
 
 

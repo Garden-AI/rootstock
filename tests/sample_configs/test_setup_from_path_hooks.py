@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from rootstock.environment import declares_setup_from_path
+from rootstock.environment import declares_setup_from_path, parse_custom_checkpoint_ids
 
 _SAMPLES = Path(__file__).parent.parent.parent / "sample_model_configurations"
 _NVIDIA = _SAMPLES / "nvidia_configs"
@@ -31,12 +31,7 @@ _DUAL_VENDOR_ENVS = sorted(p.stem for p in _AMD.glob("*.py") if (_NVIDIA / p.nam
 # Every config that declares the hook, in either vendor dir — all of them
 # must honor the signature contract, dual-vendor or not.
 _HOOK_DECLARING_CONFIGS = sorted(
-    (
-        p
-        for vendor in (_NVIDIA, _AMD)
-        for p in vendor.glob("*.py")
-        if declares_setup_from_path(p)
-    ),
+    (p for vendor in (_NVIDIA, _AMD) for p in vendor.glob("*.py") if declares_setup_from_path(p)),
     key=lambda p: (p.parent.name, p.name),
 )
 
@@ -88,6 +83,44 @@ def test_hook_signature_matches_across_vendors(env):
     assert ast.dump(nvidia) == ast.dump(amd), (
         f"setup_from_path signature drifted between nvidia_configs/{env}.py "
         f"and amd_configs/{env}.py"
+    )
+
+
+# ---------- ':custom' entries <-> hook -----------------------------------------
+
+_ALL_CONFIGS = sorted(
+    (p for vendor in (_NVIDIA, _AMD) for p in vendor.glob("*.py")),
+    key=lambda p: (p.parent.name, p.name),
+)
+
+
+@pytest.mark.parametrize(
+    "config", _ALL_CONFIGS, ids=[f"{p.parent.name}/{p.stem}" for p in _ALL_CONFIGS]
+)
+def test_custom_entries_iff_hook(config):
+    """'<family>:custom' CHECKPOINTS entries and the setup_from_path hook
+    only work together: an entry without the hook would resolve (and be
+    listed) but always fail to load, and a hook without an entry is
+    invisible to users."""
+    custom_ids = parse_custom_checkpoint_ids(config)
+    if declares_setup_from_path(config):
+        assert custom_ids, (
+            f"{config.parent.name}/{config.name} declares setup_from_path "
+            f"but no '<family>:custom' CHECKPOINTS entry"
+        )
+    else:
+        assert not custom_ids, (
+            f"{config.parent.name}/{config.name} declares {custom_ids} "
+            f"without a setup_from_path hook"
+        )
+
+
+@pytest.mark.parametrize("env", _DUAL_VENDOR_ENVS)
+def test_custom_entries_match_across_vendors(env):
+    nvidia = parse_custom_checkpoint_ids(_NVIDIA / f"{env}.py")
+    amd = parse_custom_checkpoint_ids(_AMD / f"{env}.py")
+    assert nvidia == amd, (
+        f"':custom' entries drifted between nvidia_configs/{env}.py and amd_configs/{env}.py"
     )
 
 

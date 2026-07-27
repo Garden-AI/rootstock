@@ -131,6 +131,9 @@ def record_session(
         env_name: Pre-built environment that hosted the session.
         checkpoint: Canonical checkpoint id. Replaced with ``(local)`` when
             ``is_local`` — user-chosen ids must not leak into the spool.
+            ``<family>:custom`` ids are exempt and recorded verbatim: the
+            marker already self-flags the run as user weights, and the id is
+            env-declared, not user-chosen.
         is_local: Whether the checkpoint was a user-registered weights file.
         device: Device string the worker ran on.
         client: Which entry point ran the session ("calculator", "serve").
@@ -154,6 +157,13 @@ def record_session(
 
         from . import __version__
         from .clusters import get_cluster_for_root
+        from .environment import is_custom_checkpoint
+
+        # <family>:custom is non-identifying (no user path; the id is
+        # env-declared, not user-chosen) and self-flags the run as user
+        # weights — record it verbatim so the fine-tuned *family* stays
+        # visible in the stats.
+        mask = is_local and not is_custom_checkpoint(checkpoint)
 
         record = {
             "schema_version": RECORD_SCHEMA_VERSION,
@@ -162,7 +172,7 @@ def record_session(
             "cluster": get_cluster_for_root(root),
             "root": str(root),
             "env": env_name,
-            "checkpoint": LOCAL_CHECKPOINT_LABEL if is_local else checkpoint,
+            "checkpoint": LOCAL_CHECKPOINT_LABEL if mask else checkpoint,
             "device": device,
             "client": client,
             "rootstock_version": __version__,

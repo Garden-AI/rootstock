@@ -32,7 +32,12 @@ from pathlib import Path
 from .client import RootstockClient
 from .clusters import get_cluster_for_root
 from .config import load_config
-from .environment import find_env_for_checkpoint, parse_checkpoints_dict
+from .environment import (
+    declares_setup_from_path,
+    find_env_for_checkpoint,
+    parse_checkpoints_dict,
+    parse_custom_checkpoint_ids,
+)
 from .exceptions import RootstockError
 from .layout import resolve_cache_root
 from .manifest import (
@@ -518,6 +523,25 @@ def install_environment(
             parse_checkpoints_dict(source_path)
         except ValueError as exc:
             raise OperationError(str(exc)) from exc
+
+        # '<family>:custom' entries and the setup_from_path hook only work
+        # together: an entry without the hook would resolve (and be listed)
+        # but always fail to load.
+        custom_ids = parse_custom_checkpoint_ids(source_path)
+        declares_hook = declares_setup_from_path(source_path)
+        if custom_ids and not declares_hook:
+            raise OperationError(
+                f"{source_path} declares {', '.join(custom_ids)} in "
+                f"CHECKPOINTS but no setup_from_path() hook — add the hook "
+                f"or drop the entries."
+            )
+        if declares_hook and not custom_ids:
+            _say(
+                progress,
+                f"note: {env_name} declares setup_from_path() but no "
+                f"'<family>:custom' CHECKPOINTS entry — user-supplied "
+                f"weights stay unavailable until one is declared.",
+            )
 
         # If the source file is already the registered file (the natural flow
         # on a shared install: drop file into <root>/environments/ then run

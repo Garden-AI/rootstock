@@ -23,6 +23,25 @@ class CheckpointNotFoundError(RootstockError, LookupError):
     """Raised when a canonical checkpoint id is not declared by any installed env."""
 
 
+class CustomWeightsError(RootstockError, ValueError):
+    """A ``:custom`` checkpoint / ``weights`` pairing is invalid. Messages are
+    user-presentable diagnoses that name the fix."""
+
+
+# A CHECKPOINTS key ending in ":custom" (value None) declares a custom
+# checkpoint for one model family: the id resolves to its hosting env like
+# any other, but there are no shipped weights — the user supplies theirs via
+# weights=, loaded through the env's setup_from_path hook. An env may declare
+# several (one per user-facing family). ":" is otherwise reserved in
+# checkpoint ids.
+CUSTOM_CHECKPOINT_SUFFIX = ":custom"
+
+
+def is_custom_checkpoint(checkpoint_id: str) -> bool:
+    """True when ``checkpoint_id`` names a ``<family>:custom`` entry."""
+    return checkpoint_id.endswith(CUSTOM_CHECKPOINT_SUFFIX)
+
+
 def get_user_cache_dir() -> Path:
     """
     Per-user directory for runtime write-back caches.
@@ -172,14 +191,9 @@ def list_environments(root: Path | str) -> list[tuple[str, Path]]:
     return result
 
 
-def parse_checkpoints_dict(env_source_path: Path) -> dict[str, str]:
-    """
-    Extract the module-level ``CHECKPOINTS: dict[str, str]`` literal from an env file.
-
-    The dict maps canonical checkpoint ids → upstream library strings. Both keys
-    and values must be string literals; anything else is an authoring error and
-    raises ValueError.
-    """
+def _parse_checkpoints(env_source_path: Path) -> tuple[dict[str, str], list[str]]:
+    """AST-extract the module-level ``CHECKPOINTS`` literal, split into
+    ``(canonical id -> upstream string, list of '<family>:custom' ids)``."""
     tree = ast.parse(env_source_path.read_text(), filename=str(env_source_path))
     for node in tree.body:
         targets = []
@@ -201,18 +215,63 @@ def parse_checkpoints_dict(env_source_path: Path) -> dict[str, str]:
         if not isinstance(value, ast.Dict):
             raise ValueError(f"{env_source_path}: CHECKPOINTS must be a dict literal.")
         result: dict[str, str] = {}
+        custom_ids: list[str] = []
         for k_node, v_node in zip(value.keys, value.values):
             if not (isinstance(k_node, ast.Constant) and isinstance(k_node.value, str)):
                 raise ValueError(f"{env_source_path}: CHECKPOINTS keys must be string literals.")
+            key = k_node.value
+            if ":" in key:
+                family = key.removesuffix(CUSTOM_CHECKPOINT_SUFFIX)
+                if not is_custom_checkpoint(key) or not family or ":" in family:
+                    raise ValueError(
+                        f"{env_source_path}: CHECKPOINTS key '{key}': ':' is "
+                        f"reserved in checkpoint ids — the only allowed form "
+                        f"is '<family>{CUSTOM_CHECKPOINT_SUFFIX}', declaring "
+                        f"that users may run their own weights for that "
+                        f"model family."
+                    )
+                if not (isinstance(v_node, ast.Constant) and v_node.value is None):
+                    raise ValueError(
+                        f"{env_source_path}: CHECKPOINTS key '{key}' must map "
+                        f"to None — a custom entry never names shipped "
+                        f"weights; the user supplies them (weights= in "
+                        f"Python, --weights on the CLI)."
+                    )
+                custom_ids.append(key)
+                continue
             if not (isinstance(v_node, ast.Constant) and isinstance(v_node.value, str)):
                 raise ValueError(f"{env_source_path}: CHECKPOINTS values must be string literals.")
-            result[k_node.value] = v_node.value
-        return result
+            result[key] = v_node.value
+        return result, custom_ids
     raise ValueError(
         f"{env_source_path}: missing module-level CHECKPOINTS dict. "
         f"Each env file must declare a `CHECKPOINTS: dict[str, str]` mapping "
         f"canonical checkpoint ids to upstream library strings."
     )
+
+
+def parse_checkpoints_dict(env_source_path: Path) -> dict[str, str]:
+    """
+    Extract the module-level ``CHECKPOINTS: dict[str, str]`` literal from an
+    env file — canonical entries only.
+
+    The dict maps canonical checkpoint ids → upstream library strings; both
+    sides must be string literals. ``<family>:custom`` entries (value
+    ``None``) are validated and stripped: they declare a capability, not a
+    downloadable checkpoint, and the consumers of this dict (``add``,
+    smoke-test, status) must never see them. Anything else is an authoring
+    error and raises ValueError.
+    """
+    return _parse_checkpoints(env_source_path)[0]
+
+
+def parse_custom_checkpoint_ids(env_source_path: Path) -> list[str]:
+    """
+    The ``<family>:custom`` ids declared by an env source, in declaration
+    order. Empty when the env doesn't declare support for user-supplied
+    weights.
+    """
+    return _parse_checkpoints(env_source_path)[1]
 
 
 def declares_setup_from_path(env_source_path: Path) -> bool:
@@ -226,10 +285,94 @@ def declares_setup_from_path(env_source_path: Path) -> bool:
     """
     tree = ast.parse(env_source_path.read_text(), filename=str(env_source_path))
     return any(
-        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name == "setup_from_path"
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "setup_from_path"
         for node in tree.body
     )
+
+
+def _suggest_custom_entry(root: Path | str, env_name: str, checkpoint: str) -> str:
+    """Error text for ``weights`` arriving with a non-custom id: silently
+    ignoring the file would run the shipped weights — plausible results,
+    wrong model. Names the hosting env's ``:custom`` entry when it has one."""
+    msg = (
+        f"a weights file was supplied, but checkpoint '{checkpoint}' names "
+        f"shipped weights, so it would be ignored."
+    )
+    env_source = Path(root) / "envs" / env_name / "env_source.py"
+    custom_ids: list[str] = []
+    if env_source.exists():
+        try:
+            custom_ids = parse_custom_checkpoint_ids(env_source)
+        except ValueError:
+            pass
+    if len(custom_ids) == 1:
+        return f"{msg} To run your own fine-tune, use checkpoint='{custom_ids[0]}'."
+    if custom_ids:
+        return (
+            f"{msg} To run your own fine-tune, use the entry for its model "
+            f"family: {', '.join(repr(c) for c in custom_ids)}."
+        )
+    return (
+        f"{msg} Env '{env_name}' declares no '<family>{CUSTOM_CHECKPOINT_SUFFIX}' "
+        f"CHECKPOINTS entry, so it does not support user-supplied weights — "
+        f"ask the install maintainer."
+    )
+
+
+def bind_custom_weights(
+    root: Path | str,
+    env_name: str,
+    checkpoint: str,
+    weights: str | Path | None,
+    setup_kwargs: dict | None = None,
+) -> str | None:
+    """
+    Enforce the ``<family>:custom`` / ``weights`` pairing for a *resolved*
+    checkpoint and, for a custom id, return the validated weights path (as
+    ``str``) to hand to the worker as ``checkpoint_path``. Returns None for
+    a canonical id without weights — nothing to bind.
+
+    The pairing is structural typo-proofing: ASE's ``Calculator`` silently
+    absorbs unknown kwargs, so a misspelled weights kwarg leaves ``weights``
+    unset — with a ``:custom`` id there are no shipped weights to silently
+    fall back to, so the typo errors here instead of running the wrong model.
+
+    Custom-id checks, in order: weights supplied; no ``path`` in setup_kwargs
+    (it's ``setup_from_path``'s first parameter — fail here, not as a
+    TypeError inside the worker); the weights file exists; the *built* env
+    source declares the ``setup_from_path`` hook (otherwise the failure would
+    surface as an opaque ImportError inside the worker).
+    """
+    if not is_custom_checkpoint(checkpoint):
+        if weights is None:
+            return None
+        raise CustomWeightsError(_suggest_custom_entry(root, env_name, checkpoint))
+    if weights is None:
+        raise CustomWeightsError(
+            f"checkpoint '{checkpoint}' runs your own weights file — also "
+            f"supply it (weights= in Python, --weights on the CLI)."
+        )
+    if setup_kwargs and "path" in setup_kwargs:
+        raise CustomWeightsError(
+            f"setup_kwargs cannot contain 'path' for a "
+            f"'{CUSTOM_CHECKPOINT_SUFFIX}' checkpoint; the weights path is "
+            f"passed at the top level."
+        )
+    weights_path = Path(weights).expanduser()
+    if not weights_path.is_file():
+        raise CustomWeightsError(
+            f"weights file not found (or not a regular file): {weights_path}. "
+            f"The path must be visible from the compute nodes."
+        )
+    env_source = Path(root) / "envs" / env_name / "env_source.py"
+    if not (env_source.exists() and declares_setup_from_path(env_source)):
+        raise CustomWeightsError(
+            f"env '{env_name}' (hosting '{checkpoint}') does not declare "
+            f"setup_from_path(path, device, **kwargs), which is required to "
+            f"load user-supplied weights. Ask the install maintainer to "
+            f"refresh the env sources — see docs/environments.md."
+        )
+    return str(weights_path)
 
 
 def list_declared_checkpoints(root: Path | str) -> dict[str, dict[str, str]]:
@@ -255,6 +398,31 @@ def list_declared_checkpoints(root: Path | str) -> dict[str, dict[str, str]]:
             declared[env_dir.name] = parse_checkpoints_dict(source)
         except ValueError:
             continue
+    return declared
+
+
+def list_custom_checkpoints(root: Path | str) -> dict[str, list[str]]:
+    """
+    Walk ``{root}/envs/*/env_source.py`` and return
+    ``{env_name: [<family>:custom ids]}`` for every installed env that
+    declares at least one. Envs whose source is missing or malformed are
+    silently skipped, mirroring ``list_declared_checkpoints``.
+    """
+    root = Path(root)
+    envs_dir = root / "envs"
+    declared: dict[str, list[str]] = {}
+    if not envs_dir.exists():
+        return declared
+    for env_dir in sorted(envs_dir.iterdir()):
+        source = env_dir / "env_source.py"
+        if not source.exists():
+            continue
+        try:
+            custom_ids = parse_custom_checkpoint_ids(source)
+        except ValueError:
+            continue
+        if custom_ids:
+            declared[env_dir.name] = custom_ids
     return declared
 
 

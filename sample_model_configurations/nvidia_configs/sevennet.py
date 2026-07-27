@@ -36,6 +36,8 @@ CHECKPOINTS = {
     "sevennet-omat": "7net-omat",
     "sevennet-mf-ompa": "7net-mf-ompa",
     "sevennet-omni": "7net-omni",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "sevennet:custom": None,
 }
 
 

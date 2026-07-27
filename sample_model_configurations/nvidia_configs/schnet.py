@@ -32,6 +32,8 @@ CHECKPOINTS = {
     "schnet-s2ef-oc20-20m": "SchNet-S2EF-OC20-20M",
     "schnet-s2ef-oc20-2m": "SchNet-S2EF-OC20-2M",
     "schnet-s2ef-oc20-200k": "SchNet-S2EF-OC20-200k",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "schnet:custom": None,
 }
 
 

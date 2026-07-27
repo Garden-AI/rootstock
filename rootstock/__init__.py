@@ -14,7 +14,7 @@ from importlib.metadata import version as _pkg_version
 
 from .calculator import RootstockCalculator
 from .clusters import CLUSTER_REGISTRY, Cluster, get_cluster, get_root_for_cluster
-from .environment import CheckpointNotFoundError, list_declared_checkpoints
+from .environment import CheckpointNotFoundError, CustomWeightsError, list_declared_checkpoints
 from .exceptions import RootstockError
 from .server import RootstockServer, WorkerDiedError
 
@@ -27,6 +27,7 @@ __all__ = [
     # Checkpoint discovery
     "list_declared_checkpoints",
     "CheckpointNotFoundError",
+    "CustomWeightsError",
     # Cluster name -> path bootstrap
     "CLUSTER_REGISTRY",
     "Cluster",
