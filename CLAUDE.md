@@ -25,14 +25,7 @@ rootstock install <env_source.py> [--root <path>] [--force] [--upgrade]
 # Download + verify a checkpoint by canonical id (idempotent). Use --no-verify on login nodes.
 rootstock add <checkpoint-id> [--kwarg key=val ...] [--device cuda] [--no-verify]
 
-# Register/remove a user-supplied weights file as a checkpoint (per-user
-# registry at ~/.config/rootstock/local-checkpoints.json; no shared-root
-# writes). The env must declare setup_from_path().
-rootstock add-local <weights-path> --env <env> --id <id> [--kwarg key=val ...] [--no-verify]
-rootstock remove-local <id>
-
-# Re-verify all fetched checkpoints plus the user's local checkpoints
-# (suitable for nightly cron)
+# Re-verify all fetched checkpoints (suitable for nightly cron)
 rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--json]
 
 # Show status (per-checkpoint verified/stale grid; --json for machine-readable)
@@ -146,10 +139,17 @@ with RootstockCalculator(
 ) as calc:
     ...
 
-# Local checkpoints (registered via `rootstock add-local`) resolve the same
-# way — canonical ids are checked first, then the per-user registry. The
-# worker then loads via the env's setup_from_path() instead of setup().
-with RootstockCalculator(cluster="delta", checkpoint="my-uma-ft") as calc:
+# User-supplied weights (e.g. a fine-tune): use the "<family>:custom"
+# CHECKPOINTS entry for the model family (shown by `rootstock list`) and
+# pass the weights file. The entry only selects the hosting env (no shipped
+# weights are involved — its CHECKPOINTS value is None); the worker loads
+# via the env's setup_from_path() instead of setup(). Requires weights=
+# and vice versa.
+with RootstockCalculator(
+    cluster="delta",
+    checkpoint="uma:custom",
+    weights="/scratch/me/my-uma-ft.pt",
+) as calc:
     ...
 ```
 
