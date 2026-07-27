@@ -34,6 +34,7 @@ with RootstockCalculator(
 | `device` | `str` | No | `"cuda"` (default) or `"cpu"` |
 | `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `checkpoint` or `device`. For a `:custom` checkpoint they go to `setup_from_path()` instead and cannot contain `path` |
 | `timeout` | `float` | No | Socket timeout in seconds for worker operations (default 600, matching checkpoint verification — so the first real force call, which may pay for `torch.compile` or large neighbor lists, runs under the envelope verification exercised) |
+| `weights` | `str \| Path` | With `:custom` | Path to your own weights file (e.g. a fine-tune of one of the family's shipped checkpoints). Required with — and only valid with — a `<family>:custom` checkpoint id. Must be visible from the compute nodes; loaded through the env's `setup_from_path()` hook. No shipped weights are involved |
 
 *`cluster` and `root` are mutually exclusive. When neither is given, the calculator falls back to the `ROOTSTOCK_ROOT` environment variable and then the `root` in `~/.config/rootstock/config.toml` — the same resolution the CLI uses — so on a configured machine `RootstockCalculator(checkpoint=...)` alone works.
 
@@ -45,6 +46,13 @@ RootstockCalculator(cluster="delta", checkpoint="mace-mp-0-medium")
 
 # Custom install root
 RootstockCalculator(root="/scratch/gpfs/specific/install/rootstock", checkpoint="mace-mp-0-medium")
+
+# Your own fine-tuned weights (see "Custom checkpoints" below)
+RootstockCalculator(
+    cluster="delta",
+    checkpoint="uma:custom",
+    weights="/scratch/me/my-uma-ft.pt",
+)
 ```
 
 ### Context manager

@@ -46,7 +46,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 
 def setup_from_path(path: str, device: str = "cuda"):
-    # Local checkpoints (`rootstock add-local`): load_path accepts a filesystem
+    # Custom checkpoints (`:custom` ids with user weights): load_path accepts a filesystem
     # path as well as a model name, so this is setup() minus the name mapping.
     from mattersim.forcefield import MatterSimCalculator
 

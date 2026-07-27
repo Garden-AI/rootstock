@@ -30,7 +30,7 @@ def setup(checkpoint: str, device: str = "cuda", task: str = "omat"):
 
 
 def setup_from_path(path: str, device: str = "cuda", task: str = "omat"):
-    # Local checkpoints (`rootstock add-local`): a weights *file* loads through
+    # Custom checkpoints (`:custom` ids with user weights): a weights *file* loads through
     # load_predict_unit, not the registry-name lookup setup() uses.
     from fairchem.core import FAIRChemCalculator
     from fairchem.core.units.mlip_unit import load_predict_unit

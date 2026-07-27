@@ -36,7 +36,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 
 def setup_from_path(path: str, device: str = "cuda"):
-    # Local checkpoints (`rootstock add-local`): a weights *file* loads through
+    # Custom checkpoints (`:custom` ids with user weights): a weights *file* loads through
     # CHGNet.from_file, not the named-model CHGNet.load() setup() uses.
     from chgnet.model import CHGNet, CHGNetCalculator
 

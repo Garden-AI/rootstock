@@ -1,8 +1,9 @@
-"""Tests for the sample configs' ``setup_from_path`` hooks (local checkpoints).
+"""Tests for the sample configs' ``setup_from_path`` hooks (custom checkpoints).
 
 The envs shipped for both vendors (present in nvidia_configs *and*
-amd_configs) are the canonical set for `rootstock add-local`: both copies
-must declare the hook, with the contract signature
+amd_configs) are the canonical set for ``:custom`` checkpoints (user-supplied
+weights via ``weights=`` / ``--weights``): both copies must declare the hook,
+with the contract signature
 ``setup_from_path(path, device="cuda", **extras-with-defaults)``, and the
 signatures must not drift between vendor copies.
 
@@ -57,7 +58,7 @@ def test_dual_vendor_set_is_nonempty():
 def test_dual_vendor_envs_declare_hook(env, vendor_dir):
     assert declares_setup_from_path(vendor_dir / f"{env}.py"), (
         f"{vendor_dir.name}/{env}.py must declare setup_from_path — every "
-        f"dual-vendor env supports local checkpoints"
+        f"dual-vendor env supports custom checkpoints"
     )
 
 
@@ -68,7 +69,7 @@ def test_dual_vendor_envs_declare_hook(env, vendor_dir):
 )
 def test_hook_signature_contract(config):
     """First param `path`, then `device` with a default, extras all defaulted
-    — so `add-local` without --kwarg works for every env."""
+    — so a `:custom` checkpoint without setup_kwargs works for every env."""
     args = _hook_args(config)
     names = [a.arg for a in args.args]
     assert names[:2] == ["path", "device"]

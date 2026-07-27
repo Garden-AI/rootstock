@@ -51,7 +51,7 @@ def iter_prewarm_files(spec: dict):
       volume, but imports also open thousands of small ``.py``/``.pyc``
       files whose cold reads are just as latency-bound — covering them adds
       little data and removes the residual small-file tail),
-    - the local checkpoint weights file, when the spec names one,
+    - the user-supplied (:custom) weights file, when the spec names one,
     - any extra files or directory trees a client lists in
       ``spec["prewarm_paths"]`` (reserved for future use; directories are
       walked recursively).
