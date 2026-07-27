@@ -11,8 +11,8 @@ from rootstock.environment import (
     CheckpointNotFoundError,
     parse_checkpoints_dict,
     parse_custom_checkpoint_ids,
+    resolve_checkpoint,
 )
-from rootstock.local_checkpoints import register_local_checkpoint, resolve_checkpoint
 
 _ENV_SOURCE = """\
 CHECKPOINTS = {
@@ -69,62 +69,52 @@ def fake_root(tmp_path: Path) -> Path:
     return root
 
 
-@pytest.fixture
-def registry(tmp_path: Path) -> Path:
-    return tmp_path / "registry.json"
-
-
 # ---------- resolution ---------------------------------------------------------
 
 
-def test_custom_entry_resolves_to_declaring_env(fake_root, registry):
-    resolved = resolve_checkpoint(fake_root, "uma:custom", registry_path=registry)
+def test_custom_entry_resolves_to_declaring_env(fake_root):
+    resolved = resolve_checkpoint(fake_root, "uma:custom")
     assert resolved.env_name == "uma"
     assert resolved.is_custom
-    # The weights path is bound at the call site, never during resolution.
-    assert resolved.path is None
-    assert not resolved.is_local
-    assert resolved.setup_kwargs == {}
     assert resolved.checkpoint == "uma:custom"
 
 
-def test_multiple_families_resolve_to_the_same_env(tmp_path, registry):
+def test_multiple_families_resolve_to_the_same_env(tmp_path):
     # The key's family prefix is naming, not mechanism: which env hosts the
     # id is determined by which env's dict declares it, so a multi-family
     # env declares one entry per user-facing family.
     root = tmp_path / "root"
     _make_env(root, "fairchem_v2", _MULTI_FAMILY_ENV_SOURCE)
     for checkpoint in ("esen:custom", "allscaip:custom"):
-        resolved = resolve_checkpoint(root, checkpoint, registry_path=registry)
+        resolved = resolve_checkpoint(root, checkpoint)
         assert resolved.env_name == "fairchem_v2"
         assert resolved.is_custom
 
 
-def test_unknown_custom_id_lists_declared_entries(fake_root, registry):
+def test_canonical_id_resolves_without_custom_flag(fake_root):
+    resolved = resolve_checkpoint(fake_root, "uma-s-1p1")
+    assert resolved.env_name == "uma"
+    assert not resolved.is_custom
+
+
+def test_unknown_custom_id_lists_declared_entries(fake_root):
     with pytest.raises(CheckpointNotFoundError) as exc:
-        resolve_checkpoint(fake_root, "umma:custom", registry_path=registry)
+        resolve_checkpoint(fake_root, "umma:custom")
     msg = str(exc.value)
     assert "umma:custom" in msg
     assert "uma:custom" in msg  # the declared entries are the menu
 
 
-def test_no_custom_entries_anywhere_points_at_maintainer(tmp_path, registry):
+def test_no_custom_entries_anywhere_points_at_maintainer(tmp_path):
     root = tmp_path / "root"
     _make_env(root, "orb", _NO_CUSTOM_ENV_SOURCE)
     with pytest.raises(CheckpointNotFoundError, match="maintainer"):
-        resolve_checkpoint(root, "orb:custom", registry_path=registry)
+        resolve_checkpoint(root, "orb:custom")
 
 
-def test_custom_namespace_wins_over_registry(fake_root, tmp_path, registry):
-    # A registry id that happens to end in ":custom" can never shadow a
-    # declared entry — the suffix routes to the env-declared namespace
-    # before the registry overlay.
-    weights = tmp_path / "ft.pt"
-    weights.write_bytes(b"weights")
-    register_local_checkpoint(fake_root, "uma:custom", "uma", weights, registry_path=registry)
-    resolved = resolve_checkpoint(fake_root, "uma:custom", registry_path=registry)
-    assert resolved.is_custom
-    assert resolved.path is None
+def test_unknown_canonical_id_still_lists_canonicals(fake_root):
+    with pytest.raises(CheckpointNotFoundError, match="uma-s-1p1"):
+        resolve_checkpoint(fake_root, "uma-s-9p9")
 
 
 # ---------- the parse-time split ----------------------------------------------

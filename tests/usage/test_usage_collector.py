@@ -41,7 +41,6 @@ def _write(
         cache_root=cache_root,
         env_name="mace",
         checkpoint=checkpoint,
-        is_local=False,
         device="cuda",
         client=client,
         started_at=f"{month}-23T01:02:03+00:00",

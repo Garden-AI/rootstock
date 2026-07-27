@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from .exceptions import RootstockError
@@ -461,6 +462,68 @@ def find_env_for_checkpoint(root: Path | str, checkpoint_id: str) -> tuple[str, 
             f"Run `rootstock install <env-file> --root {root}` first."
         )
     raise CheckpointNotFoundError(msg)
+
+
+@dataclass(frozen=True)
+class ResolvedCheckpoint:
+    """Where a checkpoint id points: its hosting env.
+
+    A ``<family>:custom`` id resolves to its hosting env only — the user's
+    weights path is bound at the call site (from ``weights=`` / ``--weights``),
+    never during resolution; ``is_custom`` is the marker."""
+
+    checkpoint: str
+    env_name: str
+    is_custom: bool = False
+
+
+def _resolve_custom(root: Path | str, checkpoint_id: str) -> ResolvedCheckpoint:
+    """
+    Resolve a ``<family>:custom`` checkpoint via the entries installed envs
+    declare in ``CHECKPOINTS``.
+
+    The entry carries no weights (its value is ``None``) — the user's
+    ``weights`` file is bound at the call site. Which env hosts the id is
+    determined by which env's dict declares it, exactly like a canonical id.
+    """
+    declared = list_custom_checkpoints(root)
+    for env_name, custom_ids in declared.items():
+        if checkpoint_id in custom_ids:
+            return ResolvedCheckpoint(checkpoint=checkpoint_id, env_name=env_name, is_custom=True)
+
+    if declared:
+        listing = "\n".join(f"  {env}: {', '.join(ids)}" for env, ids in declared.items())
+        msg = (
+            f"No installed env declares the custom checkpoint "
+            f"'{checkpoint_id}'.\nDeclared '{CUSTOM_CHECKPOINT_SUFFIX}' "
+            f"entries by env:\n{listing}"
+        )
+    else:
+        msg = (
+            f"No installed env declares a '<family>{CUSTOM_CHECKPOINT_SUFFIX}' "
+            f"CHECKPOINTS entry, so user-supplied weights are not available "
+            f"at {root}. Ask the install maintainer to refresh the env "
+            f"sources — see docs/environments.md."
+        )
+    raise CheckpointNotFoundError(msg)
+
+
+def resolve_checkpoint(root: Path | str, checkpoint_id: str) -> ResolvedCheckpoint:
+    """
+    Resolve a checkpoint id to its hosting env. A ``<family>:custom`` id
+    looks up the ``:custom`` entries, everything else the canonical ids (the
+    two can't collide: canonical ids may not contain ``:``).
+
+    Deliberately does not check that the env is built — resolution is also
+    used for metadata lookups; callers that spawn a worker check before
+    spawning.
+
+    Raises CheckpointNotFoundError when nothing matches.
+    """
+    if is_custom_checkpoint(checkpoint_id):
+        return _resolve_custom(root, checkpoint_id)
+    env_name, _ = find_env_for_checkpoint(root, checkpoint_id)
+    return ResolvedCheckpoint(checkpoint=checkpoint_id, env_name=env_name)
 
 
 def list_built_environments(root: Path | str) -> list[tuple[str, Path]]:

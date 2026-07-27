@@ -89,7 +89,7 @@ Rootstock ships an experimental LAMMPS `fix` that spawns a worker subprocess, gi
 
 ## Usage Statistics
 
-On shared installs where the maintainer has provisioned it, each worker session drops one small anonymous JSON record into the install's `{cache_root}/usage/` directory: which environment/checkpoint/device ran, when, for how long, how many force calls it served, and which entry point started it. Nothing phones home — records stay on the cluster's shared filesystem until the install's maintainer aggregates them (`rootstock usage report`). No job ids, no simulation data, and no raw usernames are recorded: the only per-person field is a salted hash used to count distinct users, and checkpoints you register yourself with `rootstock add-local` appear as `(local)`, never by name.
+On shared installs where the maintainer has provisioned it, each worker session drops one small anonymous JSON record into the install's `{cache_root}/usage/` directory: which environment/checkpoint/device ran, when, for how long, how many force calls it served, and which entry point started it. Nothing phones home — records stay on the cluster's shared filesystem until the install's maintainer aggregates them (`rootstock usage report`). No job ids, no simulation data, and no raw usernames are recorded: the only per-person field is a salted hash used to count distinct users. Runs with your own weights record only the `<family>:custom` checkpoint id — never the weights path.
 
 If any of this rubs you the wrong way, opt out for all of your sessions with:
 
@@ -162,14 +162,17 @@ rootstock add uma-s-1p1 --kwarg task=omat
 
 `rootstock status` shows a per-checkpoint grid of fetched/verified/stale state. See the [dashboard](https://garden-ai-prod--rootstock-admin-dashboard.modal.run/) for environment files that are known to work.
 
-Users can also bring their own weights (e.g. a fine-tuned UMA model) without any write access to the shared install — `rootstock add-local` registers a local file under a checkpoint id that then works everywhere a canonical id does:
+Users can also bring their own weights (e.g. a fine-tuned UMA model) without any write access to the shared install and without registering anything — pick the `<family>:custom` entry for the model family you fine-tuned (`rootstock list` shows them) and pass your weights file:
 
-```bash
-rootstock add-local /scratch/me/my-uma-ft.pt --env uma --id my-uma-ft --kwarg task=omol
-rootstock remove-local my-uma-ft   # delete the registration (never the file)
+```python
+RootstockCalculator(
+    cluster="delta",
+    checkpoint="uma:custom",         # env-declared entry; no shipped weights involved
+    weights="/scratch/me/my-uma-ft.pt",
+)
 ```
 
-The registration lives in the per-user registry (`~/.config/rootstock/local-checkpoints.json`); the hosting env must declare a `setup_from_path()` function (see [docs/environments.md](docs/environments.md)).
+The weights path must be visible from the compute nodes, and the hosting env must declare a `setup_from_path()` function (see [docs/environments.md](docs/environments.md)).
 
 ### 5. Register with the dashboard (optional)
 

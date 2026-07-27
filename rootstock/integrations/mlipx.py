@@ -102,7 +102,7 @@ class RootstockMLIPxModel(zntrack.Node):
         }
         try:
             from ..clusters import get_root_for_cluster
-            from ..local_checkpoints import resolve_checkpoint
+            from ..environment import resolve_checkpoint
 
             root = get_root_for_cluster(self.cluster) if self.cluster else self.root
             if root is not None:
