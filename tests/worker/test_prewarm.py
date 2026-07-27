@@ -47,9 +47,11 @@ def fake_env(tmp_path: Path) -> dict:
     }
 
 
-def test_iter_finds_shared_libs_and_checkpoint(fake_env):
+def test_iter_finds_whole_env_tree_and_checkpoint(fake_env):
+    # Whole tree, not just shared libraries: small .py/.pyc reads are just
+    # as latency-bound on a cold cache (#170).
     found = {p.name for p in iter_prewarm_files(fake_env)}
-    assert found == {"libtorch_cpu.so", "libc10.so.1", "weights.pt"}
+    assert found == {"libtorch_cpu.so", "libc10.so.1", "env_source.py", "weights.pt"}
 
 
 def test_iter_walks_extra_prewarm_dirs(fake_env, tmp_path: Path):
@@ -62,16 +64,37 @@ def test_iter_walks_extra_prewarm_dirs(fake_env, tmp_path: Path):
 
 
 def test_prewarm_reads_every_byte(fake_env):
+    expected_bytes = sum(p.stat().st_size for p in iter_prewarm_files(fake_env))
     n_files, n_bytes = prewarm_files(iter_prewarm_files(fake_env))
-    assert n_files == 3
-    assert n_bytes == 1024 + 512 + 256
+    assert n_files == 4
+    assert n_bytes == expected_bytes
+
+
+def test_single_reader_matches_parallel(fake_env):
+    parallel = prewarm_files(iter_prewarm_files(fake_env))
+    serial = prewarm_files(iter_prewarm_files(fake_env), max_workers=1)
+    assert serial == parallel
+
+
+def test_thread_knob_tolerates_garbage(fake_env, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ROOTSTOCK_PREWARM_THREADS", "banana")
+    n_files, _ = prewarm_files(iter_prewarm_files(fake_env))
+    assert n_files == 4
+
+
+def test_duplicate_paths_read_once(fake_env):
+    # The checkpoint listed again via prewarm_paths must not double-count.
+    fake_env["prewarm_paths"] = [fake_env["checkpoint_path"]]
+    n_files, n_bytes = prewarm_files(iter_prewarm_files(fake_env))
+    assert n_files == 4
+    assert n_bytes == sum(p.stat().st_size for p in set(iter_prewarm_files(fake_env)))
 
 
 def test_prewarm_from_spec_reports_summary(fake_env):
     log = io.StringIO()
     prewarm_from_spec(fake_env, log=log)
     message = log.getvalue()
-    assert "Prewarmed page cache: 3 files" in message
+    assert "Prewarmed page cache: 4 files" in message
 
 
 def test_env_var_skips_prewarm(fake_env, monkeypatch: pytest.MonkeyPatch):
@@ -89,8 +112,8 @@ def test_unreadable_file_is_skipped(fake_env):
         n_files, n_bytes = prewarm_files(iter_prewarm_files(fake_env))
     finally:
         os.chmod(blocked, 0o644)  # let tmp_path cleanup work
-    assert n_files == 3  # the readable three, blocked.so skipped
-    assert n_bytes == 1024 + 512 + 256
+    assert n_files == 4  # the readable four, blocked.so skipped
+    assert n_bytes == 1024 + 512 + 256 + len("# not a shared library")
 
 
 def test_prewarm_from_spec_never_raises():
@@ -118,7 +141,9 @@ def test_wrapper_runs_prewarm_end_to_end(tmp_path: Path):
             spec.cmd, env=spec.env, cwd=spec.cwd, capture_output=True, text=True
         )
     assert result.returncode == 0, result.stderr
-    assert "Prewarmed page cache: 1 files" in result.stderr
+    # Whole tree: libfake.so + env_source.py + bin/python (the symlinked
+    # interpreter binary — warming it is a feature, not an accident).
+    assert "Prewarmed page cache: 3 files" in result.stderr
 
 
 def test_spawn_stages_prewarm_module_next_to_wrapper(tmp_path: Path):
