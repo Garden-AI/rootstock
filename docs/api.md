@@ -27,13 +27,14 @@ with RootstockCalculator(
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `checkpoint` | `str` | Yes | Checkpoint id — either a canonical id (e.g., `"mace-mp-0-medium"`, `"uma-s-1p1"`) or one you registered with `rootstock add-local`. The hosting env is resolved automatically: installed envs' `CHECKPOINTS` tables first, then your local-checkpoint registry |
+| `checkpoint` | `str` | Yes | Checkpoint id — a canonical id (e.g., `"mace-mp-0-medium"`, `"uma-s-1p1"`), or a `<family>:custom` entry (e.g., `"uma:custom"`) together with `weights` to run your own fine-tune. The hosting env is resolved automatically from the installed envs' `CHECKPOINTS` tables |
 | `cluster` | `str` | Yes* | Cluster name (e.g., `"delta"`, `"perlmutter"`) |
 | `root` | `str` | Yes* | Custom install-root path instead of a known cluster |
 | `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. When omitted, the install's own declaration (`{root}/layout.json`) decides, falling back to the cluster registry for legacy roots, then to `root` |
 | `device` | `str` | No | `"cuda"` (default) or `"cpu"` |
-| `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `checkpoint` or `device`. For a local checkpoint, these merge over the kwargs recorded at `add-local` time (per-call wins) and go to `setup_from_path()` instead |
+| `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `checkpoint` or `device`. For a `:custom` checkpoint they go to `setup_from_path()` instead and cannot contain `path` |
 | `timeout` | `float` | No | Socket timeout in seconds for worker operations (default 600, matching checkpoint verification — so the first real force call, which may pay for `torch.compile` or large neighbor lists, runs under the envelope verification exercised) |
+| `weights` | `str \| Path` | With `:custom` | Path to your own weights file (e.g. a fine-tune of one of the family's shipped checkpoints). Required with — and only valid with — a `<family>:custom` checkpoint id. Must be visible from the compute nodes; loaded through the env's `setup_from_path()` hook. No shipped weights are involved |
 
 *`cluster` and `root` are mutually exclusive. When neither is given, the calculator falls back to the `ROOTSTOCK_ROOT` environment variable and then the `root` in `~/.config/rootstock/config.toml` — the same resolution the CLI uses — so on a configured machine `RootstockCalculator(checkpoint=...)` alone works.
 
@@ -45,6 +46,13 @@ RootstockCalculator(cluster="delta", checkpoint="mace-mp-0-medium")
 
 # Custom install root
 RootstockCalculator(root="/scratch/gpfs/specific/install/rootstock", checkpoint="mace-mp-0-medium")
+
+# Your own fine-tuned weights (see "Custom checkpoints" below)
+RootstockCalculator(
+    cluster="delta",
+    checkpoint="uma:custom",
+    weights="/scratch/me/my-uma-ft.pt",
+)
 ```
 
 ### Context manager
@@ -110,31 +118,30 @@ rootstock status
 
 This command displays installed environments, their checkpoints, and cache sizes.
 
-### Local checkpoints (bring your own weights)
+### Custom checkpoints (bring your own weights)
 
-A fine-tuned or otherwise user-supplied weights file can be registered under
-a checkpoint id of your choosing, bound to an installed env that declares the
-`setup_from_path` hook (see [Adding Models](environments.md)):
-
-```bash
-rootstock add-local /scratch/me/my-uma-ft.pt --env uma --id my-uma-ft --kwarg task=omol
-```
-
-Registration hashes the file, records it in your per-user registry
-(`~/.config/rootstock/local-checkpoints.json`), and runs the same
-verification as `rootstock add`. Nothing is written to the shared install —
-this works against a read-only shared root. The id then behaves like any
-canonical id:
+A fine-tuned or otherwise user-supplied weights file runs directly — no
+registration, no CLI step, no write access to the shared install. Envs that
+support it declare a `<family>:custom` entry in their `CHECKPOINTS` (shown
+by `rootstock list`); pick the entry for the model family you fine-tuned and
+pass the weights file:
 
 ```python
-RootstockCalculator(cluster="sophia", checkpoint="my-uma-ft", device="cuda")
+RootstockCalculator(
+    cluster="sophia",
+    checkpoint="uma:custom",         # env-declared entry; no shipped weights involved
+    weights="/scratch/me/my-uma-ft.pt",
+    device="cuda",
+)
 ```
 
-`rootstock status` shows your local checkpoints (verification state, file
-presence, staleness after env rebuilds), `rootstock smoke-test` re-verifies
-them (after re-hashing, so a swapped file is caught), and
-`rootstock remove-local <id>` deletes the registration — never the weights
-file.
+The entry's only job is env selection — there are no shipped weights behind
+it (its `CHECKPOINTS` value is `None`). The hosting env must declare the
+`setup_from_path` hook (see [Adding Models](environments.md)), the weights
+path must be visible from the compute nodes, and the file is loaded fresh at
+every use. A `:custom` id without `weights` (or vice versa) errors at
+construction. `rootstock serve` and `rootstock benchmark` accept the same
+pairing via `--weights`.
 
 ## CLI reference
 
@@ -170,28 +177,6 @@ rootstock resolve --cluster delta
 
 # JSON output
 rootstock resolve --cluster delta --json
-```
-
-#### `rootstock add-local`
-
-Register your own weights file (e.g. a fine-tune) as a checkpoint. Per-user;
-requires no write access to the shared install. The target env must declare
-`setup_from_path` (registration errors otherwise, listing the envs that do).
-
-```bash
-rootstock add-local /scratch/me/my-uma-ft.pt --env uma --id my-uma-ft --kwarg task=omol
-
-# On a login node without a GPU: register now, verify later via smoke-test
-rootstock add-local /scratch/me/my-uma-ft.pt --env uma --id my-uma-ft --no-verify
-```
-
-#### `rootstock remove-local`
-
-Delete a local checkpoint's registry entry. The weights file is never
-touched.
-
-```bash
-rootstock remove-local my-uma-ft
 ```
 
 ### Administrator commands

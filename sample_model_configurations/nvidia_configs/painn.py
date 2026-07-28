@@ -29,6 +29,8 @@ Models:
 
 CHECKPOINTS = {
     "painn-s2ef-oc20-all": "PaiNN-S2EF-OC20-All",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "painn:custom": None,
 }
 
 
@@ -54,7 +56,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 
 def setup_from_path(path: str, device: str = "cuda"):
-    # Local checkpoints (`rootstock add-local`): OCPCalculator loads a
+    # Custom checkpoints (`:custom` ids with user weights): OCPCalculator loads a
     # checkpoint file natively — this is setup() minus the registry download.
     from fairchem.core import OCPCalculator
 

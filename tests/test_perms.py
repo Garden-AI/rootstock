@@ -347,7 +347,6 @@ def test_records_write_through_a_redirected_spool(tmp_path: Path):
         cache_root=tmp_path,
         env_name="mace",
         checkpoint="mace-mp-0-medium",
-        is_local=False,
         device="cuda",
         client="calculator",
         started_at="2026-07-23T01:02:03+00:00",

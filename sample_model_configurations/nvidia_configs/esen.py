@@ -19,6 +19,8 @@ CHECKPOINTS = {
     "esen-md-direct-all-omol": "esen-md-direct-all-omol",
     "esen-sm-conserving-all-omol": "esen-sm-conserving-all-omol",
     "esen-sm-direct-all-omol": "esen-sm-direct-all-omol",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "esen:custom": None,
 }
 
 
@@ -30,7 +32,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 
 def setup_from_path(path: str, device: str = "cuda"):
-    # Local checkpoints (`rootstock add-local`): a weights *file* loads through
+    # Custom checkpoints (`:custom` ids with user weights): a weights *file* loads through
     # load_predict_unit, not the registry-name lookup setup() uses.
     from fairchem.core import FAIRChemCalculator
     from fairchem.core.units.mlip_unit import load_predict_unit

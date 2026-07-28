@@ -129,13 +129,18 @@ Signature: `setup(checkpoint: str, device: str = "cuda", **extra)`.
 
 Return: an ASE-compatible calculator.
 
-### `setup_from_path()` function (optional — enables local checkpoints)
+### `setup_from_path()` function (optional — enables custom checkpoints)
 
-Declaring a module-level `setup_from_path` opts the env into **local
-checkpoints**: user-supplied weights files (e.g. fine-tunes) registered with
-`rootstock add-local`. Envs without it don't support them, and registration
-fails with a clear error. Like `CHECKPOINTS`, presence is detected by parsing
-the source — the module is not executed.
+Declaring a module-level `setup_from_path` opts the env into **custom
+checkpoints**: user-supplied weights files (e.g. fine-tunes) run via a
+`"<family>:custom": None` entry in `CHECKPOINTS` plus `weights=` (or
+`--weights` on the CLI). Declare one entry per user-facing model family —
+a multi-family env declares several (e.g. `mace-mp:custom` and
+`mace-off23:custom`), all routing to the same hook. The entry and the hook
+must arrive together: the install lint rejects an entry without the hook,
+and envs without an entry don't advertise or accept user weights — the
+calculator fails at construction with a clear error. Like `CHECKPOINTS`,
+presence is detected by parsing the source — the module is not executed.
 
 Signature: `setup_from_path(path: str, device: str = "cuda", **extra)`.
 
@@ -144,9 +149,9 @@ Signature: `setup_from_path(path: str, device: str = "cuda", **extra)`.
   FAIRChem's `load_predict_unit(path)` vs `get_predict_unit(name)` — which is
   why this is a separate function rather than a path-shaped `checkpoint`.
 - `device`, extra kwargs: as for `setup()`. Give extras defaults where
-  possible; a fine-tune needing a required kwarg still works (the kwarg is
-  recorded at `rootstock add-local --kwarg ...` time), but defaults make
-  registration friendlier.
+  possible; a fine-tune needing a required kwarg still works (users pass it
+  via `setup_kwargs=` / `--kwarg`), but defaults make the common case
+  friendlier.
 
 Return: an ASE-compatible calculator.
 
@@ -159,12 +164,10 @@ def setup_from_path(path: str, device: str = "cuda", task: str = "omat"):
     return FAIRChemCalculator(predictor, task_name=task)
 ```
 
-One rebuild hazard to know about: registration checks the env source at
-registration time. If the env is later rebuilt (`rootstock install --force`)
-from a source that dropped `setup_from_path`, existing registrations break at
-worker startup. `rootstock status` flags registered checkpoints as stale
-after any env rebuild, and `rootstock smoke-test` re-verifies them — that's
-the detection path.
+The hook is checked against the *built* env's `env_source.py` at calculator
+construction, so a rebuild (`rootstock install --force`) from a source that
+dropped `setup_from_path` fails immediately with a maintainer-facing hint —
+never as an opaque error inside the worker.
 
 ## Examples
 

@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 from rootstock.commands.serve import cmd_serve
-from rootstock.local_checkpoints import ResolvedCheckpoint
+from rootstock.environment import ResolvedCheckpoint
 from rootstock.usage import usage_dir
 
 
@@ -35,7 +35,7 @@ def _wire_fake_worker(monkeypatch, returncode=0):
 
     monkeypatch.setattr("rootstock.spawn.spawn_in_env", fake_spawn)
     monkeypatch.setattr(
-        "rootstock.local_checkpoints.resolve_checkpoint",
+        "rootstock.environment.resolve_checkpoint",
         lambda root, ckpt: ResolvedCheckpoint(checkpoint=ckpt, env_name="mace"),
     )
     monkeypatch.setattr("rootstock.environment.get_env_python", lambda root, env: "python")

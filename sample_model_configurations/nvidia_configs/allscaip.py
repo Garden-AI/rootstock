@@ -18,6 +18,8 @@ OMol checkpoints expect `charge` and `spin` in `atoms.info`.
 
 CHECKPOINTS = {
     "allscaip-md-conserving-all-omol": "allscaip-md-conserving-all-omol",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "allscaip:custom": None,
 }
 
 
@@ -29,7 +31,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 
 def setup_from_path(path: str, device: str = "cuda"):
-    # Local checkpoints (`rootstock add-local`): a weights *file* loads through
+    # Custom checkpoints (`:custom` ids with user weights): a weights *file* loads through
     # load_predict_unit, not the registry-name lookup setup() uses.
     from fairchem.core import FAIRChemCalculator
     from fairchem.core.units.mlip_unit import load_predict_unit

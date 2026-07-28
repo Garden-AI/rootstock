@@ -33,6 +33,8 @@ CHECKPOINTS = {
     "equiformer-v2-153m-s2ef-oc20-all-md": "EquiformerV2-153M-S2EF-OC20-All+MD",
     "equiformer-v2-31m-s2ef-oc20-all-md": "EquiformerV2-31M-S2EF-OC20-All+MD",
     "equiformer-v2-83m-s2ef-oc20-2m": "EquiformerV2-83M-S2EF-OC20-2M",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "equiformer:custom": None,
 }
 
 
@@ -58,7 +60,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 
 def setup_from_path(path: str, device: str = "cuda"):
-    # Local checkpoints (`rootstock add-local`): OCPCalculator loads a
+    # Custom checkpoints (`:custom` ids with user weights): OCPCalculator loads a
     # checkpoint file natively — this is setup() minus the registry download.
     from fairchem.core import OCPCalculator
 

@@ -17,7 +17,6 @@ import pytest
 from rootstock.server import RootstockServer
 from rootstock.usage import (
     DISABLE_ENV_VAR,
-    LOCAL_CHECKPOINT_LABEL,
     RECORD_SCHEMA_VERSION,
     record_session,
     usage_dir,
@@ -31,7 +30,6 @@ def _write(cache_root, **overrides):
         cache_root=cache_root,
         env_name="mace",
         checkpoint="mace-mp-0-medium",
-        is_local=False,
         device="cuda",
         client="calculator",
         started_at="2026-07-23T01:02:03+00:00",
@@ -89,12 +87,13 @@ def test_records_are_unique_per_session(tmp_path):
     assert len(paths) == 3
 
 
-def test_local_checkpoint_id_is_masked(tmp_path):
-    """Ids registered via add-local are user-chosen names; anonymous stats
-    must not leak them."""
+def test_custom_checkpoint_id_recorded_verbatim(tmp_path):
+    """<family>:custom is non-identifying — the marker self-flags the run
+    as user weights, the id is env-declared (not user-chosen), and the
+    weights path never appears in the record."""
     usage_dir(tmp_path).mkdir()
-    path = _write(tmp_path, checkpoint="my-secret-project-ft", is_local=True)
-    assert json.loads(path.read_text())["checkpoint"] == LOCAL_CHECKPOINT_LABEL
+    path = _write(tmp_path, checkpoint="uma:custom")
+    assert json.loads(path.read_text())["checkpoint"] == "uma:custom"
 
 
 def test_env_var_opt_out(tmp_path, monkeypatch):
@@ -231,24 +230,10 @@ def test_stop_records_one_session(tmp_path, monkeypatch):
     assert kw["root"] == tmp_path
     assert kw["env_name"] == "mace"
     assert kw["checkpoint"] == "mace-mp-0-medium"
-    assert kw["is_local"] is False
     assert kw["device"] == "cpu"
     assert kw["client"] == "calculator"
     assert kw["n_calculations"] == 5
     assert kw["started_at"] == "2026-07-23T01:02:03+00:00"
-
-
-def test_stop_marks_local_checkpoint_sessions(tmp_path, monkeypatch):
-    """A server running a user-registered weights file reports is_local, so
-    record_session masks the user-chosen id."""
-    calls = []
-    monkeypatch.setattr("rootstock.server.record_session", lambda **kw: calls.append(kw))
-
-    server = _server(tmp_path, checkpoint_path="/home/someone/weights.pt")
-    _fake_session(server)
-    server.stop()
-
-    assert calls[0]["is_local"] is True
 
 
 def test_stop_with_usage_client_none_records_nothing(tmp_path, monkeypatch):

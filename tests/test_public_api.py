@@ -18,6 +18,7 @@ BLESSED = {
     "RootstockError",
     "list_declared_checkpoints",
     "CheckpointNotFoundError",
+    "CustomWeightsError",
     "CLUSTER_REGISTRY",
     "Cluster",
     "get_cluster",

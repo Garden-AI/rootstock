@@ -20,6 +20,9 @@ CHECKPOINTS = {
     "mace-off23-small": "off:small",
     "mace-off23-medium": "off:medium",
     "mace-off23-large": "off:large",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "mace-mp:custom": None,
+    "mace-off23:custom": None,
 }
 
 
@@ -35,7 +38,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 
 def setup_from_path(path: str, device: str = "cuda"):
-    # Local checkpoints (`rootstock add-local`): fine-tunes load through
+    # Custom checkpoints (`:custom` ids with user weights): fine-tunes load through
     # MACECalculator directly — the mp/off dispatch in setup() only exists
     # to pick which pretrained file to download.
     from mace.calculators import MACECalculator

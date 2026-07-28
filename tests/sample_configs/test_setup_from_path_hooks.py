@@ -1,8 +1,9 @@
-"""Tests for the sample configs' ``setup_from_path`` hooks (local checkpoints).
+"""Tests for the sample configs' ``setup_from_path`` hooks (custom checkpoints).
 
 The envs shipped for both vendors (present in nvidia_configs *and*
-amd_configs) are the canonical set for `rootstock add-local`: both copies
-must declare the hook, with the contract signature
+amd_configs) are the canonical set for ``:custom`` checkpoints (user-supplied
+weights via ``weights=`` / ``--weights``): both copies must declare the hook,
+with the contract signature
 ``setup_from_path(path, device="cuda", **extras-with-defaults)``, and the
 signatures must not drift between vendor copies.
 
@@ -20,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from rootstock.environment import declares_setup_from_path
+from rootstock.environment import declares_setup_from_path, parse_custom_checkpoint_ids
 
 _SAMPLES = Path(__file__).parent.parent.parent / "sample_model_configurations"
 _NVIDIA = _SAMPLES / "nvidia_configs"
@@ -31,12 +32,7 @@ _DUAL_VENDOR_ENVS = sorted(p.stem for p in _AMD.glob("*.py") if (_NVIDIA / p.nam
 # Every config that declares the hook, in either vendor dir — all of them
 # must honor the signature contract, dual-vendor or not.
 _HOOK_DECLARING_CONFIGS = sorted(
-    (
-        p
-        for vendor in (_NVIDIA, _AMD)
-        for p in vendor.glob("*.py")
-        if declares_setup_from_path(p)
-    ),
+    (p for vendor in (_NVIDIA, _AMD) for p in vendor.glob("*.py") if declares_setup_from_path(p)),
     key=lambda p: (p.parent.name, p.name),
 )
 
@@ -62,7 +58,7 @@ def test_dual_vendor_set_is_nonempty():
 def test_dual_vendor_envs_declare_hook(env, vendor_dir):
     assert declares_setup_from_path(vendor_dir / f"{env}.py"), (
         f"{vendor_dir.name}/{env}.py must declare setup_from_path — every "
-        f"dual-vendor env supports local checkpoints"
+        f"dual-vendor env supports custom checkpoints"
     )
 
 
@@ -73,7 +69,7 @@ def test_dual_vendor_envs_declare_hook(env, vendor_dir):
 )
 def test_hook_signature_contract(config):
     """First param `path`, then `device` with a default, extras all defaulted
-    — so `add-local` without --kwarg works for every env."""
+    — so a `:custom` checkpoint without setup_kwargs works for every env."""
     args = _hook_args(config)
     names = [a.arg for a in args.args]
     assert names[:2] == ["path", "device"]
@@ -88,6 +84,44 @@ def test_hook_signature_matches_across_vendors(env):
     assert ast.dump(nvidia) == ast.dump(amd), (
         f"setup_from_path signature drifted between nvidia_configs/{env}.py "
         f"and amd_configs/{env}.py"
+    )
+
+
+# ---------- ':custom' entries <-> hook -----------------------------------------
+
+_ALL_CONFIGS = sorted(
+    (p for vendor in (_NVIDIA, _AMD) for p in vendor.glob("*.py")),
+    key=lambda p: (p.parent.name, p.name),
+)
+
+
+@pytest.mark.parametrize(
+    "config", _ALL_CONFIGS, ids=[f"{p.parent.name}/{p.stem}" for p in _ALL_CONFIGS]
+)
+def test_custom_entries_iff_hook(config):
+    """'<family>:custom' CHECKPOINTS entries and the setup_from_path hook
+    only work together: an entry without the hook would resolve (and be
+    listed) but always fail to load, and a hook without an entry is
+    invisible to users."""
+    custom_ids = parse_custom_checkpoint_ids(config)
+    if declares_setup_from_path(config):
+        assert custom_ids, (
+            f"{config.parent.name}/{config.name} declares setup_from_path "
+            f"but no '<family>:custom' CHECKPOINTS entry"
+        )
+    else:
+        assert not custom_ids, (
+            f"{config.parent.name}/{config.name} declares {custom_ids} "
+            f"without a setup_from_path hook"
+        )
+
+
+@pytest.mark.parametrize("env", _DUAL_VENDOR_ENVS)
+def test_custom_entries_match_across_vendors(env):
+    nvidia = parse_custom_checkpoint_ids(_NVIDIA / f"{env}.py")
+    amd = parse_custom_checkpoint_ids(_AMD / f"{env}.py")
+    assert nvidia == amd, (
+        f"':custom' entries drifted between nvidia_configs/{env}.py and amd_configs/{env}.py"
     )
 
 

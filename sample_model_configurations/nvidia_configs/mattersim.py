@@ -39,6 +39,8 @@ Models:
 CHECKPOINTS = {
     "mattersim-v1-0-0-5m": "MatterSim-v1.0.0-5M",
     "mattersim-v1-0-0-1m": "MatterSim-v1.0.0-1M",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "mattersim:custom": None,
 }
 
 
@@ -59,7 +61,7 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 
 def setup_from_path(path: str, device: str = "cuda"):
-    # Local checkpoints (`rootstock add-local`): load_path accepts a filesystem
+    # Custom checkpoints (`:custom` ids with user weights): load_path accepts a filesystem
     # path as well as a model name, so this is setup() minus the name mapping.
     from mattersim.forcefield import MatterSimCalculator
 

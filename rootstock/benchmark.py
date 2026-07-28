@@ -201,8 +201,9 @@ def run_worker_mode(args) -> int:
 
     setup_kwargs = json.loads(args.setup_kwargs) if args.setup_kwargs else {}
 
-    # Mirror the real worker wrapper's branch: local checkpoints load through
-    # the env's setup_from_path hook, canonical ids through setup().
+    # Mirror the real worker wrapper's branch: user-supplied weights (:custom
+    # checkpoints) load through the env's setup_from_path hook, canonical ids
+    # through setup().
     t0 = time.perf_counter()
     if getattr(args, "checkpoint_path", None):
         from env_source import setup_from_path  # type: ignore
@@ -225,9 +226,17 @@ def run_worker_mode(args) -> int:
 # ---------------------------------------------------------------------------
 
 
-def run_in_env_arm(root: Path, cache_root: Path | None, env_name: str, env_dir: Path,
-                   checkpoint: str, device: str, setup_kwargs: dict,
-                   npz_path: Path, checkpoint_path: str | None = None) -> dict:
+def run_in_env_arm(
+    root: Path,
+    cache_root: Path | None,
+    env_name: str,
+    env_dir: Path,
+    checkpoint: str,
+    device: str,
+    setup_kwargs: dict,
+    npz_path: Path,
+    checkpoint_path: str | None = None,
+) -> dict:
     """Spawn the env's python in worker mode and parse its JSON result.
 
     Reproduces Rootstock's own subprocess environment (the HOME/cache redirect
@@ -248,11 +257,16 @@ def run_in_env_arm(root: Path, cache_root: Path | None, env_name: str, env_dir: 
         str(env_python),
         os.path.abspath(__file__),
         "--worker-mode",
-        "--env-dir", str(env_dir),
-        "--checkpoint", checkpoint,
-        "--device", device,
-        "--worker-data", str(npz_path),
-        "--setup-kwargs", json.dumps(setup_kwargs),
+        "--env-dir",
+        str(env_dir),
+        "--checkpoint",
+        checkpoint,
+        "--device",
+        device,
+        "--worker-data",
+        str(npz_path),
+        "--setup-kwargs",
+        json.dumps(setup_kwargs),
     ]
     if checkpoint_path:
         cmd += ["--checkpoint-path", checkpoint_path]
@@ -264,18 +278,28 @@ def run_in_env_arm(root: Path, cache_root: Path | None, env_name: str, env_dir: 
         )
     for line in proc.stdout.splitlines():
         if line.startswith("RESULT "):
-            return json.loads(line[len("RESULT "):])
+            return json.loads(line[len("RESULT ") :])
     raise RuntimeError(f"no RESULT line from worker.\nstdout:\n{proc.stdout}")
 
 
-def run_rootstock_arm(root: Path, cache_root: Path | None, cluster: str | None,
-                      checkpoint: str, device: str, setup_kwargs: dict,
-                      atoms, frames: np.ndarray, n_warmup: int) -> dict:
+def run_rootstock_arm(
+    root: Path,
+    cache_root: Path | None,
+    cluster: str | None,
+    checkpoint: str,
+    device: str,
+    setup_kwargs: dict,
+    atoms,
+    frames: np.ndarray,
+    n_warmup: int,
+    weights: str | None = None,
+) -> dict:
     """Time the same force loop through RootstockCalculator (IPC in the loop)."""
     from rootstock import RootstockCalculator
 
-    kwargs: dict = {"checkpoint": checkpoint, "device": device,
-                    "setup_kwargs": setup_kwargs}
+    kwargs: dict = {"checkpoint": checkpoint, "device": device, "setup_kwargs": setup_kwargs}
+    if weights:
+        kwargs["weights"] = weights
     if cluster:
         kwargs["cluster"] = cluster
     else:
@@ -287,27 +311,30 @@ def run_rootstock_arm(root: Path, cache_root: Path | None, cluster: str | None,
         return time_force_loop(atoms, calc, frames, n_warmup)
 
 
-def benchmark_one(checkpoint: str, device: str, root: Path, cache_root: Path | None,
-                  cluster: str | None, atoms, frames: np.ndarray, n_warmup: int,
-                  setup_kwargs: dict, work_dir: Path) -> dict:
-    from rootstock.local_checkpoints import resolve_checkpoint
+def benchmark_one(
+    checkpoint: str,
+    device: str,
+    root: Path,
+    cache_root: Path | None,
+    cluster: str | None,
+    atoms,
+    frames: np.ndarray,
+    n_warmup: int,
+    setup_kwargs: dict,
+    work_dir: Path,
+    weights: str | None = None,
+) -> dict:
+    from rootstock.environment import bind_custom_weights, resolve_checkpoint
 
     resolved = resolve_checkpoint(root, checkpoint)
-    if resolved.is_local and not Path(resolved.path).exists():
-        # Same guard as the calculator — fail before either arm spawns,
-        # not as a raw subprocess traceback from the in-env worker.
-        raise RuntimeError(
-            f"local checkpoint '{checkpoint}' points at {resolved.path}, "
-            f"which no longer exists. Re-register it with `rootstock "
-            f"add-local` or remove it with `rootstock remove-local "
-            f"{checkpoint}`."
-        )
+    # Same guards as the calculator — fail before either arm spawns, not as
+    # a raw subprocess traceback from the in-env worker. None for a
+    # canonical id.
+    checkpoint_path = bind_custom_weights(
+        root, resolved.env_name, checkpoint, weights, setup_kwargs
+    )
     env_name = resolved.env_name
     env_dir = root / "envs" / env_name
-    # Registered defaults for a local checkpoint; explicit --setup-kwargs
-    # wins. Both arms get the identical merged dict (the managed arm's
-    # calculator re-merges, with the same precedence, to the same result).
-    setup_kwargs = {**resolved.setup_kwargs, **setup_kwargs}
 
     # Serialize the system + identical trajectory once; both arms read it.
     npz_path = work_dir / f"frames_{checkpoint.replace('/', '_')}_{device}.npz"
@@ -321,13 +348,31 @@ def benchmark_one(checkpoint: str, device: str, root: Path, cache_root: Path | N
     )
 
     print(f"  [in-env]    {checkpoint} on {device} via {env_name} ...", flush=True)
-    direct = run_in_env_arm(root, cache_root, env_name, env_dir, checkpoint,
-                            device, setup_kwargs, npz_path,
-                            checkpoint_path=resolved.path)
+    direct = run_in_env_arm(
+        root,
+        cache_root,
+        env_name,
+        env_dir,
+        checkpoint,
+        device,
+        setup_kwargs,
+        npz_path,
+        checkpoint_path=checkpoint_path,
+    )
 
     print(f"  [rootstock] {checkpoint} on {device} (IPC) ...", flush=True)
-    rs = run_rootstock_arm(root, cache_root, cluster, checkpoint, device,
-                           setup_kwargs, atoms, frames, n_warmup)
+    rs = run_rootstock_arm(
+        root,
+        cache_root,
+        cluster,
+        checkpoint,
+        device,
+        setup_kwargs,
+        atoms,
+        frames,
+        n_warmup,
+        weights=weights,
+    )
 
     overhead_ms = rs["median_ms"] - direct["median_ms"]
     overhead_pct = (
@@ -351,43 +396,42 @@ def print_table(results: list[dict]) -> None:
     print("\n" + "=" * 92)
     print("IPC overhead: RootstockCalculator vs. in-environment direct call")
     print("=" * 92)
-    header = (f"{'checkpoint':<24}{'dev':<5}{'atoms':>6}  "
-              f"{'in-env ms':>10}{'rootstock ms':>13}{'overhead ms':>12}{'overhead %':>11}")
+    header = (
+        f"{'checkpoint':<24}{'dev':<5}{'atoms':>6}  "
+        f"{'in-env ms':>10}{'rootstock ms':>13}{'overhead ms':>12}{'overhead %':>11}"
+    )
     print(header)
     print("-" * 92)
     for r in results:
         if "error" in r:
             print(f"{r['checkpoint']:<24}{r['device']:<5}{'':>6}  ERROR: {r['error'][:48]}")
             continue
-        print(f"{r['checkpoint']:<24}{r['device']:<5}{r['n_atoms']:>6}  "
-              f"{r['in_env']['median_ms']:>10.2f}{r['rootstock']['median_ms']:>13.2f}"
-              f"{r['overhead_ms_median']:>12.2f}{r['overhead_pct_median']:>10.1f}%")
+        print(
+            f"{r['checkpoint']:<24}{r['device']:<5}{r['n_atoms']:>6}  "
+            f"{r['in_env']['median_ms']:>10.2f}{r['rootstock']['median_ms']:>13.2f}"
+            f"{r['overhead_ms_median']:>12.2f}{r['overhead_pct_median']:>10.1f}%"
+        )
     print("-" * 92)
     print("median per-call force-eval latency; overhead = rootstock - in-env.")
     print("startup (model load + worker spawn) is reported per-checkpoint in the JSON.\n")
 
 
 def list_available(root: Path) -> int:
-    from rootstock.environment import list_declared_checkpoints
-    from rootstock.local_checkpoints import LocalCheckpointError, local_checkpoints_for_root
+    from rootstock.environment import list_custom_checkpoints, list_declared_checkpoints
 
     declared = list_declared_checkpoints(root)
     if not declared:
         print(f"No envs installed at {root}. Run `rootstock install` first.")
         return 1
+    custom = list_custom_checkpoints(root)
     print(f"Checkpoints declared by installed envs at {root}:\n")
     for env, ckpts in declared.items():
-        ids = ", ".join(ckpts) if ckpts else "(none)"
+        all_ids = [*ckpts, *custom.get(env, [])]
+        ids = ", ".join(all_ids) if all_ids else "(none)"
         print(f"  {env:<16} {ids}")
-    try:
-        local = local_checkpoints_for_root(root)
-    except LocalCheckpointError as exc:
-        print(f"Warning: ignoring local-checkpoint registry: {exc}", file=sys.stderr)
-        local = {}
-    if local:
-        ids = ", ".join(sorted(local))
-        print(f"  {'(local)':<16} {ids}")
     print("\nPass a few of these to --checkpoints.")
+    if custom:
+        print("The ':custom' entries benchmark your own fine-tune — pass --weights.")
     return 0
 
 
@@ -404,16 +448,30 @@ def main(argv=None) -> int:
 
     p.add_argument("--checkpoints", nargs="+", help="Canonical checkpoint ids to benchmark.")
     p.add_argument("--devices", nargs="+", default=["cuda"], help="Devices (cuda, cpu).")
-    p.add_argument("--system", default="Cu:256",
-                   help="System spec: 'El:N' bulk supercell, or an ASE molecule name.")
+    p.add_argument(
+        "--system",
+        default="Cu:256",
+        help="System spec: 'El:N' bulk supercell, or an ASE molecule name.",
+    )
     p.add_argument("--calls", type=int, default=100, help="Timed force calls per arm.")
     p.add_argument("--warmup", type=int, default=10, help="Untimed warmup calls.")
-    p.add_argument("--rattle", type=float, default=0.005,
-                   help="Per-step Gaussian displacement (A) for the replay trajectory.")
+    p.add_argument(
+        "--rattle",
+        type=float,
+        default=0.005,
+        help="Per-step Gaussian displacement (A) for the replay trajectory.",
+    )
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--setup-kwargs", default="",
-                   help='JSON forwarded to setup() for every checkpoint '
-                        '(e.g. \'{"task":"omat"}\').')
+    p.add_argument(
+        "--setup-kwargs",
+        default="",
+        help='JSON forwarded to setup() for every checkpoint (e.g. \'{"task":"omat"}\').',
+    )
+    p.add_argument(
+        "--weights",
+        help="Path to your own weights file; requires a '<family>:custom' "
+        "entry in --checkpoints (applies to every checkpoint given).",
+    )
     p.add_argument("--out", help="Write full results JSON here.")
     p.add_argument("--list", action="store_true", help="List installed checkpoints and exit.")
 
@@ -444,9 +502,11 @@ def main(argv=None) -> int:
     cluster_info = None
     if args.cluster:
         from rootstock.clusters import get_cluster
+
         cluster_info = get_cluster(args.cluster)
     root = Path(args.root) if args.root else Path(cluster_info.root)
     from rootstock.layout import resolve_cache_root
+
     cache_root = resolve_cache_root(root, explicit=args.cache_root)
 
     if args.list:
@@ -461,9 +521,11 @@ def main(argv=None) -> int:
     n_frames = args.calls + args.warmup
     frames = make_trajectory(atoms, n_frames, args.rattle, args.seed)
 
-    print(f"System: {args.system} -> {len(atoms)} atoms; "
-          f"{args.calls} timed calls (+{args.warmup} warmup); "
-          f"root={root}")
+    print(
+        f"System: {args.system} -> {len(atoms)} atoms; "
+        f"{args.calls} timed calls (+{args.warmup} warmup); "
+        f"root={root}"
+    )
 
     results: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="rootstock_bench_") as tmp:
@@ -472,12 +534,26 @@ def main(argv=None) -> int:
             for checkpoint in args.checkpoints:
                 print(f"\n>>> {checkpoint} @ {device}")
                 try:
-                    r = benchmark_one(checkpoint, device, root, cache_root, args.cluster,
-                                      atoms, frames, args.warmup, setup_kwargs, work_dir)
-                    print(f"    overhead: {r['overhead_ms_median']:.2f} ms/call "
-                          f"({r['overhead_pct_median']:.1f}%)")
+                    r = benchmark_one(
+                        checkpoint,
+                        device,
+                        root,
+                        cache_root,
+                        args.cluster,
+                        atoms,
+                        frames,
+                        args.warmup,
+                        setup_kwargs,
+                        work_dir,
+                        weights=args.weights,
+                    )
+                    print(
+                        f"    overhead: {r['overhead_ms_median']:.2f} ms/call "
+                        f"({r['overhead_pct_median']:.1f}%)"
+                    )
                 except Exception as e:  # noqa: BLE001 - one bad model shouldn't abort the rest
                     import traceback
+
                     traceback.print_exc()
                     r = {"checkpoint": checkpoint, "device": device, "error": str(e)}
                 results.append(r)

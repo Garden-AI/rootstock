@@ -78,7 +78,8 @@ def cmd_setup_perms(args) -> int:
             print(format_command(argv))
         return 0
 
-    # --apply: confirm, then run each command, stopping at the first failure.
+    # --apply: confirm, then run each command, stopping at the first failure
+    # (except a missing setfacl, which downgrades to skipping the ACL commands).
     print(f"About to apply these permissions to {install_root} (group: {args.group}):")
     for argv in commands:
         print(f"  {format_command(argv)}")
@@ -87,8 +88,35 @@ def cmd_setup_perms(args) -> int:
         print("Aborted.")
         return 1
 
+    setfacl_missing = False
     for argv in commands:
-        result = subprocess.run(argv, capture_output=True, text=True)
+        if setfacl_missing and argv[0] == "setfacl":
+            continue
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True)
+        except FileNotFoundError:
+            # A host without ACL tooling is a known configuration (Frontier
+            # login nodes ship no setfacl), not a broken one: skip the ACL
+            # commands and keep going so the trailing chmods — which the
+            # recipe deliberately orders last — still run. The re-check below
+            # reports whatever the skips left wrong, mirroring how
+            # perms._run_getfacl degrades when getfacl is absent. Any other
+            # missing binary (chgrp, chmod, mkdir...) means something is
+            # genuinely off with the host, so abort cleanly.
+            if argv[0] == "setfacl":
+                setfacl_missing = True
+                print(
+                    "Warning: setfacl not found on this host; skipping ACL "
+                    "commands. Mode bits and group ownership will still be "
+                    "applied.",
+                    file=sys.stderr,
+                )
+                continue
+            print(
+                f"Error: command not found: {argv[0]} (needed for: {format_command(argv)})",
+                file=sys.stderr,
+            )
+            return 1
         if result.returncode != 0:
             print(f"Error: command failed: {format_command(argv)}", file=sys.stderr)
             if result.stderr:

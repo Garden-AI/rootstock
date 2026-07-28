@@ -29,6 +29,8 @@ CHECKPOINTS = {
     "orb-v2": "orb-v2",
     "orb-d3-v2": "orb-d3-v2",
     "orb-mptraj-only-v2": "orb-mptraj-only-v2",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "orb:custom": None,
 }
 
 
@@ -88,10 +90,10 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 
 def setup_from_path(path: str, device: str = "cuda", arch: str = "orb-v2"):
-    # Local checkpoints (`rootstock add-local`). A weights file doesn't say
+    # Custom checkpoints (`:custom` ids with user weights). A weights file doesn't say
     # which orb architecture produced it, so `arch` names the pretrained
-    # loader to instantiate — register the right one at add-local time
-    # (--kwarg arch=...). Handing the loader a local path also means no
+    # loader to instantiate — pass the right one at call time
+    # (setup_kwargs={"arch": ...} / --kwarg arch=...). Handing the loader a local path also means no
     # network and no cached_path locking (see setup()).
     import torch
     from orb_models.forcefield import pretrained

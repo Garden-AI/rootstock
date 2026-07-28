@@ -16,8 +16,8 @@ from ase.stress import full_3x3_to_voigt_6_stress
 
 from .clusters import get_cluster
 from .config import resolve_default_root
+from .environment import bind_custom_weights, resolve_checkpoint
 from .layout import ensure_layout_compatible, resolve_cache_root
-from .local_checkpoints import LocalCheckpointError, resolve_checkpoint
 from .server import RootstockServer, WorkerDiedError
 
 logger = logging.getLogger("rootstock.calculator")
@@ -56,12 +56,23 @@ class RootstockCalculator(Calculator):
             atoms.calc = calc
             print(atoms.get_potential_energy())
 
+        # Run your own fine-tuned weights: use the ":custom" entry for the
+        # model family you fine-tuned (shown by `rootstock list`) and pass
+        # the weights file. The entry only selects the hosting env — no
+        # shipped weights are involved.
+        with RootstockCalculator(
+            checkpoint="uma:custom",
+            weights="/scratch/me/uma-ft.pt",
+            cluster="delta",
+            device="cuda",
+        ) as calc:
+            atoms.calc = calc
+            print(atoms.get_potential_energy())
+
     Note:
         Environments must be pre-built with `rootstock install` before use.
         The hosting env is resolved automatically by walking the installed envs
-        and matching the checkpoint id against each env file's `CHECKPOINTS`,
-        then against the user's local-checkpoint registry (weights files
-        registered with `rootstock add-local`).
+        and matching the checkpoint id against each env file's `CHECKPOINTS`.
     """
 
     implemented_properties = ["energy", "free_energy", "forces", "stress"]
@@ -75,6 +86,7 @@ class RootstockCalculator(Calculator):
         device: str = "cuda",
         setup_kwargs: dict | None = None,
         timeout: float = 600.0,
+        weights: str | Path | None = None,
         **kwargs,
     ):
         """
@@ -88,7 +100,11 @@ class RootstockCalculator(Calculator):
         Args:
             checkpoint: Canonical checkpoint id (e.g., "mace-mp-0-medium",
                         "uma-s-1p1"). Required. The hosting env is resolved
-                        from the installed envs at ``root``.
+                        from the installed envs at ``root``. To run your own
+                        fine-tuned weights, use the ``:custom`` entry for
+                        the model family you fine-tuned (e.g. "uma:custom" —
+                        ``rootstock list`` shows the entries available) and
+                        pass ``weights``.
             cluster: Known cluster name (e.g., "delta", "perlmutter"). Mutually
                      exclusive with root; a name -> install-path bootstrap.
             root: Path to rootstock install directory. Mutually exclusive with
@@ -110,6 +126,12 @@ class RootstockCalculator(Calculator):
                      first real force call — which may pay for torch.compile
                      or large neighbor lists — runs under the same envelope
                      verification exercised.
+            weights: Path to your own weights file (e.g. a fine-tune of one
+                     of the family's shipped checkpoints). Required with —
+                     and only valid with — a ``:custom`` checkpoint id. The
+                     path must be visible from the compute nodes; it is
+                     loaded through the env's ``setup_from_path`` hook, and
+                     no shipped weights are involved.
             **kwargs: Additional arguments passed to ASE Calculator
         """
         # ASE's Calculator quietly absorbs unknown kwargs as parameters, so a
@@ -164,33 +186,22 @@ class RootstockCalculator(Calculator):
         # misleading resolution error.
         ensure_layout_compatible(self.root)
 
-        # Resolve the checkpoint id: env-declared canonical ids first, then
-        # the user's local-checkpoint registry. Raises CheckpointNotFoundError
-        # with a listing of both namespaces if nothing matches.
+        # Resolve the checkpoint id: env-declared ids, canonical and
+        # ':custom' entries alike. Raises CheckpointNotFoundError with a
+        # listing if nothing matches.
         resolved = resolve_checkpoint(self.root, checkpoint)
         self.env_name = resolved.env_name
-        self.checkpoint_path = resolved.path
-        # Registered defaults for a local checkpoint; per-call kwargs win.
-        # Registration already rejected reserved keys in the defaults.
-        self.setup_kwargs = {**resolved.setup_kwargs, **setup_kwargs}
-
-        if resolved.is_local and "path" in setup_kwargs:
-            # setup_from_path's first parameter — fail here, not as a
-            # TypeError inside the worker.
-            raise TypeError(
-                "setup_kwargs cannot contain 'path' for a local checkpoint; "
-                "the registered weights path is passed at the top level."
-            )
-
-        if resolved.is_local and not Path(resolved.path).exists():
-            # Fail at construction, not as a WorkerDiedError post-mortem
-            # minutes into a batch job.
-            raise LocalCheckpointError(
-                f"local checkpoint '{checkpoint}' points at {resolved.path}, "
-                f"which no longer exists. Re-register it with `rootstock "
-                f"add-local` or remove it with `rootstock remove-local "
-                f"{checkpoint}`."
-            )
+        # Enforce the ':custom' / weights= pairing (both directions — a
+        # misspelled weights kwarg is absorbed by ASE, and with a custom id
+        # there are no shipped weights to silently fall back to). For a
+        # custom id this also validates the file exists and the built env
+        # declares the setup_from_path hook — at construction, not as an
+        # opaque WorkerDiedError minutes into a batch job. None for a
+        # canonical id.
+        self.checkpoint_path = bind_custom_weights(
+            self.root, resolved.env_name, checkpoint, weights, setup_kwargs
+        )
+        self.setup_kwargs = setup_kwargs
 
         # Generate unique socket name to avoid conflicts
         self._socket_name = f"rootstock_{uuid.uuid4().hex[:8]}"

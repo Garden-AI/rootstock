@@ -21,10 +21,13 @@ def cmd_serve(args) -> int:
         0: Clean shutdown
         1: Error
     """
-    from pathlib import Path
-
-    from ..environment import CheckpointNotFoundError, get_env_python
-    from ..local_checkpoints import resolve_checkpoint
+    from ..environment import (
+        CheckpointNotFoundError,
+        CustomWeightsError,
+        bind_custom_weights,
+        get_env_python,
+        resolve_checkpoint,
+    )
     from ..manifest import now_iso
     from ..operations import parse_setup_kwargs
     from ..spawn import WORKER_WRAPPER, spawn_in_env
@@ -36,6 +39,7 @@ def cmd_serve(args) -> int:
     socket_path = args.socket
     checkpoint = args.checkpoint
     device = args.device
+    weights = getattr(args, "weights", None)
 
     try:
         cli_kwargs = parse_setup_kwargs(getattr(args, "kwarg", None))
@@ -49,17 +53,16 @@ def cmd_serve(args) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     env_name = resolved.env_name
-    # Registered defaults for a local checkpoint; explicit --kwarg wins.
-    setup_kwargs = {**resolved.setup_kwargs, **cli_kwargs}
+    setup_kwargs = cli_kwargs
 
-    if resolved.is_local and "path" in cli_kwargs:
-        # setup_from_path's first parameter — fail here, not as a TypeError
-        # inside the worker.
-        print(
-            "Error: --kwarg path=... is reserved for local checkpoints; the "
-            "registered weights path is passed automatically.",
-            file=sys.stderr,
-        )
+    # Enforce the ':custom' / --weights pairing (both directions) and, for a
+    # custom id, validate the file + the built env's setup_from_path hook —
+    # before the startup banner, not as an ImportError inside the worker.
+    # None for a canonical id.
+    try:
+        checkpoint_path = bind_custom_weights(root, env_name, checkpoint, weights, cli_kwargs)
+    except CustomWeightsError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 2
 
     # Validate environment exists before printing the startup banner
@@ -69,20 +72,10 @@ def cmd_serve(args) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    if resolved.is_local and not Path(resolved.path).exists():
-        print(
-            f"Error: local checkpoint '{checkpoint}' points at "
-            f"{resolved.path}, which no longer exists. Re-register it with "
-            f"`rootstock add-local` or remove it with "
-            f"`rootstock remove-local {checkpoint}`.",
-            file=sys.stderr,
-        )
-        return 1
-
     print("Starting rootstock worker:")
     print(f"  Env: {env_name}")
-    if resolved.is_local:
-        print(f"  Checkpoint: {checkpoint} (local: {resolved.path})")
+    if resolved.is_custom:
+        print(f"  Checkpoint: {checkpoint} (weights: {checkpoint_path})")
     else:
         print(f"  Checkpoint: {checkpoint}")
     print(f"  Device: {device}")
@@ -96,7 +89,7 @@ def cmd_serve(args) -> int:
         WORKER_WRAPPER,
         {
             "checkpoint": checkpoint,
-            "checkpoint_path": resolved.path,
+            "checkpoint_path": checkpoint_path,
             "device": device,
             "socket_path": socket_path,
             "setup_kwargs": setup_kwargs,
@@ -128,7 +121,6 @@ def cmd_serve(args) -> int:
         cache_root=cache_root,
         env_name=env_name,
         checkpoint=checkpoint,
-        is_local=resolved.is_local,
         device=device,
         client="serve",
         started_at=started_at,
