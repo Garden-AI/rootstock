@@ -100,6 +100,19 @@ def test_custom_id_binds_weights_as_checkpoint_path(fake_root, weights, recordin
     assert kwargs["checkpoint"] == "uma:custom"
 
 
+def test_relative_weights_path_resolved_at_construction(
+    fake_root, weights, recording_server, monkeypatch
+):
+    """The worker runs with cwd=env_dir, so a relative path passed through
+    verbatim would be re-resolved there — it must leave construction
+    absolute."""
+    monkeypatch.chdir(weights.parent)
+    calc = RootstockCalculator(
+        checkpoint="uma:custom", root=fake_root, weights=weights.name, device="cpu"
+    )
+    assert calc.checkpoint_path == str(weights.resolve())
+
+
 def test_custom_without_weights_raises(fake_root):
     with pytest.raises(CustomWeightsError, match="weights"):
         RootstockCalculator(checkpoint="uma:custom", root=fake_root)

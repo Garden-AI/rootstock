@@ -358,7 +358,11 @@ def bind_custom_weights(
             f"'{CUSTOM_CHECKPOINT_SUFFIX}' checkpoint; the weights path is "
             f"passed at the top level."
         )
-    weights_path = Path(weights).expanduser()
+    # Resolve against the caller's CWD now: the worker is spawned with
+    # cwd=env_dir, so a relative path passed through verbatim would be
+    # re-resolved there — failing, or worse, loading a same-named file
+    # inside the env dir.
+    weights_path = Path(weights).expanduser().resolve()
     if not weights_path.is_file():
         raise CustomWeightsError(
             f"weights file not found (or not a regular file): {weights_path}. "
