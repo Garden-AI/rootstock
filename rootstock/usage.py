@@ -54,11 +54,6 @@ RECORD_SCHEMA_VERSION = 1
 DISABLE_ENV_VAR = "ROOTSTOCK_DISABLE_USAGE_STATS"
 SALT_FILE_NAME = "salt"
 
-# Recorded in place of a local checkpoint's id: ids registered with
-# `rootstock add-local` are user-chosen and may leak what someone is working
-# on, which anonymous stats must not do.
-LOCAL_CHECKPOINT_LABEL = "(local)"
-
 
 def usage_dir(cache_root: Path | str) -> Path:
     """The spool directory for an install's cache root."""
@@ -112,7 +107,6 @@ def record_session(
     cache_root: Path | str,
     env_name: str,
     checkpoint: str,
-    is_local: bool,
     device: str,
     client: str,
     started_at: str,
@@ -129,12 +123,10 @@ def record_session(
             which is reverse-looked-up from it).
         cache_root: Resolved cache root; the spool lives under it.
         env_name: Pre-built environment that hosted the session.
-        checkpoint: Canonical checkpoint id. Replaced with ``(local)`` when
-            ``is_local`` — user-chosen ids must not leak into the spool.
-            ``<family>:custom`` ids are exempt and recorded verbatim: the
-            marker already self-flags the run as user weights, and the id is
-            env-declared, not user-chosen.
-        is_local: Whether the checkpoint was a user-registered weights file.
+        checkpoint: The checkpoint id, recorded verbatim. Both forms are
+            non-identifying: canonical ids, and ``<family>:custom`` ids
+            (the marker self-flags the run as user weights; the id is
+            env-declared, not user-chosen; the weights path never appears).
         device: Device string the worker ran on.
         client: Which entry point ran the session ("calculator", "serve").
         started_at: ISO 8601 UTC timestamp of session start (worker connect,
@@ -157,13 +149,6 @@ def record_session(
 
         from . import __version__
         from .clusters import get_cluster_for_root
-        from .environment import is_custom_checkpoint
-
-        # <family>:custom is non-identifying (no user path; the id is
-        # env-declared, not user-chosen) and self-flags the run as user
-        # weights — record it verbatim so the fine-tuned *family* stays
-        # visible in the stats.
-        mask = is_local and not is_custom_checkpoint(checkpoint)
 
         record = {
             "schema_version": RECORD_SCHEMA_VERSION,
@@ -172,7 +157,7 @@ def record_session(
             "cluster": get_cluster_for_root(root),
             "root": str(root),
             "env": env_name,
-            "checkpoint": LOCAL_CHECKPOINT_LABEL if mask else checkpoint,
+            "checkpoint": checkpoint,
             "device": device,
             "client": client,
             "rootstock_version": __version__,

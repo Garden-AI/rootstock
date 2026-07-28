@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from ..config import DEFAULT_CONFIG_FILE
 from ..install_state import InstallState, read_install_state
-from ..local_checkpoints import LocalCheckpointError, local_checkpoints_for_root
 from ..manifest import is_verified
 from .common import get_root_or_exit, resolve_cache_root
 
@@ -40,73 +38,6 @@ def _checkpoint_line(env, ckpt_name: str, ckpt) -> str:
     line = f"    {ckpt_name:<24}  {fetched}  {verified}  {marker}".rstrip()
     if ckpt.last_error:
         line += f"\n      last error: {ckpt.last_error}"
-    return line
-
-
-def _local_state(state: InstallState, ckpt_id: str, entry) -> dict:
-    """Derived flags for one local checkpoint: file presence, staleness
-    against the hosting env's manifest built_at, and canonical shadowing."""
-    env = state.envs.get(entry.env)
-    record = env.record if env is not None else None
-
-    shadowed_by = None
-    for env_name, env_state in state.envs.items():
-        if env_state.declared_checkpoints and ckpt_id in env_state.declared_checkpoints:
-            shadowed_by = env_name
-            break
-
-    if entry.verified_at is None:
-        verified_current = False
-    elif record is None:
-        verified_current = False
-    else:
-        # Same lexical-ISO comparison as manifest.is_verified.
-        verified_current = entry.verified_at > record.built_at
-
-    return {
-        "exists": Path(entry.path).exists(),
-        "env_built": env is not None,
-        "env_built_at": record.built_at if record else None,
-        "verified_current": verified_current,
-        "shadowed_by": shadowed_by,
-    }
-
-
-def _local_checkpoint_line(state: InstallState, ckpt_id: str, entry) -> str:
-    derived = _local_state(state, ckpt_id, entry)
-
-    if entry.verified_at is None:
-        verified = "not verified"
-        marker = "⚠"
-    elif derived["verified_current"]:
-        verified = f"verified {_short_date(entry.verified_at)} ({entry.verified_device})"
-        marker = "✓"
-    elif derived["env_built_at"] is not None:
-        verified = (
-            f"verified {_short_date(entry.verified_at)} ({entry.verified_device})  "
-            f"⚠ stale (env rebuilt {_short_date(derived['env_built_at'])})"
-        )
-        marker = ""
-    else:
-        verified = (
-            f"verified {_short_date(entry.verified_at)} ({entry.verified_device})  "
-            f"⚠ env not in manifest"
-        )
-        marker = ""
-
-    line = f"    {ckpt_id:<24}  env: {entry.env:<12}  {verified}  {marker}".rstrip()
-    line += f"\n      {entry.path}"
-    if not derived["exists"]:
-        line += "  ⚠ file missing"
-    if not derived["env_built"]:
-        line += f"\n      ⚠ env '{entry.env}' is not built"
-    if derived["shadowed_by"]:
-        line += (
-            f"\n      ⚠ shadowed by a canonical id in env "
-            f"'{derived['shadowed_by']}' — the canonical checkpoint wins"
-        )
-    if entry.last_error:
-        line += f"\n      last error: {entry.last_error}"
     return line
 
 
@@ -156,20 +87,6 @@ def cmd_status(args) -> int:
         # Records the manifest still carries for envs that are gone from disk.
         for name in sorted(state.manifest_only_envs):
             print(f"  {name:<20} [manifest only — not on disk]")
-
-    # The user's own registered local checkpoints (per-user registry; never
-    # part of the shared manifest).
-    try:
-        local = local_checkpoints_for_root(root)
-        local_error = None
-    except LocalCheckpointError as exc:
-        local, local_error = {}, str(exc)
-    if local or local_error:
-        print("\nLocal checkpoints (this user):")
-        if local_error:
-            print(f"  (unreadable: {local_error})")
-        for ckpt_id, entry in sorted(local.items()):
-            print(_local_checkpoint_line(state, ckpt_id, entry))
 
     # Show the cache location; computing sizes is opt-in. Cache may live
     # under the install root or under a separate declared cache_root. Some
@@ -240,16 +157,6 @@ def _cmd_status_json(state: InstallState) -> int:
             "checkpoints": checkpoints,
         }
 
-    local_checkpoints = {}
-    try:
-        for ckpt_id, entry in sorted(local_checkpoints_for_root(state.root).items()):
-            local_checkpoints[ckpt_id] = {
-                **entry.to_dict(),
-                **_local_state(state, ckpt_id, entry),
-            }
-    except LocalCheckpointError:
-        pass  # per-user registry problems must not break machine-readable status
-
     manifest = state.manifest
     payload = {
         "root": str(state.root),
@@ -260,7 +167,6 @@ def _cmd_status_json(state: InstallState) -> int:
         "sources": [name for name, _ in state.sources],
         "environments": environments,
         "manifest_only_environments": sorted(state.manifest_only_envs),
-        "local_checkpoints": local_checkpoints,
     }
     print(json.dumps(payload, indent=2))
     return 0
