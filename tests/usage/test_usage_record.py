@@ -97,6 +97,16 @@ def test_local_checkpoint_id_is_masked(tmp_path):
     assert json.loads(path.read_text())["checkpoint"] == LOCAL_CHECKPOINT_LABEL
 
 
+def test_custom_checkpoint_id_recorded_verbatim(tmp_path):
+    """<family>:custom is exempt from the mask — the marker already
+    self-flags the run as user weights and the id is env-declared, not
+    user-chosen. Exempt even when the entry point reports is_local (the
+    server flags any session with a checkpoint_path)."""
+    usage_dir(tmp_path).mkdir()
+    path = _write(tmp_path, checkpoint="uma:custom", is_local=True)
+    assert json.loads(path.read_text())["checkpoint"] == "uma:custom"
+
+
 def test_env_var_opt_out(tmp_path, monkeypatch):
     usage_dir(tmp_path).mkdir()
     monkeypatch.setenv(DISABLE_ENV_VAR, "1")

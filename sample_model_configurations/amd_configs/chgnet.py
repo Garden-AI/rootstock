@@ -22,6 +22,8 @@
 
 CHECKPOINTS = {
     "chgnet-default": "chgnet-default",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "chgnet:custom": None,
 }
 
 

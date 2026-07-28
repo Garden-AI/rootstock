@@ -270,12 +270,15 @@ def run_in_env_arm(root: Path, cache_root: Path | None, env_name: str, env_dir: 
 
 def run_rootstock_arm(root: Path, cache_root: Path | None, cluster: str | None,
                       checkpoint: str, device: str, setup_kwargs: dict,
-                      atoms, frames: np.ndarray, n_warmup: int) -> dict:
+                      atoms, frames: np.ndarray, n_warmup: int,
+                      weights: str | None = None) -> dict:
     """Time the same force loop through RootstockCalculator (IPC in the loop)."""
     from rootstock import RootstockCalculator
 
     kwargs: dict = {"checkpoint": checkpoint, "device": device,
                     "setup_kwargs": setup_kwargs}
+    if weights:
+        kwargs["weights"] = weights
     if cluster:
         kwargs["cluster"] = cluster
     else:
@@ -289,13 +292,17 @@ def run_rootstock_arm(root: Path, cache_root: Path | None, cluster: str | None,
 
 def benchmark_one(checkpoint: str, device: str, root: Path, cache_root: Path | None,
                   cluster: str | None, atoms, frames: np.ndarray, n_warmup: int,
-                  setup_kwargs: dict, work_dir: Path) -> dict:
+                  setup_kwargs: dict, work_dir: Path,
+                  weights: str | None = None) -> dict:
+    from rootstock.environment import bind_custom_weights
     from rootstock.local_checkpoints import resolve_checkpoint
 
     resolved = resolve_checkpoint(root, checkpoint)
+    # Same guards as the calculator — fail before either arm spawns, not as
+    # a raw subprocess traceback from the in-env worker.
+    custom_path = bind_custom_weights(root, resolved.env_name, checkpoint, weights, setup_kwargs)
+    checkpoint_path = custom_path if custom_path is not None else resolved.path
     if resolved.is_local and not Path(resolved.path).exists():
-        # Same guard as the calculator — fail before either arm spawns,
-        # not as a raw subprocess traceback from the in-env worker.
         raise RuntimeError(
             f"local checkpoint '{checkpoint}' points at {resolved.path}, "
             f"which no longer exists. Re-register it with `rootstock "
@@ -323,11 +330,12 @@ def benchmark_one(checkpoint: str, device: str, root: Path, cache_root: Path | N
     print(f"  [in-env]    {checkpoint} on {device} via {env_name} ...", flush=True)
     direct = run_in_env_arm(root, cache_root, env_name, env_dir, checkpoint,
                             device, setup_kwargs, npz_path,
-                            checkpoint_path=resolved.path)
+                            checkpoint_path=checkpoint_path)
 
     print(f"  [rootstock] {checkpoint} on {device} (IPC) ...", flush=True)
     rs = run_rootstock_arm(root, cache_root, cluster, checkpoint, device,
-                           setup_kwargs, atoms, frames, n_warmup)
+                           setup_kwargs, atoms, frames, n_warmup,
+                           weights=weights)
 
     overhead_ms = rs["median_ms"] - direct["median_ms"]
     overhead_pct = (
@@ -414,6 +422,9 @@ def main(argv=None) -> int:
     p.add_argument("--setup-kwargs", default="",
                    help='JSON forwarded to setup() for every checkpoint '
                         '(e.g. \'{"task":"omat"}\').')
+    p.add_argument("--weights",
+                   help="Path to your own weights file; requires a '<family>:custom' "
+                        "entry in --checkpoints (applies to every checkpoint given).")
     p.add_argument("--out", help="Write full results JSON here.")
     p.add_argument("--list", action="store_true", help="List installed checkpoints and exit.")
 
@@ -473,7 +484,8 @@ def main(argv=None) -> int:
                 print(f"\n>>> {checkpoint} @ {device}")
                 try:
                     r = benchmark_one(checkpoint, device, root, cache_root, args.cluster,
-                                      atoms, frames, args.warmup, setup_kwargs, work_dir)
+                                      atoms, frames, args.warmup, setup_kwargs, work_dir,
+                                      weights=args.weights)
                     print(f"    overhead: {r['overhead_ms_median']:.2f} ms/call "
                           f"({r['overhead_pct_median']:.1f}%)")
                 except Exception as e:  # noqa: BLE001 - one bad model shouldn't abort the rest

@@ -39,6 +39,8 @@ Models:
 CHECKPOINTS = {
     "mattersim-v1-0-0-5m": "MatterSim-v1.0.0-5M",
     "mattersim-v1-0-0-1m": "MatterSim-v1.0.0-1M",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "mattersim:custom": None,
 }
 
 

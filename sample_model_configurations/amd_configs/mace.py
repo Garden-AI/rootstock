@@ -33,6 +33,9 @@ CHECKPOINTS = {
     "mace-off23-small": "off:small",
     "mace-off23-medium": "off:medium",
     "mace-off23-large": "off:large",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "mace-mp:custom": None,
+    "mace-off23:custom": None,
 }
 
 

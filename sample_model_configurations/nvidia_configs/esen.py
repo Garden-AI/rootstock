@@ -19,6 +19,8 @@ CHECKPOINTS = {
     "esen-md-direct-all-omol": "esen-md-direct-all-omol",
     "esen-sm-conserving-all-omol": "esen-sm-conserving-all-omol",
     "esen-sm-direct-all-omol": "esen-sm-direct-all-omol",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "esen:custom": None,
 }
 
 

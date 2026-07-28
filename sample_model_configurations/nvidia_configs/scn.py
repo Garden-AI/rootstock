@@ -33,6 +33,8 @@ CHECKPOINTS = {
     "scn-s2ef-oc20-all-md": "SCN-S2EF-OC20-All+MD",
     "scn-t4-b2-s2ef-oc20-2m": "SCN-t4-b2-S2EF-OC20-2M",
     "scn-s2ef-oc20-2m": "SCN-S2EF-OC20-2M",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "scn:custom": None,
 }
 
 

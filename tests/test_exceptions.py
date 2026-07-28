@@ -5,14 +5,15 @@ from __future__ import annotations
 import pytest
 
 from rootstock import RootstockError
-from rootstock.environment import CheckpointNotFoundError
+from rootstock.environment import CheckpointNotFoundError, CustomWeightsError
 from rootstock.manifest import ManifestError
 from rootstock.operations import OperationError
 from rootstock.server import WorkerDiedError
 
 
 @pytest.mark.parametrize(
-    "exc", [CheckpointNotFoundError, WorkerDiedError, OperationError, ManifestError]
+    "exc",
+    [CheckpointNotFoundError, CustomWeightsError, WorkerDiedError, OperationError, ManifestError],
 )
 def test_domain_errors_share_the_base(exc):
     assert issubclass(exc, RootstockError)

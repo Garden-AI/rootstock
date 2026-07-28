@@ -35,6 +35,8 @@ CHECKPOINTS = {
     "escn-l6-m3-lay20-s2ef-oc20-all-md": "eSCN-L6-M3-Lay20-S2EF-OC20-All+MD",
     "escn-l6-m2-lay12-s2ef-oc20-2m": "eSCN-L6-M2-Lay12-S2EF-OC20-2M",
     "escn-l4-m2-lay12-s2ef-oc20-2m": "eSCN-L4-M2-Lay12-S2EF-OC20-2M",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "escn:custom": None,
 }
 
 

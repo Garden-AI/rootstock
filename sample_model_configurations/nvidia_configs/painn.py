@@ -29,6 +29,8 @@ Models:
 
 CHECKPOINTS = {
     "painn-s2ef-oc20-all": "PaiNN-S2EF-OC20-All",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "painn:custom": None,
 }
 
 

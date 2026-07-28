@@ -8,6 +8,8 @@ they historically subclassed, so existing ``except LookupError`` /
 
 - ``CheckpointNotFoundError`` (rootstock.environment) — no installed env
   declares the requested canonical checkpoint id.
+- ``CustomWeightsError`` (rootstock.environment) — a ``:custom`` checkpoint
+  id and its ``weights`` file were paired or bound invalidly.
 - ``WorkerDiedError`` (rootstock.server) — the worker process failed at the
   socket level; carries a post-mortem.
 - ``OperationError`` (rootstock.operations) — an install/add operation

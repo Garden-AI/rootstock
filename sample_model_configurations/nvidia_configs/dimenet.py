@@ -35,6 +35,8 @@ CHECKPOINTS = {
     "dimenet-plus-plus-s2ef-oc20-20m": "DimeNet++-S2EF-OC20-20M",
     "dimenet-plus-plus-s2ef-oc20-2m": "DimeNet++-S2EF-OC20-2M",
     "dimenet-plus-plus-s2ef-oc20-200k": "DimeNet++-S2EF-OC20-200k",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "dimenet:custom": None,
 }
 
 

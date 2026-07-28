@@ -33,6 +33,8 @@ CHECKPOINTS = {
     "equiformer-v2-153m-s2ef-oc20-all-md": "EquiformerV2-153M-S2EF-OC20-All+MD",
     "equiformer-v2-31m-s2ef-oc20-all-md": "EquiformerV2-31M-S2EF-OC20-All+MD",
     "equiformer-v2-83m-s2ef-oc20-2m": "EquiformerV2-83M-S2EF-OC20-2M",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "equiformer:custom": None,
 }
 
 

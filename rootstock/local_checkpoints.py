@@ -34,9 +34,12 @@ from pathlib import Path
 
 from .config import DEFAULT_CONFIG_DIR
 from .environment import (
+    CUSTOM_CHECKPOINT_SUFFIX,
     CheckpointNotFoundError,
     declares_setup_from_path,
     find_env_for_checkpoint,
+    is_custom_checkpoint,
+    list_custom_checkpoints,
     list_declared_checkpoints,
 )
 from .exceptions import RootstockError
@@ -93,12 +96,17 @@ class LocalCheckpointEntry:
 @dataclass(frozen=True)
 class ResolvedCheckpoint:
     """Where a checkpoint id points: hosting env, plus the weights path and
-    registered default setup kwargs when the id is a local checkpoint."""
+    registered default setup kwargs when the id is a local checkpoint.
+
+    A ``<family>:custom`` id resolves to its hosting env only — the weights
+    path is bound at the call site from the user-supplied ``weights``
+    argument, so ``path`` stays None and ``is_custom`` is the marker."""
 
     checkpoint: str
     env_name: str
-    path: str | None = None  # None => canonical id
+    path: str | None = None  # None => canonical or :custom id
     setup_kwargs: dict = field(default_factory=dict)
+    is_custom: bool = False
 
     @property
     def is_local(self) -> bool:
@@ -356,26 +364,62 @@ def record_local_verification(
     save_local_registry(roots, registry_path)
 
 
+def _resolve_custom(root: Path | str, checkpoint_id: str) -> ResolvedCheckpoint:
+    """
+    Resolve a ``<family>:custom`` checkpoint via the entries installed envs
+    declare in ``CHECKPOINTS``.
+
+    The entry carries no weights (its value is ``None``) — the user's
+    ``weights`` file is bound at the call site. Which env hosts the id is
+    determined by which env's dict declares it, exactly like a canonical id.
+    """
+    declared = list_custom_checkpoints(root)
+    for env_name, custom_ids in declared.items():
+        if checkpoint_id in custom_ids:
+            return ResolvedCheckpoint(checkpoint=checkpoint_id, env_name=env_name, is_custom=True)
+
+    if declared:
+        listing = "\n".join(f"  {env}: {', '.join(ids)}" for env, ids in declared.items())
+        msg = (
+            f"No installed env declares the custom checkpoint "
+            f"'{checkpoint_id}'.\nDeclared '{CUSTOM_CHECKPOINT_SUFFIX}' "
+            f"entries by env:\n{listing}"
+        )
+    else:
+        msg = (
+            f"No installed env declares a '<family>{CUSTOM_CHECKPOINT_SUFFIX}' "
+            f"CHECKPOINTS entry, so user-supplied weights are not available "
+            f"at {root}. Ask the install maintainer to refresh the env "
+            f"sources — see docs/environments.md."
+        )
+    raise CheckpointNotFoundError(msg)
+
+
 def resolve_checkpoint(
     root: Path | str,
     checkpoint_id: str,
     registry_path: Path | str | None = None,
 ) -> ResolvedCheckpoint:
     """
-    Resolve a checkpoint id to its hosting env, checking env-declared
-    canonical ids first, then the user's local-checkpoint registry.
+    Resolve a checkpoint id to its hosting env. Env-declared ids come first
+    — a ``<family>:custom`` id looks up the ``:custom`` entries, everything
+    else the canonical ids (the two can't collide: canonical ids may not
+    contain ``:``) — then the user's local-checkpoint registry.
 
-    Canonical ids win: registration rejects collisions in the other
-    direction, but an env installed *after* a local registration can
-    introduce one — the canonical id is authoritative and `status` surfaces
-    the shadowing.
+    Canonical ids win over the registry: registration rejects collisions in
+    the other direction, but an env installed *after* a local registration
+    can introduce one — the canonical id is authoritative and `status`
+    surfaces the shadowing.
 
     Deliberately does not check that the env is built or the weights file
     still exists — resolution is also used for metadata lookups; callers
     that spawn a worker check before spawning.
 
-    Raises CheckpointNotFoundError when neither namespace has the id.
+    Raises CheckpointNotFoundError when no namespace has the id.
     """
+    if is_custom_checkpoint(checkpoint_id):
+        return _resolve_custom(root, checkpoint_id)
+
     for env_name, ckpts in list_declared_checkpoints(root).items():
         if checkpoint_id in ckpts:
             return ResolvedCheckpoint(checkpoint=checkpoint_id, env_name=env_name)
