@@ -174,7 +174,11 @@ def _cmd_status_json(state: InstallState) -> int:
 
 def cmd_list(args) -> int:
     """List registered environments."""
-    from ..environment import list_built_environments, list_environments
+    from ..environment import (
+        list_built_environments,
+        list_custom_checkpoints,
+        list_environments,
+    )
 
     root = get_root_or_exit(args)
 
@@ -190,5 +194,14 @@ def cmd_list(args) -> int:
     for name, path in sources:
         status = "built" if name in built_names else "source only"
         print(f"  {name:<20} [{status}]")
+
+    custom = list_custom_checkpoints(root)
+    if custom:
+        entries = ", ".join(cid for ids in custom.values() for cid in ids)
+        print(
+            f"\nTo run your own fine-tuned weights, use its family's "
+            f"':custom' checkpoint ({entries}) and pass your weights file "
+            f"(weights= in Python, --weights on the CLI)."
+        )
 
     return 0

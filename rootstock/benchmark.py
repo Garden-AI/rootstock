@@ -201,8 +201,9 @@ def run_worker_mode(args) -> int:
 
     setup_kwargs = json.loads(args.setup_kwargs) if args.setup_kwargs else {}
 
-    # Mirror the real worker wrapper's branch: local checkpoints load through
-    # the env's setup_from_path hook, canonical ids through setup().
+    # Mirror the real worker wrapper's branch: user-supplied weights (:custom
+    # checkpoints) load through the env's setup_from_path hook, canonical ids
+    # through setup().
     t0 = time.perf_counter()
     if getattr(args, "checkpoint_path", None):
         from env_source import setup_from_path  # type: ignore
@@ -416,17 +417,21 @@ def print_table(results: list[dict]) -> None:
 
 
 def list_available(root: Path) -> int:
-    from rootstock.environment import list_declared_checkpoints
+    from rootstock.environment import list_custom_checkpoints, list_declared_checkpoints
 
     declared = list_declared_checkpoints(root)
     if not declared:
         print(f"No envs installed at {root}. Run `rootstock install` first.")
         return 1
+    custom = list_custom_checkpoints(root)
     print(f"Checkpoints declared by installed envs at {root}:\n")
     for env, ckpts in declared.items():
-        ids = ", ".join(ckpts) if ckpts else "(none)"
+        all_ids = [*ckpts, *custom.get(env, [])]
+        ids = ", ".join(all_ids) if all_ids else "(none)"
         print(f"  {env:<16} {ids}")
     print("\nPass a few of these to --checkpoints.")
+    if custom:
+        print("The ':custom' entries benchmark your own fine-tune — pass --weights.")
     return 0
 
 

@@ -54,7 +54,7 @@ finally:
 sys.path.insert(0, spec["env_dir"])
 from rootstock.worker import run_worker
 
-# Local checkpoints (user-supplied weights) load through the env's opt-in
+# User-supplied weights (:custom checkpoints) load through the env's opt-in
 # setup_from_path hook; the path travels through run_worker's existing
 # checkpoint parameter, so workers frozen inside built envs need no change.
 # The imports are one-sided: canonical mode must not require the hook.

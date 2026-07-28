@@ -447,15 +447,26 @@ def find_env_for_checkpoint(root: Path | str, checkpoint_id: str) -> tuple[str, 
             return env_name, ckpts
 
     if declared:
+        # The ':custom' entries are part of the menu — list them alongside
+        # the canonical ids so user-weights support is discoverable exactly
+        # where installed support exists.
+        custom = list_custom_checkpoints(root)
         listing = "\n".join(
-            f"  {env}: {', '.join(ids) if ids else '(none)'}" for env, ids in declared.items()
+            f"  {env}: {', '.join([*ids, *custom.get(env, [])]) or '(none)'}"
+            for env, ids in declared.items()
         )
         msg = (
             f"No installed env declares checkpoint '{checkpoint_id}'.\n"
-            f"Declared canonical ids by env:\n{listing}\n"
+            f"Declared checkpoint ids by env:\n{listing}\n"
             f"If '{checkpoint_id}' belongs to an env you haven't installed yet, "
             f"run `rootstock install <env-file> --root {root}`."
         )
+        if custom:
+            msg += (
+                f"\nThe '{CUSTOM_CHECKPOINT_SUFFIX}' entries run your own "
+                f"weights file — pass it via weights= in Python or --weights "
+                f"on the CLI."
+            )
     else:
         msg = (
             f"No envs are installed at {root}. "
