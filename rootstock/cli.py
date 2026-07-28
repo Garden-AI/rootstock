@@ -48,9 +48,10 @@ Commands:
 
     rootstock usage report [--root <path>] [--json]
     rootstock usage compact [--root <path>]
-        Aggregate (read-only) or compact the anonymous usage-record spool at
-        {cache_root}/usage/. The spool is provisioned by setup-perms; without
-        it, usage collection is off.
+    rootstock usage push [--root <path>] [--dry-run]
+        Aggregate (read-only), compact, or push to the dashboard backend the
+        anonymous usage-record spool at {cache_root}/usage/. The spool is
+        provisioned by setup-perms; without it, usage collection is off.
 """
 
 import argparse
@@ -75,6 +76,7 @@ from .commands import (
     cmd_smoke_test,
     cmd_status,
     cmd_usage_compact,
+    cmd_usage_push,
     cmd_usage_report,
 )
 from .commands.common import ROOTSTOCK_ROOT_ENV
@@ -564,7 +566,8 @@ def main():
             "Maintainer-side view of the anonymous usage records that "
             "calculator sessions spool to {cache_root}/usage/. 'report' "
             "aggregates read-only; 'compact' folds raw records into "
-            "per-month rollup files."
+            "per-month rollup files; 'push' sends the aggregated rollup "
+            "rows to the dashboard backend."
         ),
     )
     usage_subparsers = usage_parser.add_subparsers(
@@ -602,6 +605,26 @@ def main():
         help="Cache root override (default: the install's own declaration)",
     )
     usage_compact_parser.set_defaults(func=cmd_usage_compact)
+
+    usage_push_parser = usage_subparsers.add_parser(
+        "push",
+        help="Push aggregated rollup rows to the dashboard backend",
+    )
+    usage_push_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    usage_push_parser.add_argument(
+        "--cache-root",
+        help="Cache root override (default: the install's own declaration)",
+    )
+    usage_push_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the endpoint URL and payload instead of pushing",
+    )
+    usage_push_parser.set_defaults(func=cmd_usage_push)
 
     # parse_known_args instead of parse_args so `rootstock benchmark ...` can
     # forward arbitrary flags to the benchmark's own parser. Every other

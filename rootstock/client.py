@@ -1,7 +1,7 @@
 """
 HTTP client for Rootstock backend API.
 
-Handles pushing manifests to the central registry.
+Handles pushing manifests and usage rollups to the central registry.
 """
 
 from __future__ import annotations
@@ -43,10 +43,39 @@ class RootstockClient:
         if not self.config.api_url:
             return False, "API URL not configured"
 
-        data = json.dumps(manifest.to_dict()).encode("utf-8")
+        return self._post(self.config.api_url, manifest.to_dict(), "Manifest pushed successfully")
+
+    def push_usage(self, cluster: str, rows: list[dict]) -> tuple[bool, str]:
+        """
+        Push aggregated usage rollup rows to the backend usage endpoint.
+
+        Args:
+            cluster: Cluster name the rollups are filed under
+            rows: Rollup rows as aggregated by ``summarize_spool`` — counts
+                only, never the user hashes
+
+        Returns:
+            (success, message) tuple
+        """
+        if not self.config.api_key:
+            return False, "API key not configured"
+        if not self.config.api_secret:
+            return False, "API secret not configured"
+        url = self.config.resolve_usage_api_url()
+        if not url:
+            return False, "Usage API URL not configured (set usage_api_url)"
+
+        return self._post(
+            url,
+            {"cluster": cluster, "rows": rows},
+            f"Pushed {len(rows)} rollup row(s) to {url}",
+        )
+
+    def _post(self, url: str, payload: dict, success_message: str) -> tuple[bool, str]:
+        data = json.dumps(payload).encode("utf-8")
 
         request = Request(
-            self.config.api_url,
+            url,
             data=data,
             headers={
                 "Content-Type": "application/json",
@@ -59,7 +88,7 @@ class RootstockClient:
         try:
             with urlopen(request, timeout=30) as response:
                 if response.status in (200, 201, 204):
-                    return True, "Manifest pushed successfully"
+                    return True, success_message
                 return False, f"Unexpected status: {response.status}"
         except HTTPError as e:
             return False, f"HTTP error {e.code}: {e.reason}"

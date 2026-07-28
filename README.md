@@ -89,7 +89,7 @@ Rootstock ships an experimental LAMMPS `fix` that spawns a worker subprocess, gi
 
 ## Usage Statistics
 
-On shared installs where the maintainer has provisioned it, each worker session drops one small anonymous JSON record into the install's `{cache_root}/usage/` directory: which environment/checkpoint/device ran, when, for how long, how many force calls it served, and which entry point started it. Nothing phones home — records stay on the cluster's shared filesystem until the install's maintainer aggregates them (`rootstock usage report`). No job ids, no simulation data, and no raw usernames are recorded: the only per-person field is a salted hash used to count distinct users. Runs with your own weights record only the `<family>:custom` checkpoint id — never the weights path.
+On shared installs where the maintainer has provisioned it, each worker session drops one small anonymous JSON record into the install's `{cache_root}/usage/` directory: which environment/checkpoint/device ran, when, for how long, how many force calls it served, and which entry point started it. Nothing phones home — records stay on the cluster's shared filesystem until the install's maintainer aggregates them (`rootstock usage report`) and, if the cluster is registered with the dashboard, pushes the aggregated monthly counts (`rootstock usage push`). No job ids, no simulation data, and no raw usernames are recorded: the only per-person field is a salted hash used to count distinct users, and checkpoints you register yourself with `rootstock add-local` appear as `(local)`, never by name. Only derived counts ever leave the cluster — the hashes stay in the spool.
 
 If any of this rubs you the wrong way, opt out for all of your sessions with:
 

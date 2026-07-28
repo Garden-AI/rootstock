@@ -27,6 +27,7 @@ import tomllib
 ROOTSTOCK_API_KEY_ENV = "ROOTSTOCK_API_KEY"
 ROOTSTOCK_API_SECRET_ENV = "ROOTSTOCK_API_SECRET"
 ROOTSTOCK_API_URL_ENV = "ROOTSTOCK_API_URL"
+ROOTSTOCK_USAGE_API_URL_ENV = "ROOTSTOCK_USAGE_API_URL"
 ROOTSTOCK_ROOT_ENV = "ROOTSTOCK_ROOT"
 
 # Default config location
@@ -42,6 +43,7 @@ class UserConfig:
     api_key: str | None = None
     api_secret: str | None = None
     api_url: str | None = None
+    usage_api_url: str | None = None
     name: str | None = None
     email: str | None = None
     is_maintainer: bool = False
@@ -49,6 +51,22 @@ class UserConfig:
     def is_push_enabled(self) -> bool:
         """Check if api_key, api_secret, and api_url are configured for pushing."""
         return bool(self.api_key and self.api_secret and self.api_url)
+
+    def resolve_usage_api_url(self) -> str | None:
+        """The endpoint usage rollups are pushed to.
+
+        Deployments of rootstock-admin expose the manifest and usage ingest
+        functions side by side (``...-manifest.modal.run`` /
+        ``...-usage.modal.run``), so when ``usage_api_url`` isn't configured
+        it is derived from ``api_url`` by swapping the function name. An
+        ``api_url`` that doesn't follow that naming can't be derived from —
+        set ``usage_api_url`` explicitly.
+        """
+        if self.usage_api_url:
+            return self.usage_api_url
+        if self.api_url and "-manifest" in self.api_url:
+            return self.api_url.replace("-manifest", "-usage", 1)
+        return None
 
     def validate(self) -> tuple[bool, str]:
         """
@@ -91,6 +109,7 @@ def load_config(config_path: Path | None = None) -> UserConfig:
         config.api_key = data.get("api_key")
         config.api_secret = data.get("api_secret")
         config.api_url = data.get("api_url")
+        config.usage_api_url = data.get("usage_api_url")
         config.is_maintainer = data.get("is_maintainer", False)
         maintainer = data.get("maintainer", {})
         config.name = maintainer.get("name")
@@ -103,6 +122,8 @@ def load_config(config_path: Path | None = None) -> UserConfig:
         config.api_secret = os.environ.get(ROOTSTOCK_API_SECRET_ENV)
     if not config.api_url:
         config.api_url = os.environ.get(ROOTSTOCK_API_URL_ENV)
+    if not config.usage_api_url:
+        config.usage_api_url = os.environ.get(ROOTSTOCK_USAGE_API_URL_ENV)
 
     return config
 
@@ -147,6 +168,8 @@ def save_config(config: UserConfig, config_path: Path | None = None) -> None:
         data["api_secret"] = config.api_secret
     if config.api_url:
         data["api_url"] = config.api_url
+    if config.usage_api_url:
+        data["usage_api_url"] = config.usage_api_url
 
     maintainer = {}
     if config.name:

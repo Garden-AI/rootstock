@@ -66,3 +66,28 @@ def test_unset_fields_are_omitted(tmp_path: Path):
     assert "api_key" not in text
     assert "[maintainer]" not in text
     assert "is_maintainer = false" in text
+
+
+def test_usage_api_url_round_trips(tmp_path: Path):
+    config = UserConfig(usage_api_url="https://example.com/usage")
+    assert _round_trip(tmp_path, config).usage_api_url == "https://example.com/usage"
+
+
+def test_usage_url_derived_from_standard_api_url():
+    config = UserConfig(api_url="https://garden-ai-prod--rootstock-admin-manifest.modal.run")
+    assert (
+        config.resolve_usage_api_url() == "https://garden-ai-prod--rootstock-admin-usage.modal.run"
+    )
+
+
+def test_explicit_usage_url_wins_over_derivation():
+    config = UserConfig(
+        api_url="https://garden-ai-prod--rootstock-admin-manifest.modal.run",
+        usage_api_url="https://example.com/usage",
+    )
+    assert config.resolve_usage_api_url() == "https://example.com/usage"
+
+
+def test_nonstandard_api_url_does_not_derive():
+    assert UserConfig(api_url="https://example.com/ingest").resolve_usage_api_url() is None
+    assert UserConfig().resolve_usage_api_url() is None
