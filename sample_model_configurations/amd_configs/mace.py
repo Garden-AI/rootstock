@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #     # 0.3.15+ needed for the mh-1 registry entry (matpes needs 0.3.13,
-#     # mpa-0 needs 0.3.10).
+#     # omol needs 0.3.14, mpa-0 needs 0.3.10).
 #     "mace-torch>=0.3.15",
 #     "ase>=3.22",
 #     # 2.4.1 is explicitly unsupported by mace-torch.
@@ -29,11 +29,13 @@ unchanged. cuEquivariance acceleration is CUDA-only and is not used here  -
 MACE falls back to the pure e3nn/torch path.
 
 Upstream-string routing in CHECKPOINTS: an `off:` prefix routes to mace_off()
-instead of mace_mp(); a `@head` suffix selects a head of a multi-head model
-(loaded in float64, per the MACE-MH-1 model card).
+and an `omol:` prefix to mace_omol() (float64, molecules only, reads `charge`
+and `spin` from atoms.info); a `@head` suffix selects a head of a multi-head
+model (loaded in float64, per the MACE-MH-1 model card).
 
-License: mace-matpes-r2scan-0 and mace-mh-1 heads are under the Academic
-Software License (ASL) — academic/non-commercial use only. The rest are MIT.
+License: mace-matpes-r2scan-0, mace-mh-1 heads, and mace-omol-0 are under the
+Academic Software License (ASL) — academic/non-commercial use only. The rest
+are MIT.
 """
 
 CHECKPOINTS = {
@@ -48,9 +50,10 @@ CHECKPOINTS = {
     "mace-mpa-0-medium": "medium-mpa-0",
     "mace-matpes-r2scan-0": "mace-matpes-r2scan-0",
     "mace-mh-1-matpes-r2scan": "mh-1@matpes_r2scan",
+    # Only the extra-large OMOL model has been released.
+    "mace-omol-0-extra-large": "omol:extra_large",
     # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
-    "mace-mp:custom": None,
-    "mace-off23:custom": None,
+    "mace:custom": None,
 }
 
 
@@ -60,6 +63,10 @@ def setup(checkpoint: str, device: str = "cuda"):
         from mace.calculators import mace_off
 
         return mace_off(model=arg[4:], device=device, default_dtype="float32")
+    if arg.startswith("omol:"):
+        from mace.calculators import mace_omol
+
+        return mace_omol(model=arg[5:], device=device, default_dtype="float64")
     from mace.calculators import mace_mp
 
     if "@" in arg:
