@@ -277,7 +277,7 @@ def create_private_socket_path(name: str) -> str:
     return path
 
 
-def create_server_socket(socket_path: str, timeout: float = None) -> socket.socket:
+def create_server_socket(socket_path: str, timeout: float | None = None) -> socket.socket:
     """
     Create and bind a Unix domain socket server.
 
@@ -303,7 +303,7 @@ def create_server_socket(socket_path: str, timeout: float = None) -> socket.sock
 
 
 def connect_unix_socket(
-    socket_path: str, timeout: float = None, max_retries: int = 50, retry_delay: float = 0.1
+    socket_path: str, timeout: float | None = None, max_retries: int = 50, retry_delay: float = 0.1
 ) -> socket.socket:
     """
     Connect to a Unix domain socket server with retries.

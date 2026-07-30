@@ -1097,6 +1097,9 @@ def fetch_checkpoint(
         # Refresh + push (takes the lock for its own load -> refresh -> save)
         update_and_push_manifest(root, quiet=True, push=push)
 
+    # Every path here either set fetched_at (fresh download) or found it
+    # already recorded (already_fetched); a failed download raised above.
+    assert fetched_at is not None
     return FetchResult(
         env_name=env_name,
         checkpoint=checkpoint,

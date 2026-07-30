@@ -41,7 +41,8 @@ def cmd_manifest_show(args) -> int:
         for name, env in manifest.environments.items():
             print(f"    {name}:")
             print(f"      Built at:     {env.built_at}")
-            print(f"      Source hash:  {env.source_hash[:20]}...")
+            hash_desc = f"{env.source_hash[:20]}..." if env.source_hash else "none"
+            print(f"      Source hash:  {hash_desc}")
             lock_desc = f"{env.lock_hash[:20]}..." if env.lock_hash else "none (pre-lockfile build)"
             print(f"      Lockfile:     {lock_desc}")
             print(f"      Dependencies: {len(env.dependencies)} packages")

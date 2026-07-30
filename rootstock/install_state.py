@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .environment import (
     list_built_environments,
@@ -31,7 +32,9 @@ from .manifest import (
 
 # Sentinel distinguishing "load the manifest for me" from an explicit
 # manifest (including an explicit None).
-_LOAD = object()
+# Sentinel meaning "load the manifest from disk"; typed Any so it can stand in
+# for the Manifest | None parameter it defaults.
+_LOAD: Any = object()
 
 
 @dataclass
@@ -81,7 +84,7 @@ class InstallState:
         }
 
 
-def read_install_state(root: Path | str, manifest: object = _LOAD) -> InstallState:
+def read_install_state(root: Path | str, manifest: Manifest | None = _LOAD) -> InstallState:
     """Read the merged filesystem + manifest state of an installation.
 
     Args:

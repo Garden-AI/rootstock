@@ -99,7 +99,8 @@ def render_commands(
         ["setfacl", "-dm", "o::r-X", str(install_root)],
     ]
 
-    separate_cache = cache_root is not None and Path(cache_root) != install_root
+    cache_path = Path(cache_root) if cache_root is not None else install_root
+    separate_cache = cache_path != install_root
     # The spool lives on the cache half of the install — that's the
     # runtime-writable side (on Frontier the install root is under /sw, which
     # must not take writes from user jobs).
@@ -116,14 +117,13 @@ def render_commands(
             cmds.insert(1, ["ln", "-sfn", str(spool_target), str(spool)])
 
     if separate_cache:
-        cache_root = Path(cache_root)
         cmds += [
-            ["chgrp", group, str(cache_root)],
+            ["chgrp", group, str(cache_path)],
             # Same reasoning, and it's what makes newly downloaded weights
             # world-readable regardless of the maintainer's umask. No
             # named-group entry — maintainer-only-write on the cache is the
             # accepted default.
-            ["setfacl", "-dm", "o::r-X", str(cache_root)],
+            ["setfacl", "-dm", "o::r-X", str(cache_path)],
         ]
 
     if retrofit:
@@ -139,8 +139,8 @@ def render_commands(
         ]
         if separate_cache:
             cmds += [
-                ["setfacl", "-R", "-m", "o::r-X", str(cache_root)],
-                ["setfacl", "-R", "-dm", "o::r-X", str(cache_root)],
+                ["setfacl", "-R", "-m", "o::r-X", str(cache_path)],
+                ["setfacl", "-R", "-dm", "o::r-X", str(cache_path)],
             ]
         # setgid has to hold on every *existing* directory too, not just the
         # root: a subdirectory without it hands new files the creator's primary
@@ -148,7 +148,7 @@ def render_commands(
         # dirs rather than one per dir.
         cmds += [_setgid_dirs(install_root)]
         if separate_cache:
-            cmds += [_setgid_dirs(cache_root)]
+            cmds += [_setgid_dirs(cache_path)]
 
     # Mode bits go *last*, deliberately. Setting an ACL rewrites the file mode
     # (the ACL's owner/mask/other entries are the mode bits), and on some
@@ -158,7 +158,7 @@ def render_commands(
     # mode after every setfacl is cheap and makes the recipe order-independent.
     cmds += [["chmod", INSTALL_ROOT_MODE, str(install_root)]]
     if separate_cache:
-        cmds += [["chmod", CACHE_ROOT_MODE, str(cache_root)]]
+        cmds += [["chmod", CACHE_ROOT_MODE, str(cache_path)]]
     if usage_spool:
         # After the retrofit setfacl/find pass, which would otherwise rewrite
         # the spool's mode along with everything else under the root. Moded

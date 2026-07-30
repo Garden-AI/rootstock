@@ -72,6 +72,11 @@ class RootstockClient:
         )
 
     def _post(self, url: str, payload: dict, success_message: str) -> tuple[bool, str]:
+        api_key = self.config.api_key
+        api_secret = self.config.api_secret
+        if api_key is None or api_secret is None:  # callers check; keep _post self-contained
+            return False, "API credentials not configured"
+
         data = json.dumps(payload).encode("utf-8")
 
         request = Request(
@@ -79,8 +84,8 @@ class RootstockClient:
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "Modal-Key": self.config.api_key,
-                "Modal-Secret": self.config.api_secret,
+                "Modal-Key": api_key,
+                "Modal-Secret": api_secret,
             },
             method="POST",
         )

@@ -21,7 +21,7 @@ def _wired_worker() -> tuple[MLIPWorker, IPIProtocol]:
     worker = MLIPWorker(calculator=None, socket_path="/tmp/unused")
     worker._socket = worker_sock
     worker._protocol = IPIProtocol(worker_sock)
-    worker._connect = lambda: None
+    worker._connect = lambda: worker._protocol
     return worker, IPIProtocol(server_sock)
 
 

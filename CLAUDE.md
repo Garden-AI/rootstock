@@ -12,8 +12,7 @@ Versioning is dynamic (git tags via uv-dynamic-versioning) — check `rootstock 
 
 ### Local Development
 ```bash
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv sync   # creates .venv with the package (editable) + dev dependency group
 ```
 
 ### CLI Commands
@@ -38,11 +37,15 @@ rootstock check-perms [<root>] [--cluster <name>] [--group <group>] [--json]
 rootstock list --root <path>
 ```
 
-### Linting
+### Linting, typechecking, tests
 ```bash
-ruff check rootstock/
-ruff format rootstock/
+uv run ruff check rootstock/ tests/
+uv run ruff format rootstock/ tests/
+uv run ty check
+uv run pytest --cov
 ```
+CI (`.github/workflows/ci.yml`) runs the same four checks on every PR;
+`ruff format` runs there with `--check`.
 
 ## Architecture
 

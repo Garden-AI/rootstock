@@ -11,12 +11,16 @@ dependencies = [
     "tomli-w>=1.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=7.0",
+    "pytest-cov>=5.0",
     "ruff>=0.1",
+    "ty>=0.0.60",
     "zensical>=0.0.27",
 ]
+
+[project.optional-dependencies]
 modal = [
     "modal>=0.56",
 ]
@@ -65,3 +69,33 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["rootstock"]
+branch = true
+
+[tool.coverage.report]
+precision = 1
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.ty.src]
+# The package is what's typechecked; tests, scripts/, and the PEP 723
+# environment sources (which import deps that only exist in built envs)
+# are out of scope.
+include = ["rootstock"]
+
+# The optional integrations import their extras (atomate2, mlipx, zntrack)
+# which aren't installed in the dev environment, and mix into third-party
+# base classes ty can't see — silence just those two rules there.
+[[tool.ty.overrides]]
+include = ["rootstock/integrations/**"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+unresolved-attribute = "ignore"

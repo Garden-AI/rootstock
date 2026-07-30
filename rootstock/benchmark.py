@@ -504,7 +504,11 @@ def main(argv=None) -> int:
         from rootstock.clusters import get_cluster
 
         cluster_info = get_cluster(args.cluster)
-    root = Path(args.root) if args.root else Path(cluster_info.root)
+    if args.root:
+        root = Path(args.root)
+    else:
+        assert cluster_info is not None  # p.error above guarantees --root or --cluster
+        root = Path(cluster_info.root)
     from rootstock.layout import resolve_cache_root
 
     cache_root = resolve_cache_root(root, explicit=args.cache_root)

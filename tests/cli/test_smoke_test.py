@@ -137,7 +137,8 @@ def test_smoke_test_returns_zero_when_all_pass(populated_root, monkeypatch):
 def test_smoke_test_filters_by_env(populated_root, monkeypatch):
     seen: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        smoke_module, "verify_checkpoint",
+        smoke_module,
+        "verify_checkpoint",
         lambda root, env_name, checkpoint, device, setup_kwargs, **_: (
             seen.append((env_name, checkpoint)) or (True, None)
         ),
@@ -150,7 +151,8 @@ def test_smoke_test_filters_by_env(populated_root, monkeypatch):
 def test_smoke_test_filters_by_env_and_checkpoint(populated_root, monkeypatch):
     seen: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        smoke_module, "verify_checkpoint",
+        smoke_module,
+        "verify_checkpoint",
         lambda root, env_name, checkpoint, device, setup_kwargs, **_: (
             seen.append((env_name, checkpoint)) or (True, None)
         ),

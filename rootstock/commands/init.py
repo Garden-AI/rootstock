@@ -74,7 +74,7 @@ def resolve_init_cache_root(args, root: Path, cluster: str | None) -> Path:
     print("support flock, or weights may belong on scratch).")
     split_default = "y" if suggested != root else "n"
     answer = prompt_with_default("Cache on a different filesystem? (y/n)", split_default)
-    if answer.lower() not in ("y", "yes"):
+    if (answer or "").lower() not in ("y", "yes"):
         print(f"  -> Cache root: {root} (same as install root)")
         return root
 
@@ -143,7 +143,7 @@ def cmd_init(args) -> int:
     print("Are you the maintainer of this rootstock installation?")
     print("Maintainers can configure API credentials to push manifests to the backend.")
     is_maintainer_input = prompt_with_default("Maintainer (y/n)", "n")
-    config.is_maintainer = is_maintainer_input.lower() in ("y", "yes")
+    config.is_maintainer = (is_maintainer_input or "").lower() in ("y", "yes")
 
     print()
 
@@ -174,7 +174,8 @@ def cmd_init(args) -> int:
     # Create directory structure. Most dirs live under the install root,
     # but cache/ and home/ live under the cache root — these may be the same
     # path or different filesystems depending on the cluster.
-    if not args.skip_dirs:
+    # (cache_root is None exactly when --skip-dirs was given.)
+    if cache_root is not None:
         print("\nCreating directory structure...")
 
         dirs_to_create = [
