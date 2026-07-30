@@ -33,8 +33,7 @@ CHECKPOINTS = {
     "mace-matpes-r2scan-0": "mace-matpes-r2scan-0",
     "mace-mh-1-matpes-r2scan": "mh-1@matpes_r2scan",
     # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
-    "mace-mp:custom": None,
-    "mace-off23:custom": None,
+    "mace:custom": None,
 }
 
 
