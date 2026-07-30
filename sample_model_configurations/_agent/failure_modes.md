@@ -309,6 +309,9 @@ were already resolved under the strict `explicit` rules.
 ROCm math libraries: ~2x the CUDA wheel. One venv is ~15-17 GB installed.
 **Fix:** Put the venv root AND the uv cache on a large volume, not the
 container/boot disk. Budget ~15-17 GB per env plus ~20 GB of shared wheel cache.
+On filesystems without reflink support (overlayfs), uv's default clone mode
+falls back to full copies — set `UV_LINK_MODE=hardlink` so venvs hardlink from
+the cache and each extra env costs ~nothing on top of it.
 
 ## torch-scatter / torch-sparse on ROCm: no wheels, must source-build
 

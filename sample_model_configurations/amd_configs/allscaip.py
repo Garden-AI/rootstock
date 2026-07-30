@@ -24,7 +24,9 @@ Identical to nvidia_configs/allscaip.py except torch resolves from the ROCm
 wheel index. fairchem-core v2 is a plain PyPI install (no
 torch-geometric/pyg-find-links), and AllScAIP's all-to-all attention lives
 in-package with no flash-attention or custom CUDA kernels — so the only ROCm
-change is the torch wheel index.
+change is the torch wheel index. On ROCm fairchem logs "Fallback to math
+attention for gradient based force prediction": same numbers, slower
+attention path.
 
 OMol checkpoints expect `charge` and `spin` in `atoms.info`.
 """
