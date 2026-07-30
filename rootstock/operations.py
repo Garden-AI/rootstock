@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -484,6 +485,58 @@ def _precompile_environment(env_python: Path, env_target: Path) -> None:
             print(f"    ... and {len(output) - 10} more lines")
 
 
+def _publish_python_interpreter(
+    tmp_python_dir: Path,
+    python_install_dir: Path,
+    progress: Progress | None,
+) -> None:
+    """Move a freshly downloaded interpreter into the shared ``.python/`` dir.
+
+    Parallel builds race here (uv downloads each build's interpreter to a
+    private tempdir; publication into the shared dir is ours to make safe):
+    each item is copied to a unique staging name *inside* ``.python/`` (same
+    filesystem) and atomically renamed into place, so a concurrent reader —
+    another build's ``uv venv`` — can never see a half-copied interpreter
+    tree. Losing the rename race to another build is fine: its copy is as
+    good as ours, so the staging copy is simply discarded.
+
+    Once the destination exists, leftover staging entries for that item
+    (from builds that crashed mid-copy) are swept. Sweeping a *live* loser's
+    staging is harmless: its copy or rename fails, it sees the destination
+    exists, and it carries on.
+    """
+    if not tmp_python_dir.exists():
+        return
+
+    for item in tmp_python_dir.iterdir():
+        dest = python_install_dir / item.name
+        if not dest.exists():
+            _say(progress, f"  Copying Python to {dest}")
+            # pid alone is not unique enough: parallel builds may be threads
+            # of one process (a batch driver), so salt with the thread id.
+            staging = python_install_dir / (
+                f"{item.name}.installing.{os.getpid()}.{threading.get_ident()}"
+            )
+            try:
+                if item.is_dir():
+                    shutil.copytree(item, staging)
+                else:
+                    shutil.copy2(item, staging)
+                staging.rename(dest)
+            except OSError:
+                # Tolerable only when another build actually won the race.
+                if not dest.exists():
+                    raise
+        # dest exists now — ours or another build's. Anything still staged
+        # for this item is dead weight (a crashed build's leftover, or our
+        # own copy after losing the race); reclaim the space.
+        for stale in python_install_dir.glob(f"{item.name}.installing.*"):
+            if stale.is_dir():
+                shutil.rmtree(stale, ignore_errors=True)
+            else:
+                stale.unlink(missing_ok=True)
+
+
 def install_environment(
     root: Path,
     source: str | Path,
@@ -695,16 +748,9 @@ def _build_and_swap(
         if result.returncode != 0:
             raise OperationError(f"Error downloading Python: {result.stderr}")
 
-        # Copy downloaded Python to root directory (if not already there)
-        if tmp_python_dir.exists():
-            for item in tmp_python_dir.iterdir():
-                dest = python_install_dir / item.name
-                if not dest.exists():
-                    if item.is_dir():
-                        _say(progress, f"  Copying Python to {dest}")
-                        shutil.copytree(item, dest)
-                    else:
-                        shutil.copy2(item, dest)
+        # Publish the downloaded Python into the shared root (if not already
+        # there) — staged-copy + atomic rename, safe against parallel builds.
+        _publish_python_interpreter(tmp_python_dir, python_install_dir, progress)
 
     # Phase 2: Create venv using the Python we just installed
     uv_env = os.environ.copy()
