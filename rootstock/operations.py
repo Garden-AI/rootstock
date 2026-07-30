@@ -92,6 +92,26 @@ class AddResult:
     verified_device: str | None
 
 
+@dataclass
+class FetchResult:
+    """Outcome of a successful :func:`fetch_checkpoint`."""
+
+    env_name: str
+    checkpoint: str
+    fetched_at: str
+    already_fetched: bool  # download skipped: weights were already cached
+
+
+@dataclass
+class VerifyResult:
+    """Outcome of a successful :func:`verify_fetched_checkpoint`."""
+
+    env_name: str
+    checkpoint: str
+    verified_at: str
+    verified_device: str
+
+
 def _say(progress: Progress | None, message: str) -> None:
     if progress is not None:
         progress(message)
@@ -953,43 +973,52 @@ def _ensure_manifest_entry(
     return env, env.checkpoints[checkpoint]
 
 
-def add_checkpoint(
-    root: Path,
-    checkpoint: str,
-    *,
-    device: str = "cuda",
-    verify: bool = True,
-    push: bool = True,
-    setup_kwargs: dict | None = None,
-    cache_root: Path | None = None,
-    progress: Progress | None = None,
-) -> AddResult:
-    """
-    Idempotent download-or-verify for a checkpoint by canonical id.
-
-    The hosting env is resolved by matching the id against each installed
-    env's CHECKPOINTS table. Downloads happen on CPU (the cache-aware path);
-    verification runs on ``device`` unless ``verify`` is False.
-
-    Raises CheckpointNotFoundError when no installed env declares the id,
-    and OperationError for download/verify failures (the failure is also
-    recorded in the manifest's ``last_error`` for the checkpoint).
-    """
-    root = Path(root)
-    setup_kwargs = setup_kwargs or {}
-    if cache_root is None:
-        cache_root = resolve_cache_root(root)
-
+def _resolve_built_env(root: Path, checkpoint: str) -> str:
+    """Resolve the hosting env for a checkpoint id, failing fast when it
+    isn't built (checked again inside each transaction by
+    :func:`_ensure_manifest_entry`, whose refresh needs it too)."""
     env_name, _ = find_env_for_checkpoint(root, checkpoint)
-
-    # Fail fast before any long-running work (checked again inside each
-    # transaction by _ensure_manifest_entry, whose refresh needs it too).
     env_dir = root / "envs" / env_name
     if not (env_dir / "bin" / "python").exists():
         raise OperationError(
             f"environment '{env_name}' is not built at {env_dir}.\n"
             f"Run: rootstock install <path-to-{env_name}.py> --root {root}"
         )
+    return env_name
+
+
+def fetch_checkpoint(
+    root: Path,
+    checkpoint: str,
+    *,
+    setup_kwargs: dict | None = None,
+    cache_root: Path | None = None,
+    refresh: bool = True,
+    push: bool = True,
+    progress: Progress | None = None,
+) -> FetchResult:
+    """
+    Idempotent CPU-side download of a checkpoint by canonical id.
+
+    The download half of :func:`add_checkpoint`, usable on its own: it needs
+    no GPU (so it can run on a login node), and downloads parallelize freely
+    — HF hub uses its own file locks, and distinct checkpoints touch distinct
+    cache files — where verification must stay bounded by GPU memory.
+
+    Records ``fetched_at``/``last_error`` in the manifest. ``refresh=False``
+    skips the trailing full manifest refresh (+ push): a batch driver running
+    many fetches refreshes once at the end instead of once per checkpoint.
+
+    Raises CheckpointNotFoundError when no installed env declares the id,
+    and OperationError when the download fails (also recorded in the
+    manifest's ``last_error``).
+    """
+    root = Path(root)
+    setup_kwargs = setup_kwargs or {}
+    if cache_root is None:
+        cache_root = resolve_cache_root(root)
+
+    env_name = _resolve_built_env(root, checkpoint)
 
     # Unlocked peek for idempotence; every write below loads fresh inside
     # its own transaction, so a racing writer costs at most a redundant
@@ -998,12 +1027,9 @@ def add_checkpoint(
     peek_env = peek.environments.get(env_name) if peek else None
     peek_ckpt = peek_env.checkpoints.get(checkpoint) if peek_env else None
     already_fetched = peek_ckpt is not None and peek_ckpt.fetched_at is not None
-
     fetched_at = peek_ckpt.fetched_at if peek_ckpt else None
-    verified_at: str | None = None
-    verified_device: str | None = None
 
-    # ---- Download phase (runs outside the lock) ------------------------
+    # ---- Download (runs outside the lock) -------------------------------
     if not already_fetched:
         _say(progress, f"Downloading {env_name}/{checkpoint} on CPU...")
         ok, err = _run_download(root, env_name, checkpoint, setup_kwargs, cache_root=cache_root)
@@ -1021,38 +1047,149 @@ def add_checkpoint(
     else:
         _say(progress, f"{env_name}/{checkpoint} already fetched at {fetched_at}")
 
-    # ---- Verify phase (runs outside the lock) --------------------------
+    if refresh:
+        # Refresh + push (takes the lock for its own load -> refresh -> save)
+        update_and_push_manifest(root, quiet=True, push=push)
+
+    return FetchResult(
+        env_name=env_name,
+        checkpoint=checkpoint,
+        fetched_at=fetched_at,
+        already_fetched=already_fetched,
+    )
+
+
+def verify_fetched_checkpoint(
+    root: Path,
+    checkpoint: str,
+    *,
+    device: str = "cuda",
+    setup_kwargs: dict | None = None,
+    cache_root: Path | None = None,
+    refresh: bool = True,
+    push: bool = True,
+    progress: Progress | None = None,
+) -> VerifyResult:
+    """
+    Verify a checkpoint on ``device`` and record the outcome in the manifest.
+
+    The verify half of :func:`add_checkpoint`, usable on its own — typically
+    after :func:`fetch_checkpoint` (a prior fetch isn't a hard precondition;
+    verification loads through the same cache-aware path and would download
+    missing weights itself). Each verification loads the full model onto
+    ``device``, so a batch driver must bound its concurrency, unlike the
+    freely-parallel fetch.
+
+    Success stamps ``verified_at``/``verified_device`` and clears
+    ``last_error``; failure clears the verified stamps and records the error.
+    ``refresh=False`` skips the trailing full manifest refresh (+ push), for
+    batch drivers that refresh once at the end.
+
+    Raises CheckpointNotFoundError when no installed env declares the id,
+    and OperationError when verification fails.
+    """
+    root = Path(root)
+    setup_kwargs = setup_kwargs or {}
+    if cache_root is None:
+        cache_root = resolve_cache_root(root)
+
+    env_name = _resolve_built_env(root, checkpoint)
+
+    # ---- Verify (runs outside the lock) ---------------------------------
+    _say(progress, f"Verifying {env_name}/{checkpoint} on {device}...")
+    ok, err = verify_checkpoint(
+        root, env_name, checkpoint, device, setup_kwargs, cache_root=cache_root
+    )
+    with _manifest_transaction(root) as manifest:
+        _, ckpt = _ensure_manifest_entry(manifest, root, env_name, checkpoint)
+        if ok:
+            ckpt.verified_at = now_iso()
+            ckpt.verified_device = device
+            ckpt.last_error = None
+            verified_at = ckpt.verified_at
+        else:
+            ckpt.verified_at = None
+            ckpt.verified_device = None
+            ckpt.last_error = f"verify: {err}"
+    if not ok:
+        raise OperationError(f"verify failed: {err}")
+    _say(progress, f"  verified_at = {verified_at} ({device})")
+
+    if refresh:
+        # Refresh + push (takes the lock for its own load -> refresh -> save)
+        update_and_push_manifest(root, quiet=True, push=push)
+
+    return VerifyResult(
+        env_name=env_name,
+        checkpoint=checkpoint,
+        verified_at=verified_at,
+        verified_device=device,
+    )
+
+
+def add_checkpoint(
+    root: Path,
+    checkpoint: str,
+    *,
+    device: str = "cuda",
+    verify: bool = True,
+    push: bool = True,
+    setup_kwargs: dict | None = None,
+    cache_root: Path | None = None,
+    progress: Progress | None = None,
+) -> AddResult:
+    """
+    Idempotent download-or-verify for a checkpoint by canonical id.
+
+    The composition of :func:`fetch_checkpoint` and
+    :func:`verify_fetched_checkpoint` (batch drivers call those directly to
+    parallelize the two phases independently), with a single manifest
+    refresh at the end. The hosting env is resolved by matching the id
+    against each installed env's CHECKPOINTS table. Downloads happen on CPU
+    (the cache-aware path); verification runs on ``device`` unless
+    ``verify`` is False.
+
+    Raises CheckpointNotFoundError when no installed env declares the id,
+    and OperationError for download/verify failures (the failure is also
+    recorded in the manifest's ``last_error`` for the checkpoint; a failure
+    skips the trailing refresh, exactly as before the split).
+    """
+    root = Path(root)
+    setup_kwargs = setup_kwargs or {}
+    if cache_root is None:
+        cache_root = resolve_cache_root(root)
+
+    fetched = fetch_checkpoint(
+        root,
+        checkpoint,
+        setup_kwargs=setup_kwargs,
+        cache_root=cache_root,
+        refresh=False,
+        progress=progress,
+    )
+
+    verified: VerifyResult | None = None
     if not verify:
         _say(progress, "(skipping verify per --no-verify)")
     else:
-        _say(progress, f"Verifying {env_name}/{checkpoint} on {device}...")
-        ok, err = verify_checkpoint(
-            root, env_name, checkpoint, device, setup_kwargs, cache_root=cache_root
+        verified = verify_fetched_checkpoint(
+            root,
+            checkpoint,
+            device=device,
+            setup_kwargs=setup_kwargs,
+            cache_root=cache_root,
+            refresh=False,
+            progress=progress,
         )
-        with _manifest_transaction(root) as manifest:
-            _, ckpt = _ensure_manifest_entry(manifest, root, env_name, checkpoint)
-            if ok:
-                ckpt.verified_at = now_iso()
-                ckpt.verified_device = device
-                ckpt.last_error = None
-                verified_at = ckpt.verified_at
-                verified_device = ckpt.verified_device
-            else:
-                ckpt.verified_at = None
-                ckpt.verified_device = None
-                ckpt.last_error = f"verify: {err}"
-        if not ok:
-            raise OperationError(f"verify failed: {err}")
-        _say(progress, f"  verified_at = {verified_at} ({device})")
 
     # Refresh + push (takes the lock for its own load -> refresh -> save)
     update_and_push_manifest(root, quiet=True, push=push)
 
     return AddResult(
-        env_name=env_name,
+        env_name=fetched.env_name,
         checkpoint=checkpoint,
-        fetched_at=fetched_at,
-        already_fetched=already_fetched,
-        verified_at=verified_at if verify else None,
-        verified_device=verified_device if verify else None,
+        fetched_at=fetched.fetched_at,
+        already_fetched=fetched.already_fetched,
+        verified_at=verified.verified_at if verified else None,
+        verified_device=verified.verified_device if verified else None,
     )
