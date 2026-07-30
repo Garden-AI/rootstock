@@ -27,6 +27,15 @@ Commands:
     rootstock add --list [--root <path>]
         List every canonical checkpoint id that add accepts, grouped by env.
 
+    rootstock sync [<source-dir>] [--root <path> | --cluster <name>] [--dry-run]
+        Converge the install to its declared state: build missing/changed
+        envs, download and verify missing/stale checkpoints, in parallel
+        phases. Idempotent — re-run to retry whatever failed.
+            rootstock sync --cluster delta --dry-run
+            rootstock sync ./environments/ --jobs 8
+            rootstock sync --rebuild                 # after a CLI version bump
+            rootstock sync --phases build,download   # login node (no GPU)
+
     rootstock benchmark [--root <path>] [--checkpoints <id> ...] [--devices cuda cpu] [--list]
         Measure i-PI IPC overhead: RootstockCalculator vs. the same calculator
         called directly inside its pre-built env. `--list` shows installed ids.
@@ -75,6 +84,7 @@ from .commands import (
     cmd_setup_perms,
     cmd_smoke_test,
     cmd_status,
+    cmd_sync,
     cmd_usage_compact,
     cmd_usage_push,
     cmd_usage_report,
@@ -244,6 +254,110 @@ def main():
         help="Don't push manifest to backend",
     )
     add_parser.set_defaults(func=cmd_add)
+
+    # sync command
+    sync_parser = subparsers.add_parser(
+        "sync",
+        help="Converge an install to its declared state (batch build/download/verify)",
+        description=(
+            "Plan and execute the delta between declared state (registered env "
+            "sources, optionally overlaid by a staging directory, plus their "
+            "CHECKPOINTS tables) and actual state (built envs + manifest). "
+            "Idempotent: re-running after a failure retries only what didn't "
+            "converge. Runs work in parallel per phase; verification "
+            "concurrency is bounded separately (each verify loads a model "
+            "onto the GPU)."
+        ),
+    )
+    sync_parser.add_argument(
+        "source_dir",
+        nargs="?",
+        help=(
+            "Optional directory of env source files (*.py) to register/update "
+            "before converging; defaults to the root's registered environments"
+        ),
+    )
+    sync_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    sync_parser.add_argument(
+        "--cluster",
+        help="Resolve the root from the cluster registry instead of --root",
+    )
+    sync_parser.add_argument(
+        "--env",
+        action="append",
+        metavar="NAME",
+        help="Limit to this environment (and its checkpoints); repeatable",
+    )
+    sync_parser.add_argument(
+        "--checkpoint",
+        action="append",
+        metavar="ID",
+        help="Limit to this checkpoint id; repeatable",
+    )
+    sync_parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Force-rebuild the selected environments (e.g. after a CLI version bump)",
+    )
+    sync_parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="Re-resolve env lockfiles during rebuilds instead of honoring them",
+    )
+    sync_parser.add_argument(
+        "--phases",
+        default=",".join(("build", "download", "verify")),
+        help=(
+            "Comma-separated subset of build,download,verify (default: all). "
+            "E.g. build,download on a login node, then verify in a GPU job"
+        ),
+    )
+    sync_parser.add_argument(
+        "--jobs",
+        type=int,
+        default=4,
+        help="Build/download parallelism (default: 4)",
+    )
+    sync_parser.add_argument(
+        "--verify-jobs",
+        type=int,
+        default=1,
+        help=(
+            "Verify parallelism (default: 1 — each verify loads a model onto "
+            "the GPU). With --device cuda, N workers round-robin cuda:0..N-1"
+        ),
+    )
+    sync_parser.add_argument("--device", default="cuda", help="Device for verify (default: cuda)")
+    sync_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the plan and exit without doing anything",
+    )
+    sync_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the plan and results as JSON on stdout (progress goes to stderr)",
+    )
+    sync_parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop scheduling new work after the first failure (default: keep going)",
+    )
+    sync_parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Don't push manifest to backend",
+    )
+    sync_parser.add_argument(
+        "--no-perm-check",
+        action="store_true",
+        help="Skip the up-front shared-install permission check",
+    )
+    sync_parser.set_defaults(func=cmd_sync)
 
     # smoke-test command
     smoke_parser = subparsers.add_parser(
