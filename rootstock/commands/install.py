@@ -13,34 +13,7 @@ from pathlib import Path
 
 from ..layout import ensure_layout_compatible, write_layout_marker
 from ..operations import OperationError, install_environment
-from .common import get_root_or_exit, resolve_cache_root
-
-
-def _warn_on_permissions(root: Path, cache_root: Path) -> None:
-    """Best-effort, bounded permission check run up front (warn-only).
-
-    A shared install with the wrong perms "works for the maintainer, breaks for
-    everyone else" — so we surface it before the slow build, not after. Never
-    fails the install; only the root directories are stat'd (no recursion), so
-    it's cheap on HPC filesystems.
-    """
-    from ..perms import check_permissions
-
-    issues = check_permissions(root, cache_root)
-    if not issues:
-        return
-
-    print(
-        "\nWarning: shared-install permissions may be misconfigured:",
-        file=sys.stderr,
-    )
-    for issue in issues:
-        print(f"  - {issue.path}: {issue.problem}", file=sys.stderr)
-    print(
-        "  Fix with: rootstock setup-perms --group <project-group> --apply\n"
-        "  (or pass --no-perm-check to silence this)",
-        file=sys.stderr,
-    )
+from .common import get_root_or_exit, resolve_cache_root, warn_on_permissions
 
 
 def _install_one(root: Path, source: str, args) -> int:
@@ -122,7 +95,7 @@ def cmd_install(args) -> int:
 
     # Surface permission problems before the (slow) build starts.
     if not getattr(args, "no_perm_check", False):
-        _warn_on_permissions(root, cache_root)
+        warn_on_permissions(root, cache_root)
 
     # Stamp (or backfill, for pre-marker installs) the layout version, and
     # make the install self-describing: declare its cache root. For legacy
