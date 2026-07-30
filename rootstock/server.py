@@ -336,10 +336,19 @@ class RootstockServer:
         """
         if self._process is None:
             fate = "worker process was never started"
-        elif self._process.poll() is not None:
-            fate = f"worker process exited with code {self._process.returncode}"
         else:
-            fate = "worker process is still running (hung, or blocked on the device?)"
+            # A dying worker delivers the socket error a beat before its exit
+            # status is reapable (the fd closes during process teardown), so a
+            # bare poll() here would misreport a dead worker as hung. Give it
+            # a short grace period; a truly hung worker just waits it out.
+            try:
+                returncode = self._process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                returncode = None
+            if returncode is not None:
+                fate = f"worker process exited with code {returncode}"
+            else:
+                fate = "worker process is still running (hung, or blocked on the device?)"
 
         lines = [f"{context}: {fate}."]
         if exc is not None:
