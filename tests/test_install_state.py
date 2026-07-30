@@ -94,9 +94,7 @@ def test_source_hash_drift_detected(tmp_path):
 
 def test_manifest_only_envs_are_not_installed(tmp_path):
     _make_built_env(tmp_path)
-    manifest = _manifest(
-        tmp_path, {"mace": _env_record(), "deleted": _env_record()}
-    )
+    manifest = _manifest(tmp_path, {"mace": _env_record(), "deleted": _env_record()})
     save_manifest(manifest, tmp_path)
 
     state = read_install_state(tmp_path)

@@ -164,7 +164,9 @@ def test_verify_rejects_nonfinite_virial(stub_server):
 
 def test_verify_catches_server_start_failure(stub_server):
     stub_server(
-        energy=0, forces=_ok_forces(), virial=_ok_virial(),
+        energy=0,
+        forces=_ok_forces(),
+        virial=_ok_virial(),
         raise_on_start=RuntimeError("worker died"),
     )
     ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
@@ -175,7 +177,9 @@ def test_verify_catches_server_start_failure(stub_server):
 
 def test_verify_catches_calculate_failure(stub_server):
     stub_server(
-        energy=0, forces=_ok_forces(), virial=_ok_virial(),
+        energy=0,
+        forces=_ok_forces(),
+        virial=_ok_virial(),
         raise_on_calc=ValueError("CUDA out of memory"),
     )
     ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")

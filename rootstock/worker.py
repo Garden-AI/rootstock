@@ -14,7 +14,7 @@ The worker is spawned via a generated wrapper script that calls run_worker().
 import json
 import traceback
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -63,7 +63,7 @@ class MLIPWorker:
         self._calculator = calculator
         self._socket = None
         self._protocol = None
-        self._atoms = None  # Cache ASE Atoms object
+        self._atoms: Any = None  # Cache ASE Atoms object (ase imported lazily)
 
         # Atomic species info from INIT message
         self._atomic_numbers: list[int] | None = None
@@ -73,7 +73,7 @@ class MLIPWorker:
         if self.log:
             print(f"[Worker] {msg}", file=self.log, flush=True)
 
-    def _connect(self):
+    def _connect(self) -> IPIProtocol:
         """Connect to the server, with the retry window from WorkerConfig."""
         config = get_worker_config()
         self._log(
@@ -88,6 +88,7 @@ class MLIPWorker:
         )
         self._protocol = IPIProtocol(self._socket, log=self.log)
         self._log("Connected")
+        return self._protocol
 
     def _create_atoms(self, positions: np.ndarray, cell: np.ndarray):
         """
@@ -106,6 +107,7 @@ class MLIPWorker:
         pbc = self._pbc if self._pbc is not None else [True, True, True]
         if (
             self._atoms is None
+            or self._atomic_numbers is None
             or not np.array_equal(self._atoms.numbers, self._atomic_numbers)
             or not np.array_equal(self._atoms.pbc, pbc)
         ):
@@ -166,7 +168,7 @@ class MLIPWorker:
         - READY -> receive POSDATA -> calculate -> HAVEDATA
         - HAVEDATA -> receive GETFORCE -> send FORCEREADY -> NEEDINIT
         """
-        self._connect()
+        protocol = self._connect()
 
         state = "NEEDINIT"
         energy = None
@@ -180,7 +182,7 @@ class MLIPWorker:
             while True:
                 # Wait for message from server
                 try:
-                    msg = self._protocol.recvmsg()
+                    msg = protocol.recvmsg()
                 except SocketClosed:
                     self._log("Server closed connection")
                     break
@@ -192,15 +194,15 @@ class MLIPWorker:
                 elif msg == "STATUS":
                     # Report current state
                     if state == "NEEDINIT":
-                        self._protocol.sendmsg("NEEDINIT")
+                        protocol.sendmsg("NEEDINIT")
                     elif state == "READY":
-                        self._protocol.sendmsg("READY")
+                        protocol.sendmsg("READY")
                     elif state == "HAVEDATA":
-                        self._protocol.sendmsg("HAVEDATA")
+                        protocol.sendmsg("HAVEDATA")
 
                 elif msg == "INIT":
                     # Receive initialization with atomic species info
-                    bead_index, init_bytes = self._protocol.recv_init()
+                    bead_index, init_bytes = protocol.recv_init()
 
                     # Parse JSON from init_bytes
                     if init_bytes and init_bytes != b"\x00":
@@ -224,7 +226,7 @@ class MLIPWorker:
                     if state not in ("READY", "NEEDINIT"):
                         self._log(f"Warning: POSDATA in state {state}")
 
-                    cell, positions = self._protocol.recv_posdata()
+                    cell, positions = protocol.recv_posdata()
                     self._log(f"Received POSDATA: {len(positions)} atoms")
 
                     # Calculate energy and forces. A failure (bad structure,
@@ -250,8 +252,11 @@ class MLIPWorker:
                     # Send results
                     if state != "HAVEDATA":
                         raise RuntimeError(f"GETFORCE in state {state}")
+                    # HAVEDATA is only entered after the POSDATA arm assigned
+                    # these (possibly the zeroed error-path values).
+                    assert energy is not None and forces is not None and virial is not None
 
-                    self._protocol.send_forceready(energy, forces, virial, extra)
+                    protocol.send_forceready(energy, forces, virial, extra)
                     self._log("Sent FORCEREADY")
 
                     state = "NEEDINIT"

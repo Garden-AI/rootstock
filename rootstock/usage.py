@@ -407,6 +407,8 @@ def compact_spool(cache_root: Path | str) -> SpoolSummary | None:
             raise
 
     summary = summarize_spool(cache_root)
+    if summary is None:
+        return None
     summary.raw_files = compacted
     summary.skipped = skipped
     summary.kept = kept

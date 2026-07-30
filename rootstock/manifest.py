@@ -188,10 +188,10 @@ class Maintainer:
 class CheckpointInfo:
     """Metadata for a single checkpoint registered with an environment."""
 
-    fetched_at: str | None = None       # ISO 8601, set when download succeeds
-    verified_at: str | None = None      # ISO 8601, set when smoke test passes
+    fetched_at: str | None = None  # ISO 8601, set when download succeeds
+    verified_at: str | None = None  # ISO 8601, set when smoke test passes
     verified_device: str | None = None  # "cuda", "cpu", etc.
-    last_error: str | None = None       # most recent error from add or smoke-test
+    last_error: str | None = None  # most recent error from add or smoke-test
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -216,7 +216,9 @@ class EnvironmentInfo:
     """
 
     built_at: str  # ISO 8601 timestamp
-    source_hash: str  # "sha256:abc123..."
+    # "sha256:abc123...", or None when the built env has no env_source.py
+    # to hash (e.g. one built by a pre-lockfile rootstock).
+    source_hash: str | None
     source: str  # Full source code of the environment file
     python_requires: str  # ">=3.11"
     dependencies: dict[str, str]  # {"mace-torch": "0.3.6"}
@@ -453,8 +455,7 @@ def _describe_lock(lock_path: Path) -> str:
     try:
         holder = json.loads(lock_path.read_text())
         return (
-            f"held by pid {holder.get('pid')} on {holder.get('host')} "
-            f"since {holder.get('created')}"
+            f"held by pid {holder.get('pid')} on {holder.get('host')} since {holder.get('created')}"
         )
     except (OSError, json.JSONDecodeError):
         return "holder unknown (lock file unreadable)"

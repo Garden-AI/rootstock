@@ -187,11 +187,11 @@ class RootstockServer:
         logger.debug("Server listening on %s", self.socket_path)
 
         # Launch worker process
-        self._start_worker()
+        process = self._start_worker()
 
         logger.info(
             "Launched worker (PID %s) for %s/%s on %s",
-            self._process.pid,
+            process.pid,
             self.env_name,
             self.checkpoint,
             self.device,
@@ -200,8 +200,8 @@ class RootstockServer:
         # Wait for worker to connect
         self._accept_connection()
 
-    def _start_worker(self):
-        """Start worker using pre-built environment."""
+    def _start_worker(self) -> subprocess.Popen:
+        """Start worker using pre-built environment; return the worker process."""
         from .spawn import WORKER_WRAPPER, spawn_in_env
 
         self._spawn_stack = contextlib.ExitStack()
@@ -240,6 +240,7 @@ class RootstockServer:
             stdout=self._stdout_file,
             stderr=self._stderr_file,
         )
+        return self._process
 
     def _accept_connection(self):
         """Accept connection from worker process.
@@ -251,25 +252,30 @@ class RootstockServer:
         way for the caller's timeout to fire (observed on Delta, workers
         blocked in Lustre reads of /work/hdd during model load).
         """
+        server_socket = self._server_socket
+        process = self._process
+        assert server_socket is not None and process is not None  # set by start()
+
         # Use short timeout for accept so we can check if process died
-        self._server_socket.settimeout(1.0)
+        server_socket.settimeout(1.0)
         deadline = time.monotonic() + self.timeout
         next_heartbeat = 30.0
 
         while True:
             try:
-                self._client_socket, addr = self._server_socket.accept()
+                client_socket, addr = server_socket.accept()
+                self._client_socket = client_socket
                 break
             except TimeoutError:
                 # Check if process died
-                if self._process.poll() is not None:
+                if process.poll() is not None:
                     raise self._worker_failure_error("Worker process died before connecting")
                 waited = self.timeout - (deadline - time.monotonic())
                 if waited >= next_heartbeat:
                     logger.info(
                         "Still waiting for worker %d to connect (%.0fs elapsed, "
                         "typically loading the model)",
-                        self._process.pid,
+                        process.pid,
                         waited,
                     )
                     next_heartbeat += 30.0
@@ -288,10 +294,10 @@ class RootstockServer:
                     raise error
 
         # Restore original timeout
-        self._server_socket.settimeout(self.timeout)
-        self._client_socket.settimeout(self.timeout)
+        server_socket.settimeout(self.timeout)
+        client_socket.settimeout(self.timeout)
 
-        self._protocol = IPIProtocol(self._client_socket)
+        self._protocol = IPIProtocol(client_socket)
         self._connected = True
 
         from .manifest import now_iso
@@ -371,7 +377,7 @@ class RootstockServer:
             forces: Nx3 forces in eV/Angstrom
             virial: 3x3 virial tensor in eV
         """
-        if not self._connected:
+        if not self._connected or self._protocol is None:
             raise RuntimeError("Server not connected. Call start() first.")
 
         # A worker that dies mid-exchange (GPU OOM, batch-system kill) can't
@@ -385,17 +391,16 @@ class RootstockServer:
 
             if status == "NEEDINIT":
                 # Send INIT with atomic species info
-                init_data = {
-                    "numbers": atomic_numbers.tolist() if atomic_numbers is not None else None,
-                    "pbc": [bool(p) for p in pbc] if pbc is not None else [True, True, True],
-                }
+                numbers = atomic_numbers.tolist() if atomic_numbers is not None else None
+                pbc_list = [bool(p) for p in pbc] if pbc is not None else [True, True, True]
+                init_data = {"numbers": numbers, "pbc": pbc_list}
                 init_bytes = json.dumps(init_data).encode("utf-8")
                 self._protocol.send_init(bead_index=0, init_string=init_bytes)
 
                 # Track what we sent
                 self._init_sent = True
-                self._init_numbers = init_data["numbers"]
-                self._init_pbc = init_data["pbc"]
+                self._init_numbers = numbers
+                self._init_pbc = pbc_list
 
                 self._protocol.send_status()
                 status = self._protocol.recv_status()
@@ -433,7 +438,11 @@ class RootstockServer:
         can't-fail guarantees live in record_session; the only job here is
         gathering the fields and making the write once per session.
         """
-        if self.usage_client is None or self._session_started_at is None:
+        if (
+            self.usage_client is None
+            or self._session_started_at is None
+            or self._session_started_monotonic is None
+        ):
             return
         started_at = self._session_started_at
         duration_s = time.monotonic() - self._session_started_monotonic

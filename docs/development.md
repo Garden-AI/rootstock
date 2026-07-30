@@ -5,17 +5,21 @@
 ```bash
 git clone https://github.com/Garden-AI/rootstock.git
 cd rootstock
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv sync
 ```
+
+`uv sync` creates `.venv` and installs the package (editable) plus the dev
+dependency group.
 
 ## Code quality
 
-Run linting before committing:
+CI runs these same checks on every pull request (`.github/workflows/ci.yml`):
 
 ```bash
-ruff check rootstock/
-ruff format rootstock/
+uv run ruff check rootstock/ tests/
+uv run ruff format --check rootstock/ tests/
+uv run ty check
+uv run pytest --cov
 ```
 
 ## Project structure

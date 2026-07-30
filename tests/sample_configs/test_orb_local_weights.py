@@ -101,9 +101,7 @@ class _FakeResponse(io.BytesIO):
 
 
 def test_fetch_downloads_atomically(env_module, monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda url: _FakeResponse(b"checkpoint-bytes")
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url: _FakeResponse(b"checkpoint-bytes"))
     dest = tmp_path / "orb" / "orb-v2.ckpt"
     env_module._fetch("https://example.com/orb-v2.ckpt", dest)
 
@@ -112,9 +110,7 @@ def test_fetch_downloads_atomically(env_module, monkeypatch, tmp_path: Path):
     assert list(dest.parent.iterdir()) == [dest]
 
 
-def test_fetch_cleans_up_partial_download_on_failure(
-    env_module, monkeypatch, tmp_path: Path
-):
+def test_fetch_cleans_up_partial_download_on_failure(env_module, monkeypatch, tmp_path: Path):
     def _boom(url):
         raise OSError("network down")
 
@@ -216,9 +212,7 @@ def test_setup_fetches_weights_on_cold_cache(wired_env, monkeypatch, tmp_path: P
     model cache, then loads from the local file."""
     module, checkpoint, calls = wired_env
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda url: _FakeResponse(b"downloaded")
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url: _FakeResponse(b"downloaded"))
 
     module.setup(checkpoint, device="cpu")
 

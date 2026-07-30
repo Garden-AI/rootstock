@@ -240,10 +240,11 @@ Rootstock uses `uv` to build an isolated virtual environment from these dependen
 ```bash
 git clone https://github.com/Garden-AI/rootstock.git
 cd rootstock
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-ruff check rootstock/
-ruff format rootstock/
+uv sync
+uv run ruff check rootstock/ tests/
+uv run ruff format rootstock/ tests/
+uv run ty check
+uv run pytest
 ```
 
 ## Get Involved

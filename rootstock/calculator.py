@@ -207,10 +207,11 @@ class RootstockCalculator(Calculator):
         self._socket_name = f"rootstock_{uuid.uuid4().hex[:8]}"
         self._server: RootstockServer | None = None
 
-    def _ensure_server(self):
-        """Start server if not already running."""
-        if self._server is None:
-            self._server = RootstockServer(
+    def _ensure_server(self) -> RootstockServer:
+        """Start server if not already running; return the live server."""
+        server = self._server
+        if server is None:
+            server = self._server = RootstockServer(
                 env_name=self.env_name,
                 checkpoint=self.checkpoint,
                 device=self.device,
@@ -221,7 +222,8 @@ class RootstockCalculator(Calculator):
                 timeout=self.timeout,
                 checkpoint_path=self.checkpoint_path,
             )
-            self._server.start()
+            server.start()
+        return server
 
     def calculate(
         self,
@@ -241,15 +243,19 @@ class RootstockCalculator(Calculator):
         Calculator.calculate(self, atoms, properties, system_changes)
 
         # Ensure server is running
-        self._ensure_server()
+        server = self._ensure_server()
+
+        calc_atoms = self.atoms
+        if calc_atoms is None:
+            raise RuntimeError("No atoms to calculate; pass an Atoms object or attach one first.")
 
         # Get results from worker
         try:
-            energy, forces, virial = self._server.calculate(
-                positions=self.atoms.positions,
-                cell=np.array(self.atoms.cell),
-                atomic_numbers=self.atoms.numbers,
-                pbc=list(self.atoms.pbc),
+            energy, forces, virial = server.calculate(
+                positions=calc_atoms.positions,
+                cell=np.array(calc_atoms.cell),
+                atomic_numbers=calc_atoms.numbers,
+                pbc=list(calc_atoms.pbc),
             )
         except WorkerDiedError:
             # A dead worker can't serve the next call either. Tear the server
@@ -276,8 +282,8 @@ class RootstockCalculator(Calculator):
         self.results["forces"] = forces
 
         # Convert virial to stress if cell is 3D
-        if self.atoms.cell.rank == 3 and any(self.atoms.pbc):
-            volume = self.atoms.get_volume()
+        if calc_atoms.cell.rank == 3 and any(calc_atoms.pbc):
+            volume = calc_atoms.get_volume()
             stress_tensor = -virial / volume
             self.results["stress"] = full_3x3_to_voigt_6_stress(stress_tensor)
         else:

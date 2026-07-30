@@ -41,7 +41,7 @@ def _run_one_force_call(calculator) -> tuple[float, np.ndarray, np.ndarray, byte
     worker = MLIPWorker(calculator=calculator, socket_path="/tmp/unused")
     worker._socket = worker_sock
     worker._protocol = IPIProtocol(worker_sock)
-    worker._connect = lambda: None
+    worker._connect = lambda: worker._protocol
 
     server = IPIProtocol(server_sock)
     server.send_init(bead_index=0, init_string=INIT_JSON)
@@ -91,7 +91,7 @@ def test_worker_survives_a_failed_calculation():
     worker = MLIPWorker(calculator=calc, socket_path="/tmp/unused")
     worker._socket = worker_sock
     worker._protocol = IPIProtocol(worker_sock)
-    worker._connect = lambda: None
+    worker._connect = lambda: worker._protocol
 
     server = IPIProtocol(server_sock)
     server.send_init(bead_index=0, init_string=INIT_JSON)
