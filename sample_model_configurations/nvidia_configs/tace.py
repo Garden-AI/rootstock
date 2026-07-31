@@ -15,11 +15,8 @@
 # ///
 """TACE env — hosts TECE/TACE foundation checkpoints (Xu, Xie & Hu).
 
-Weights download ungated from the xvzemin/tace-foundations HF repo
-(CC-BY-4.0) into ~/.cache/tace, which lands in the shared cache via the
-redirected HOME. openequivariance CUDA-kernel acceleration is optional and
-sdist-only on PyPI, so it is not used here — TACE falls back to the e3nn
-path.
+openequivariance CUDA-kernel acceleration is optional upstream and not
+installed here — TACE runs on the e3nn path.
 """
 
 CHECKPOINTS = {

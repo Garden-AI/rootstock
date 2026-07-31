@@ -29,13 +29,11 @@ unchanged. cuEquivariance acceleration is CUDA-only and is not used here  -
 MACE falls back to the pure e3nn/torch path.
 
 Upstream-string routing in CHECKPOINTS: an `off:` prefix routes to mace_off()
-and an `omol:` prefix to mace_omol() (float64, molecules only, reads `charge`
-and `spin` from atoms.info); a `@head` suffix selects a head of a multi-head
-model (loaded in float64, per the MACE-MH-1 model card).
+and an `omol:` prefix to mace_omol() (float64, molecules only); a `@head`
+suffix selects a head of a multi-head model (loaded in float64, per the
+MACE-MH-1 model card).
 
-License: mace-matpes-r2scan-0, mace-mh-1 heads, and mace-omol-0 are under the
-Academic Software License (ASL) — academic/non-commercial use only. The rest
-are MIT.
+The OMOL checkpoint expects `charge` and `spin` in `atoms.info`.
 """
 
 CHECKPOINTS = {

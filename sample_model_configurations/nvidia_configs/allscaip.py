@@ -18,6 +18,7 @@ OMol checkpoints expect `charge` and `spin` in `atoms.info`.
 
 CHECKPOINTS = {
     "allscaip-md-conserving-all-omol": "allscaip-md-conserving-all-omol",
+    "allscaip-md-direct-all-omol": "allscaip-md-direct-all-omol",
     # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
     "allscaip:custom": None,
 }

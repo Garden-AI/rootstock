@@ -14,7 +14,7 @@
 The upstream string encodes model@version; versions are pinned rather than
 "latest" so rebuilds serve the same weights. pet-omatpes-l is trained at the
 r2SCAN level of theory — its energies are not comparable to the PBE-level
-pet-oam models. Weights download ungated from the lab-cosmo/upet HF repo.
+pet-oam models.
 """
 
 CHECKPOINTS = {

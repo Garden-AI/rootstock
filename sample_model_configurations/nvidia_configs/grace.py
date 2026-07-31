@@ -7,17 +7,11 @@
 # ///
 """GRACE env — hosts GRACE foundation checkpoints via tensorpotential.
 
-GRACE runs on TensorFlow, not torch — tensorpotential pulls
-tensorflow[and-cuda] itself (pip-shipped CUDA/cuDNN, so the node's NVIDIA
-driver must be compatible). TPCalculator has no device argument: TF grabs
-whatever GPU it sees, so device selection happens via CUDA_VISIBLE_DEVICES,
-and both it and TF_USE_LEGACY_KERAS must be set before the first TF import.
-Weights download ungated from the AMS-ICAMS-RUB HF repo into ~/.cache/grace
-under the redirected HOME. The first calculation triggers an XLA compile —
+GRACE runs on TensorFlow, not torch. TPCalculator has no device argument:
+TF grabs whatever GPU it sees, so device selection happens via
+CUDA_VISIBLE_DEVICES, and both it and TF_USE_LEGACY_KERAS must be set
+before the first TF import. The first calculation triggers an XLA compile —
 a slow first step is expected.
-
-License: code and all GRACE foundation models are under the Academic
-Software License (ASL) — academic/non-commercial use only.
 """
 
 CHECKPOINTS = {

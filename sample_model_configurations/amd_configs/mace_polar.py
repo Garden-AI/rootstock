@@ -26,8 +26,7 @@
 
 Identical to nvidia_configs/mace_polar.py except torch resolves from the ROCm
 wheel index. Kept separate from the stable `mace` env because of the extra
-git-only graph-longrange dependency. Loaded via mace_polar(), a separate
-route from the mace_mp()/mace_off() loaders.
+git-only graph-longrange dependency.
 
 POLAR checkpoints expect `charge`, `spin`, and `external_field` in atoms.info.
 """
