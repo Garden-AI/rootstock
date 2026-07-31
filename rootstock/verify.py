@@ -43,7 +43,8 @@ def _smoke_test_atoms() -> "Atoms":  # noqa: UP037 — Atoms is TYPE_CHECKING-on
         cell=[10.0, 10.0, 10.0],
         pbc=True,
     )
-    # eSEN OMol checkpoints expect these. Harmless for everyone else.
+    # OMol-trained checkpoints (eSEN, Orb v3) require these. Harmless for
+    # everyone else.
     atoms.info["charge"] = 0
     atoms.info["spin"] = 1
     # Break any accidental symmetry so forces aren't trivially zero.
@@ -108,6 +109,7 @@ def verify_checkpoint(
             cell=np.array(atoms.cell),
             atomic_numbers=atoms.numbers,
             pbc=list(atoms.pbc),
+            info=dict(atoms.info),
         )
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"

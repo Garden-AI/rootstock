@@ -32,6 +32,7 @@ class _StubServer:
         self._raise_on_calc = raise_on_calc
         self.started = False
         self.stopped = False
+        self.calculate_kwargs: dict | None = None
         _StubServer.instances.append(self)
 
     def start(self):
@@ -39,7 +40,14 @@ class _StubServer:
             raise self._raise_on_start
         self.started = True
 
-    def calculate(self, *, positions, cell, atomic_numbers, pbc):
+    def calculate(self, *, positions, cell, atomic_numbers, pbc, info=None):
+        self.calculate_kwargs = {
+            "positions": positions,
+            "cell": cell,
+            "atomic_numbers": atomic_numbers,
+            "pbc": pbc,
+            "info": info,
+        }
         if self._raise_on_calc is not None:
             raise self._raise_on_calc
         return self._energy, self._forces, self._virial
@@ -185,6 +193,15 @@ def test_verify_catches_calculate_failure(stub_server):
     ok, err = verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert ok is False
     assert "ValueError" in err
+
+
+def test_verify_forwards_atoms_info(stub_server):
+    """charge/spin must reach the worker — OMol models (eSEN, Orb v3) reject
+    calculations without them."""
+    Stub = stub_server(energy=-10.5, forces=_ok_forces(), virial=_ok_virial())
+    verify.verify_checkpoint(Path("/tmp"), "orb_v3", "orb-v3-conservative-omol", "cuda")
+    info = Stub.instances[0].calculate_kwargs["info"]
+    assert info == {"charge": 0, "spin": 1}
 
 
 def test_smoke_test_atoms_has_charge_and_spin():
