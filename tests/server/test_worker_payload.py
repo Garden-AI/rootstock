@@ -19,8 +19,9 @@ def captured_payload(monkeypatch):
     captured = {}
 
     @contextmanager
-    def fake_spawn(root, env_name, wrapper_source, payload, cache_root=None):
+    def fake_spawn(root, env_name, wrapper_source, payload, cache_root=None, offline=False):
         captured.update(payload)
+        captured["_offline"] = offline
         raise _StopSpawn("payload captured")
         yield  # pragma: no cover
 
@@ -57,3 +58,15 @@ def test_payload_checkpoint_path_defaults_to_none(captured_payload, tmp_path: Pa
     )
     _start(server)
     assert captured_payload["checkpoint_path"] is None
+
+
+def test_worker_spawns_offline(captured_payload, tmp_path: Path):
+    """Workers serve pre-fetched weights — hub network access is forbidden."""
+    server = RootstockServer(
+        env_name="uma",
+        checkpoint="uma-s-1p1",
+        device="cpu",
+        root=tmp_path,
+    )
+    _start(server)
+    assert captured_payload["_offline"] is True
