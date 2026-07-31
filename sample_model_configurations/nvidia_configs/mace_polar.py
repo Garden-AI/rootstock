@@ -22,6 +22,8 @@ CHECKPOINTS = {
     "mace-polar-1-s": "polar-1-s",
     "mace-polar-1-m": "polar-1-m",
     "mace-polar-1-l": "polar-1-l",
+    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
+    "mace-polar:custom": None,
 }
 
 
@@ -29,3 +31,11 @@ def setup(checkpoint: str, device: str = "cuda"):
     from mace.calculators import mace_polar
 
     return mace_polar(model=CHECKPOINTS[checkpoint], device=device, default_dtype="float32")
+
+
+def setup_from_path(path: str, device: str = "cuda"):
+    # Custom checkpoints (`:custom` ids with user weights): mace_polar() accepts a
+    # weights file directly, keeping the PolarMACE model-type wiring.
+    from mace.calculators import mace_polar
+
+    return mace_polar(model=path, device=device, default_dtype="float32")
