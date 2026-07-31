@@ -237,6 +237,22 @@ def test_spawn_in_env_default_cache_root_uses_install_root(tmp_path: Path):
         assert spec.env["XDG_CACHE_HOME"] == str(tmp_path / "cache")
 
 
+def test_spawn_in_env_offline_sets_hf_hub_offline(tmp_path: Path):
+    """Workers must not touch the network — hub freshness checks on no-internet
+    compute nodes can crash setup() instead of falling back to the cache."""
+    _make_fake_env(tmp_path)
+    with spawn_in_env(tmp_path, "fake_env", WORKER_WRAPPER, {}, offline=True) as spec:
+        assert spec.env["HF_HUB_OFFLINE"] == "1"
+
+
+def test_spawn_in_env_online_by_default(tmp_path: Path, monkeypatch):
+    """The download wrapper needs the network — offline must be opt-in."""
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    _make_fake_env(tmp_path)
+    with spawn_in_env(tmp_path, "fake_env", WORKER_WRAPPER, {}) as spec:
+        assert "HF_HUB_OFFLINE" not in spec.env
+
+
 # ---------- RootstockCalculator wiring ------------------------------------
 
 

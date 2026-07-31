@@ -115,6 +115,7 @@ def spawn_in_env(
     wrapper_source: str,
     payload: dict,
     cache_root: Path | None = None,
+    offline: bool = False,
 ) -> Iterator[SpawnCommand]:
     """
     Stage ``wrapper_source`` + a JSON sidecar for ``payload`` and yield the
@@ -127,6 +128,11 @@ def spawn_in_env(
         payload: JSON-serializable values the wrapper reads from the sidecar.
             ``env_dir`` is filled in here; everything else is the caller's.
         cache_root: Optional split cache root (see get_model_cache_env).
+        offline: Forbid HuggingFace Hub network access (HF_HUB_OFFLINE=1).
+            Workers serve weights pre-fetched by ``rootstock add`` and often
+            run on compute nodes with no internet, where the hub's freshness
+            HEAD request can crash setup() instead of falling back to the
+            cached file. Downloads leave this off.
 
     Raises:
         RuntimeError: the environment is not built.
@@ -137,6 +143,8 @@ def spawn_in_env(
 
     env = os.environ.copy()
     env.update(get_model_cache_env(root, cache_root))
+    if offline:
+        env["HF_HUB_OFFLINE"] = "1"
 
     tmp_dir = tempfile.mkdtemp(prefix="rootstock_spawn_")
     try:

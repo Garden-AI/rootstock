@@ -213,6 +213,7 @@ class RootstockServer:
                     "setup_kwargs": self.setup_kwargs,
                 },
                 cache_root=self.cache_root,
+                offline=True,
             )
         )
 
