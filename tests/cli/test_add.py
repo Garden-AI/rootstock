@@ -94,6 +94,7 @@ def _make_args(root: Path, **overrides):
     args.kwarg = overrides.get("kwarg")
     args.device = overrides.get("device", "cuda")
     args.no_verify = overrides.get("no_verify", False)
+    args.force = overrides.get("force", False)
     args.root = str(root)
     args.no_push = overrides.get("no_push", True)
     return args
@@ -157,6 +158,22 @@ def test_add_then_add_is_idempotent(fake_root, monkeypatch):
     assert ckpt.verified_at is not None
     assert ckpt.verified_device == "cuda"
     assert ckpt.last_error is None
+
+
+def test_add_force_redownloads(fake_root, monkeypatch):
+    """--force repairs a cache file gone missing behind the manifest's
+    fetched stamp."""
+    download_calls = []
+    monkeypatch.setattr(
+        operations,
+        "_run_download",
+        lambda *a, **kw: (download_calls.append(a), (True, None))[1],
+    )
+
+    assert cmd_add(_make_args(fake_root, no_verify=True)) == 0
+    assert cmd_add(_make_args(fake_root, no_verify=True, force=True)) == 0
+
+    assert len(download_calls) == 2, "--force must re-run the download"
 
 
 def test_add_records_download_failure_and_returns_1(fake_root, monkeypatch):

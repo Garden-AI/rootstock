@@ -1041,6 +1041,7 @@ def fetch_checkpoint(
     cache_root: Path | None = None,
     refresh: bool = True,
     push: bool = True,
+    force: bool = False,
     progress: Progress | None = None,
 ) -> FetchResult:
     """
@@ -1054,6 +1055,12 @@ def fetch_checkpoint(
     Records ``fetched_at``/``last_error`` in the manifest. ``refresh=False``
     skips the trailing full manifest refresh (+ push): a batch driver running
     many fetches refreshes once at the end instead of once per checkpoint.
+
+    ``force=True`` re-runs the download even when the manifest records the
+    checkpoint as fetched — the repair path for cache files that have gone
+    missing behind the manifest's back (cleaned, or an interrupted download
+    that stamped anyway). The underlying download is cache-aware, so a
+    forced fetch of an intact checkpoint costs a cache hit, not a transfer.
 
     Raises CheckpointNotFoundError when no installed env declares the id,
     and OperationError when the download fails (also recorded in the
@@ -1072,7 +1079,7 @@ def fetch_checkpoint(
     peek = load_manifest(root)
     peek_env = peek.environments.get(env_name) if peek else None
     peek_ckpt = peek_env.checkpoints.get(checkpoint) if peek_env else None
-    already_fetched = peek_ckpt is not None and peek_ckpt.fetched_at is not None
+    already_fetched = not force and peek_ckpt is not None and peek_ckpt.fetched_at is not None
     fetched_at = peek_ckpt.fetched_at if peek_ckpt else None
 
     # ---- Download (runs outside the lock) -------------------------------
@@ -1183,6 +1190,7 @@ def add_checkpoint(
     device: str = "cuda",
     verify: bool = True,
     push: bool = True,
+    force: bool = False,
     setup_kwargs: dict | None = None,
     cache_root: Path | None = None,
     progress: Progress | None = None,
@@ -1196,7 +1204,8 @@ def add_checkpoint(
     refresh at the end. The hosting env is resolved by matching the id
     against each installed env's CHECKPOINTS table. Downloads happen on CPU
     (the cache-aware path); verification runs on ``device`` unless
-    ``verify`` is False.
+    ``verify`` is False. ``force`` re-runs the download past the manifest's
+    fetched stamp (see :func:`fetch_checkpoint`).
 
     Raises CheckpointNotFoundError when no installed env declares the id,
     and OperationError for download/verify failures (the failure is also
@@ -1214,6 +1223,7 @@ def add_checkpoint(
         setup_kwargs=setup_kwargs,
         cache_root=cache_root,
         refresh=False,
+        force=force,
         progress=progress,
     )
 

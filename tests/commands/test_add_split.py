@@ -101,6 +101,22 @@ def test_fetch_is_idempotent(fake_root, refresh_calls, monkeypatch):
     assert second.fetched_at == first.fetched_at
 
 
+def test_fetch_force_redownloads_past_fetched_stamp(fake_root, refresh_calls, monkeypatch):
+    """The repair path for cache files gone missing behind the manifest."""
+    downloads = []
+    monkeypatch.setattr(
+        operations, "_run_download", lambda *a, **kw: (downloads.append(a), (True, None))[1]
+    )
+
+    first = fetch_checkpoint(fake_root, "mace-mp-0-medium")
+    second = fetch_checkpoint(fake_root, "mace-mp-0-medium", force=True)
+
+    assert len(downloads) == 2, "force must re-run the download"
+    assert not second.already_fetched
+    assert second.fetched_at is not None
+    assert second.fetched_at >= first.fetched_at
+
+
 def test_fetch_failure_records_last_error_and_raises(fake_root, refresh_calls, monkeypatch):
     monkeypatch.setattr(
         operations, "_run_download", lambda *a, **kw: (False, "ConnectionError: hub unreachable")

@@ -82,6 +82,7 @@ def cmd_add(args) -> int:
             device=args.device,
             verify=not args.no_verify,
             push=not args.no_push,
+            force=args.force,
             setup_kwargs=setup_kwargs,
             progress=print,
         )
