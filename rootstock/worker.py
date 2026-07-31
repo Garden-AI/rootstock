@@ -29,6 +29,23 @@ if TYPE_CHECKING:
     from ase.calculators.calculator import Calculator
 
 
+def _info_value(value):
+    """Convert a JSON-decoded info value to what models expect on Atoms.
+
+    Numeric vectors (e.g. ``external_field``) arrive as JSON arrays; in-process
+    users store them on ``atoms.info`` as numpy arrays, so match that. Anything
+    non-numeric (or ragged) is kept as-is.
+    """
+    if isinstance(value, list) and value:
+        try:
+            arr = np.asarray(value)
+        except ValueError:
+            return value
+        if arr.dtype.kind in "biuf":
+            return arr
+    return value
+
+
 class MLIPWorker:
     """
     Worker that runs an MLIP calculator and communicates via i-PI protocol.
@@ -68,6 +85,11 @@ class MLIPWorker:
         # Atomic species info from INIT message
         self._atomic_numbers: list[int] | None = None
         self._pbc: list[bool] | None = None
+        # atoms.info payload from INIT; _applied_info is the raw JSON form
+        # last applied to the cached Atoms, kept for change detection (the
+        # applied values may be numpy arrays, which don't compare with ==).
+        self._info: dict = {}
+        self._applied_info: dict | None = None
 
     def _log(self, msg):
         if self.log:
@@ -101,6 +123,11 @@ class MLIPWorker:
         (not just the atom count) matters: the server re-sends INIT every
         cycle, so a same-count composition or PBC change must not silently
         reuse the old system.
+
+        The INIT-supplied atoms.info payload is applied on both paths. When
+        only the info changed, the attached calculator's result cache is
+        reset: ASE's compare_atoms looks at geometry only, so without the
+        reset an info-only change (e.g. charge) would serve stale results.
         """
         from ase import Atoms
 
@@ -123,11 +150,19 @@ class MLIPWorker:
                 cell=cell,
                 pbc=pbc,
             )
+            self._atoms.info = {k: _info_value(v) for k, v in self._info.items()}
+            self._applied_info = self._info
             self._atoms.calc = self._calculator
         else:
             # Update existing object (faster - reuses neighbor lists etc.)
             self._atoms.positions = positions
             self._atoms.cell = cell
+            if self._info != self._applied_info:
+                self._atoms.info = {k: _info_value(v) for k, v in self._info.items()}
+                self._applied_info = self._info
+                reset = getattr(self._calculator, "reset", None)
+                if reset is not None:
+                    reset()
 
         return self._atoms
 
@@ -210,6 +245,8 @@ class MLIPWorker:
                             init_data = json.loads(init_bytes.decode("utf-8"))
                             self._atomic_numbers = init_data.get("numbers")
                             self._pbc = init_data.get("pbc", [True, True, True])
+                            info = init_data.get("info")
+                            self._info = info if isinstance(info, dict) else {}
                             self._log(
                                 f"Received INIT (bead={bead_index}, "
                                 f"atoms={len(self._atomic_numbers) if self._atomic_numbers else 0})"

@@ -55,6 +55,26 @@ RootstockCalculator(
 )
 ```
 
+### Model inputs via `atoms.info`
+
+Keys set on `atoms.info` are forwarded to the worker on every calculation,
+so checkpoints that read calculate-time inputs from it — `charge` and `spin`
+for the OMol-era models (`uma-*` with `task="omol"`, `esen-*-all-omol`,
+`mace-omol-*`), plus `external_field` for `mace-polar-*` — behave exactly as
+they would in-process:
+
+```python
+atoms.info["charge"] = 1
+atoms.info["spin"] = 2
+energy_cation = atoms.get_potential_energy()  # differs from the neutral result
+```
+
+All JSON-serializable values are forwarded (numpy scalars and arrays are
+converted; numeric vectors arrive at the model as numpy arrays). Values that
+cannot be represented in JSON are dropped with a debug log. Changing only
+`atoms.info` on identical geometry correctly triggers a fresh calculation.
+LAMMPS-driven runs (`fix rootstock`) do not carry `atoms.info`.
+
 ### Context manager
 
 `RootstockCalculator` should be used as a context manager to ensure proper cleanup of the worker subprocess:

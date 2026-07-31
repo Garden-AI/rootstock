@@ -45,12 +45,18 @@ the server packs the species into the INIT message's free-form init string
 as UTF-8 JSON:
 
 ```json
-{"numbers": [1, 1, 8], "pbc": [true, true, true]}
+{"numbers": [1, 1, 8], "pbc": [true, true, true], "info": {"charge": 1, "spin": 2}}
 ```
 
 A worker that has not received this payload fails at the first POSDATA.
 Unknown keys in the JSON object are ignored, which makes new keys a
 sanctioned forward-compatible extension channel.
+
+The `info` object carries the JSON-serializable subset of the client's
+`atoms.info` — model inputs like `charge`, `spin`, and `external_field`
+that OMol-era and POLAR checkpoints read at calculate-time. The worker
+applies it to its Atoms each cycle (numeric vectors become numpy arrays);
+the calculator drops non-serializable values with a debug log.
 
 **The worker demands INIT before every force evaluation.** After each
 FORCEREADY the worker returns to NEEDINIT rather than READY, and the server
@@ -65,7 +71,10 @@ Consequences:
 - The supported protocol peers are exactly `RootstockServer` (the ASE
   calculator path and `rootstock serve`'s counterpart) and
   `lammps/fix_rootstock.cpp` (which implements the dialect natively,
-  including the per-cycle INIT).
+  including the per-cycle INIT). `fix_rootstock` does not send the `info`
+  object, so LAMMPS-driven runs cannot carry `charge`/`spin`/
+  `external_field` — the worker sees an empty info and the model uses its
+  defaults.
 - This is a deliberate, documented limitation of 1.0. The worker side of the
   protocol is frozen inside every built environment, so the requirement
   cannot be relaxed for environments that have already been deployed.

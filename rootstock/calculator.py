@@ -6,6 +6,7 @@ This is the main user-facing interface for Rootstock.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -21,6 +22,40 @@ from .layout import ensure_layout_compatible, resolve_cache_root
 from .server import RootstockServer, WorkerDiedError
 
 logger = logging.getLogger("rootstock.calculator")
+
+
+def _json_safe_info(info: dict) -> dict:
+    """Extract the JSON-serializable subset of an ``atoms.info`` dict.
+
+    This is what crosses the socket in the INIT payload. Model-input keys
+    (``charge``, ``spin``, ``external_field``, ...) are scalars or small
+    numeric vectors, so all JSON-safe values are forwarded rather than a
+    whitelist — key names are model-ecosystem-dependent, and a whitelist
+    would silently drop the next model family's key. numpy scalars and
+    arrays are converted to native types; values that can't be represented
+    in JSON (and non-string keys) are dropped with a debug log, never a
+    crash.
+    """
+    safe = {}
+    for key, value in info.items():
+        if not isinstance(key, str):
+            logger.debug("Dropping atoms.info key %r: non-string key", key)
+            continue
+        if isinstance(value, np.generic):
+            value = value.item()
+        elif isinstance(value, np.ndarray):
+            value = value.tolist()
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError):
+            logger.debug(
+                "Dropping atoms.info[%r]: %s is not JSON-serializable",
+                key,
+                type(value).__name__,
+            )
+            continue
+        safe[key] = value
+    return safe
 
 
 class RootstockCalculator(Calculator):
@@ -225,6 +260,25 @@ class RootstockCalculator(Calculator):
             server.start()
         return server
 
+    def check_state(self, atoms, tol=1e-15):
+        """Like ASE's, but an ``atoms.info`` change also invalidates results.
+
+        ASE's ``compare_atoms`` looks only at geometry (positions, numbers,
+        cell, pbc, initial charges/magmoms) — without this override, changing
+        only e.g. ``info["charge"]`` on identical geometry would serve the
+        cached result instead of reaching the worker. Only the forwarded
+        (JSON-safe) subset is compared: a key that can't cross the socket
+        can't change the result either.
+        """
+        system_changes = super().check_state(atoms, tol=tol)
+        if (
+            not system_changes
+            and self.atoms is not None
+            and _json_safe_info(atoms.info) != _json_safe_info(self.atoms.info)
+        ):
+            system_changes = ["info"]
+        return system_changes
+
     def calculate(
         self,
         atoms=None,
@@ -256,6 +310,7 @@ class RootstockCalculator(Calculator):
                 cell=np.array(calc_atoms.cell),
                 atomic_numbers=calc_atoms.numbers,
                 pbc=list(calc_atoms.pbc),
+                info=_json_safe_info(calc_atoms.info),
             )
         except WorkerDiedError:
             # A dead worker can't serve the next call either. Tear the server
