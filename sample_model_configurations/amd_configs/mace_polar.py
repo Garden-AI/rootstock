@@ -8,12 +8,25 @@
 #     # PolarMACE imports graph_longrange at runtime; the distribution is named
 #     # graph-longrange and exists only as this git repo (no PyPI release).
 #     "graph-longrange @ git+https://github.com/WillBaldwin0/graph_electrostatics.git",
+#     # torch's ROCm wheels depend on this; it lives only on the ROCm
+#     # index, so it must be a direct dep for [tool.uv.sources] to route it.
+#     "pytorch-triton-rocm",
 # ]
+#
+# [tool.uv.sources]
+# torch = { index = "pytorch-rocm" }
+# pytorch-triton-rocm = { index = "pytorch-rocm" }
+#
+# [[tool.uv.index]]
+# name = "pytorch-rocm"
+# url = "https://download.pytorch.org/whl/rocm6.4"
+# explicit = true
 # ///
-"""MACE-POLAR env — electrostatic/polarizable MACE foundation models (OMol25).
+"""MACE-POLAR env (ROCm) — electrostatic/polarizable MACE foundation models.
 
-Kept separate from the stable `mace` env because of the extra git-only
-graph-longrange dependency.
+Identical to nvidia_configs/mace_polar.py except torch resolves from the ROCm
+wheel index. Kept separate from the stable `mace` env because of the extra
+git-only graph-longrange dependency.
 
 POLAR checkpoints expect `charge`, `spin`, and `external_field` in atoms.info.
 """

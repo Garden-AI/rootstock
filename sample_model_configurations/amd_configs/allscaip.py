@@ -4,14 +4,26 @@
 #     "fairchem-core>=2.20",
 #     "ase>=3.22",
 #     "torch>=2.4.0",
+#     # torch's ROCm wheels depend on this; it lives only on the ROCm
+#     # index, so it must be a direct dep for [tool.uv.sources] to route it.
+#     "pytorch-triton-rocm",
 # ]
+#
+# [tool.uv.sources]
+# torch = { index = "pytorch-rocm" }
+# pytorch-triton-rocm = { index = "pytorch-rocm" }
+#
+# [[tool.uv.index]]
+# name = "pytorch-rocm"
+# url = "https://download.pytorch.org/whl/rocm6.4"
+# explicit = true
 # ///
-"""AllScAIP env — FAIRChem scalable attention MLIP trained on OMol25.
+"""AllScAIP env (ROCm) — FAIRChem scalable attention MLIP trained on OMol25.
 
-allscaip-md-conserving-all-omol is an energy-conserving, all-to-all node
-attention model served through fairchem-core's get_predict_unit — the same
-API as eSEN. fairchem v2 carries the architecture in-package, so no
-flash-attention or custom CUDA kernels are needed.
+Identical to nvidia_configs/allscaip.py except torch resolves from the ROCm
+wheel index; AllScAIP has no flash-attention or custom CUDA kernels, so
+nothing else changes. On ROCm fairchem falls back to math attention for
+gradient-based forces: same numbers, slower attention path.
 
 OMol checkpoints expect `charge` and `spin` in `atoms.info`.
 """
