@@ -142,6 +142,12 @@ with RootstockCalculator(
 ) as calc:
     ...
 
+# atoms.info is forwarded to the worker every calculation (JSON-safe subset;
+# numpy converted, non-serializable values dropped with a debug log), so
+# OMol/POLAR checkpoints see charge/spin/external_field as if in-process.
+# An info-only change invalidates the cached result (check_state override).
+atoms.info["charge"] = 1
+
 # User-supplied weights (e.g. a fine-tune): use the "<family>:custom"
 # CHECKPOINTS entry for the model family (shown by `rootstock list`) and
 # pass the weights file. The entry only selects the hosting env (no shipped

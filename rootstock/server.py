@@ -160,11 +160,6 @@ class RootstockServer:
         self._stdout_file = None
         self._stderr_file = None
 
-        # Track INIT state
-        self._init_sent = False
-        self._init_numbers: list[int] | None = None
-        self._init_pbc: list[bool] | None = None
-
         # Holds the spawn_in_env context (staged wrapper + sidecar) open for
         # the life of the worker process; stop() closes it.
         self._spawn_stack: contextlib.ExitStack | None = None
@@ -371,15 +366,23 @@ class RootstockServer:
         cell: np.ndarray,
         atomic_numbers: np.ndarray | None = None,
         pbc: list[bool] | None = None,
+        info: dict | None = None,
     ) -> tuple[float, np.ndarray, np.ndarray]:
         """
         Calculate energy and forces for given atomic configuration.
 
+        The worker returns to NEEDINIT after every force call, so the INIT
+        payload (species, pbc, info) is re-sent each cycle — mid-run changes
+        to any of them reach the worker.
+
         Args:
             positions: Nx3 array of atomic positions in Angstrom
             cell: 3x3 cell matrix in Angstrom
-            atomic_numbers: Atomic numbers array (sent in INIT on first call)
-            pbc: Periodic boundary conditions [x, y, z] (sent in INIT on first call)
+            atomic_numbers: Atomic numbers array (sent in INIT)
+            pbc: Periodic boundary conditions [x, y, z] (sent in INIT)
+            info: JSON-serializable ``atoms.info`` subset (sent in INIT) —
+                model inputs like ``charge``/``spin``/``external_field`` that
+                the worker applies to its Atoms.
 
         Returns:
             energy: Potential energy in eV
@@ -402,14 +405,9 @@ class RootstockServer:
                 # Send INIT with atomic species info
                 numbers = atomic_numbers.tolist() if atomic_numbers is not None else None
                 pbc_list = [bool(p) for p in pbc] if pbc is not None else [True, True, True]
-                init_data = {"numbers": numbers, "pbc": pbc_list}
+                init_data = {"numbers": numbers, "pbc": pbc_list, "info": info or {}}
                 init_bytes = json.dumps(init_data).encode("utf-8")
                 self._protocol.send_init(bead_index=0, init_string=init_bytes)
-
-                # Track what we sent
-                self._init_sent = True
-                self._init_numbers = numbers
-                self._init_pbc = pbc_list
 
                 self._protocol.send_status()
                 status = self._protocol.recv_status()
