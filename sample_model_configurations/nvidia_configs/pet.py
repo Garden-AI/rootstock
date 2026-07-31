@@ -24,7 +24,18 @@ CHECKPOINTS = {
 
 
 def setup(checkpoint: str, device: str = "cuda"):
+    from huggingface_hub import hf_hub_download
     from upet.calculator import UPETCalculator
 
+    # Passing model=/version= makes UPETCalculator resolve the name by listing
+    # the hub repo — an uncached API call that fails on workers, which run
+    # with HF_HUB_OFFLINE=1 (and on any node without internet). Fetch the
+    # pinned file ourselves — a cache hit needs no network even offline — and
+    # hand it over as checkpoint_path, which skips the resolve entirely.
     model, version = CHECKPOINTS[checkpoint].split("@", 1)
-    return UPETCalculator(model=model, version=version, device=device)
+    path = hf_hub_download(
+        repo_id="lab-cosmo/upet",
+        filename=f"{model}-v{version}.ckpt",
+        subfolder="models",
+    )
+    return UPETCalculator(checkpoint_path=path, device=device)

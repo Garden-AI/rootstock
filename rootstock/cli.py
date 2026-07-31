@@ -244,6 +244,15 @@ def main():
         help="Skip the verify phase (download only). Login-node escape hatch.",
     )
     add_parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Re-run the download even if the manifest records the checkpoint "
+            "as fetched — repairs a cache file that has gone missing. Cheap "
+            "when the cache is intact (cache hit, no transfer)."
+        ),
+    )
+    add_parser.add_argument(
         "--root",
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
