@@ -16,17 +16,7 @@ from ..batch import PHASES, execute_sync, plan_sync, render_plan, render_summary
 from ..environment import CheckpointNotFoundError
 from ..layout import ensure_layout_compatible, write_layout_marker
 from ..operations import OperationError
-from .common import get_root_or_exit, resolve_cache_root, warn_on_permissions
-
-
-def _resolve_root(args) -> Path:
-    """``--root`` (or env/config fallback), with ``--cluster`` as a registry
-    bootstrap for admins driving a known cluster by name."""
-    if getattr(args, "cluster", None) and not args.root:
-        from ..clusters import get_root_for_cluster
-
-        return get_root_for_cluster(args.cluster)
-    return get_root_or_exit(args)
+from .common import resolve_cache_root, resolve_root, warn_on_permissions
 
 
 def _parse_phases(spec: str) -> tuple[str, ...]:
@@ -70,7 +60,7 @@ def cmd_sync(args) -> int:
             print(f"Error: {source_dir} is not a directory", file=sys.stderr)
             return 2
 
-    root = _resolve_root(args)
+    root = resolve_root(args)
 
     # Never write into a root laid out by a newer rootstock.
     try:

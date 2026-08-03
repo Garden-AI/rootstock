@@ -39,6 +39,16 @@ def warn_on_permissions(root: Path, cache_root: Path) -> None:
     )
 
 
+def resolve_root(args) -> Path:
+    """``--root`` (or env/config fallback), with ``--cluster`` as a registry
+    bootstrap for admins driving a known cluster by name."""
+    if getattr(args, "cluster", None) and not args.root:
+        from ..clusters import get_root_for_cluster
+
+        return get_root_for_cluster(args.cluster)
+    return get_root_or_exit(args)
+
+
 def get_root_or_exit(args) -> Path:
     """
     Get the root directory from args, environment variable, or config file.
