@@ -36,6 +36,16 @@ Commands:
             rootstock sync --rebuild                 # after a CLI version bump
             rootstock sync --phases build,download   # login node (no GPU)
 
+    rootstock prune [<source-dir>] [--root <path> | --cluster <name>] [--dry-run] [--yes]
+        The subtractive half of sync: remove built envs with no registered
+        source, checkpoint records (and their unshared weight files) no
+        source declares, and internal garbage (.build/.trash leftovers,
+        orphaned interpreters, stale lockfiles, the uv cache). Plan-confirm
+        by default; batch jobs pass --yes.
+            rootstock prune --cluster delta --dry-run
+            rootstock prune ./environments/ --yes    # retire everything not declared here
+            rootstock prune --gc-only --yes          # internal garbage only
+
     rootstock benchmark [--root <path>] [--checkpoints <id> ...] [--devices cuda cpu] [--list]
         Measure i-PI IPC overhead: RootstockCalculator vs. the same calculator
         called directly inside its pre-built env. `--list` shows installed ids.
@@ -79,6 +89,7 @@ from .commands import (
     cmd_manifest_push,
     cmd_manifest_show,
     cmd_new_env,
+    cmd_prune,
     cmd_resolve,
     cmd_serve,
     cmd_setup_perms,
@@ -389,6 +400,108 @@ def main():
         help="Skip the up-front shared-install permission check",
     )
     sync_parser.set_defaults(func=cmd_sync)
+
+    # prune command
+    prune_parser = subparsers.add_parser(
+        "prune",
+        help="Remove undeclared envs/checkpoints and internal garbage (sync's subtractive half)",
+        description=(
+            "Plan and execute the removal of actual state not covered by "
+            "declared state: built envs with no registered source, manifest "
+            "checkpoint records no source declares (plus their weight files, "
+            "refcounted against surviving checkpoints), and internal garbage "
+            "(.build/.trash leftovers, orphaned interpreters, stale "
+            "lockfiles, the uv cache). Prints the plan and asks for "
+            "confirmation before deleting anything; idempotent and safe to "
+            "re-run after a failure. Don't run while a sync is in flight."
+        ),
+    )
+    prune_parser.add_argument(
+        "source_dir",
+        nargs="?",
+        help=(
+            "Optional directory declaring the *complete* desired set of env "
+            "sources (*.py): anything registered, built, or fetched beyond it "
+            "is pruned — including registered source files. Defaults to the "
+            "root's registered environments."
+        ),
+    )
+    prune_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    prune_parser.add_argument(
+        "--cluster",
+        help="Resolve the root from the cluster registry instead of --root",
+    )
+    prune_parser.add_argument(
+        "--env",
+        action="append",
+        metavar="NAME",
+        help="Limit to this environment (and its checkpoints); repeatable",
+    )
+    prune_parser.add_argument(
+        "--checkpoint",
+        action="append",
+        metavar="ID",
+        help="Limit checkpoint pruning to this id; repeatable",
+    )
+    prune_parser.add_argument(
+        "--gc-only",
+        action="store_true",
+        help="Collect internal garbage only; never touches envs or checkpoints",
+    )
+    prune_parser.add_argument(
+        "--deep",
+        action="store_true",
+        help=(
+            "Also delete unattributed cache/home contents (anything no "
+            "checkpoint's weight record claims). Only sensible once weight "
+            "records have been backfilled — run a smoke-test first"
+        ),
+    )
+    prune_parser.add_argument(
+        "--min-age",
+        type=float,
+        default=24.0,
+        metavar="HOURS",
+        help=(
+            "Leave .build/.trash/interpreter entries younger than this alone "
+            "— they may belong to a build running on another node (default: 24)"
+        ),
+    )
+    prune_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt (for batch jobs)",
+    )
+    prune_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the plan and exit without deleting anything",
+    )
+    prune_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the plan and results as JSON on stdout (progress goes to stderr)",
+    )
+    prune_parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop scheduling new deletions after the first failure (default: keep going)",
+    )
+    prune_parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Don't push manifest to backend",
+    )
+    prune_parser.add_argument(
+        "--no-perm-check",
+        action="store_true",
+        help="Skip the up-front shared-install permission check",
+    )
+    prune_parser.set_defaults(func=cmd_prune)
 
     # smoke-test command
     smoke_parser = subparsers.add_parser(
