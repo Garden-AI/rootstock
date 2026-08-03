@@ -423,8 +423,10 @@ def main():
         help=(
             "Optional directory declaring the *complete* desired set of env "
             "sources (*.py): anything registered, built, or fetched beyond it "
-            "is pruned — including registered source files. Defaults to the "
-            "root's registered environments."
+            "is pruned — including registered source files. An empty directory "
+            "declares zero environments. Defaults to the root's registered "
+            "environments (if that dir doesn't exist, nothing is declared and "
+            "only internal garbage is collected)."
         ),
     )
     prune_parser.add_argument(

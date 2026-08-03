@@ -763,6 +763,11 @@ def plan_prune(
     declared set (including unregistering source files). Category-B internal
     garbage is collected in both modes; ``gc_only`` limits the plan to it.
 
+    A declaring directory that exists but is *empty* affirmatively declares
+    zero environments (everything installed is undeclared); a registry dir
+    that doesn't exist declares nothing, and the plan degrades to the
+    internal-GC tier alone.
+
     ``min_age_hours`` guards every category-B item: pid-liveness is
     meaningless on a shared filesystem (the build owning ``.build/<env>.<pid>``
     may be on another node), so anything mtime-newer than the guard is left
@@ -794,13 +799,27 @@ def plan_prune(
     registered = dict(state.sources)
 
     # ---- desired sources ----------------------------------------------------
+    # Presence vs. absence of the declaring directory carries meaning. A
+    # directory that exists but declares nothing is an affirmative "zero
+    # environments" — the declarative retirement move ("delete the source,
+    # prune") taken to its limit. An *absent* registry is no declaration at
+    # all: there is nothing to converge to, so only the internal-GC tier
+    # (which needs no declared state) runs. A nonexistent SOURCE_DIR stays a
+    # usage error in the adapter — that's a typo, not a declaration.
+    declarative = not gc_only
     if source_dir is not None:
-        staged = sorted(source_dir.glob("*.py"))
-        if not staged:
-            raise ops.OperationError(f"No *.py environment files found in {source_dir}")
-        desired: dict[str, Path] = {path.stem: path for path in staged}
-    else:
+        desired: dict[str, Path] = {path.stem: path for path in sorted(source_dir.glob("*.py"))}
+    elif (root / "environments").is_dir():
         desired = registered
+    else:
+        desired = {}
+        if declarative and (state.envs or (manifest is not None and bool(manifest.environments))):
+            plan.notes.append(
+                f"{root / 'environments'} does not exist — no declared state to "
+                f"converge to; collecting internal garbage only (an empty "
+                f"environments/ dir, by contrast, declares zero environments)"
+            )
+        declarative = False
 
     # ---- scope validation (mirrors sync) -------------------------------------
     known_envs = set(state.envs) | set(registered) | set(desired)
@@ -831,14 +850,16 @@ def plan_prune(
     # passes --yes, so "prune this one checkpoint id" must not ride along
     # with env deletion nobody asked for. --env restores env pruning scoped
     # to the named envs.
-    env_tier = not gc_only and (bool(envs) or not checkpoints)
+    env_tier = declarative and (bool(envs) or not checkpoints)
     pruned_env_names: set[str] = set()
-    if env_tier and source_dir is None and not registered and state.envs:
-        # A lost/empty environments/ dir would read as "delete everything";
-        # the plan-confirm gate protects execution, but say it out loud.
+    if env_tier and not desired and (state.envs or registered):
+        # Reachable only when the declaring dir exists (an absent registry
+        # already degraded to gc-only above): a deliberate zero-environment
+        # declaration. The plan-confirm gate still stands, but say it plainly.
+        where = source_dir if source_dir is not None else root / "environments"
         plan.notes.append(
-            f"no env sources are registered under {root / 'environments'} — every "
-            f"built env counts as undeclared (use --gc-only if that's not intended)"
+            f"{where} declares no environments — reading it as a deliberate "
+            f"zero-environment state; everything installed will be removed"
         )
     if env_tier:
         for name in sorted(set(state.envs) | set(registered)):
@@ -867,7 +888,7 @@ def plan_prune(
     # parsed keeps everything: sync's planner skips *adding* work on a parse
     # error, so prune must skip *removing* — the conservative direction flips.
     declared_by_env: dict[str, set[str] | None] = {}
-    if not gc_only:
+    if declarative:
         for name in sorted(desired):
             try:
                 declared_by_env[name] = set(parse_checkpoints_dict(desired[name]))
@@ -879,7 +900,7 @@ def plan_prune(
                 )
 
     pruned: list[tuple[str, str, CheckpointInfo, str]] = []  # (env, ckpt, record, reason)
-    if not gc_only and manifest is not None:
+    if declarative and manifest is not None:
         for env_name in sorted(manifest.environments):
             if envs and env_name not in envs:
                 continue
@@ -1069,7 +1090,9 @@ def plan_prune(
     # The records capture the read working set, not the download set, so
     # "delete everything unrecorded" would over-delete. Report it instead;
     # --deep graduates it to deletion for maintainers who trust the records.
-    if not gc_only:
+    # Gated on `declarative`: with no registry dir at all, the root doesn't
+    # look like a healthy install, and --deep especially shouldn't act on it.
+    if declarative:
         attributed_files: set[str] = set()
         for record in manifest.environments.values() if manifest else []:
             for info in record.checkpoints.values():

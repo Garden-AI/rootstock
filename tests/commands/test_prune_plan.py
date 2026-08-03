@@ -270,11 +270,26 @@ def test_source_dir_mode_unregisters_beyond_the_declared_set(tmp_path):
     assert plan.envs[0].reason == f"not in {declared}"
 
 
-def test_empty_source_dir_is_an_error(tmp_path):
+def test_empty_source_dir_declares_zero_environments(tmp_path):
+    """An existing-but-empty SOURCE_DIR is an affirmative declaration, not a
+    mistake: converge to zero environments. (A *nonexistent* SOURCE_DIR stays
+    a usage error in the adapter — that's a typo, not a declaration.)"""
+    source = env_source("mace-mp-0-medium")
+    register(tmp_path, "mace", source)
+    build(tmp_path, "mace", source)
+    save(
+        tmp_path,
+        {"mace": record(tmp_path, "mace", checkpoints={"mace-mp-0-medium": fetched()})},
+    )
     empty = tmp_path / "declared"
     empty.mkdir()
-    with pytest.raises(OperationError, match="No \\*.py environment files"):
-        plan_prune(tmp_path, source_dir=empty, cache_root=tmp_path)
+
+    plan = plan_prune(tmp_path, source_dir=empty, cache_root=tmp_path)
+
+    assert [(e.env_name, e.env_dir) for e in plan.envs] == [("mace", True)]
+    assert plan.envs[0].source_file == str(tmp_path / "environments" / "mace.py")
+    assert [c.checkpoint for c in plan.checkpoints] == ["mace-mp-0-medium"]
+    assert any("zero-environment state" in note for note in plan.notes)
 
 
 def test_unparseable_checkpoints_keeps_records(tmp_path):
@@ -293,14 +308,42 @@ def test_unparseable_checkpoints_keeps_records(tmp_path):
     assert any("keeping all of its checkpoint records" in note for note in plan.notes)
 
 
-def test_missing_environments_dir_gets_a_loud_note(tmp_path):
+def test_missing_environments_dir_degrades_to_gc_only(tmp_path):
+    """An absent registry declares nothing: there is no target state to
+    converge to, so envs, checkpoint records, weights, and the unattributed
+    tier are all left alone — only internal garbage (which needs no declared
+    state) is collected, with a note saying why."""
     build(tmp_path, "mace", env_source("mace-mp-0-medium"))
-    save(tmp_path, {"mace": record(tmp_path, "mace")})
+    entry = weight(tmp_path, "cache/mace/model.pt")
+    weight(tmp_path, "cache/mystery/junk.bin")
+    save(
+        tmp_path,
+        {"mace": record(tmp_path, "mace", checkpoints={"mace-mp-0-medium": fetched(entry)})},
+    )
+    stale = tmp_path / ".build" / "mace.1"
+    stale.mkdir(parents=True)
+    age(stale)
+
+    plan = plan_prune(tmp_path, deep=True, cache_root=tmp_path)
+
+    assert plan.envs == [] and plan.checkpoints == [] and plan.weight_dirs == []
+    assert plan.unattributed == []  # --deep must not act on a broken-looking root
+    assert [i.kind for i in plan.gc] == ["build"]
+    assert any("no declared state to converge to" in note for note in plan.notes)
+
+
+def test_empty_environments_dir_declares_zero_environments(tmp_path):
+    """Present-but-empty registry: the declarative retirement move taken to
+    its limit. Everything installed is undeclared, and the plan says so."""
+    (tmp_path / "environments").mkdir()
+    build(tmp_path, "mace", env_source("mace-mp-0-medium"))
+    save(tmp_path, {"mace": record(tmp_path, "mace", checkpoints={"mace-mp-0-medium": fetched()})})
 
     plan = plan_prune(tmp_path, cache_root=tmp_path)
 
     assert [e.env_name for e in plan.envs] == ["mace"]
-    assert any("every built env counts as undeclared" in note for note in plan.notes)
+    assert [c.checkpoint for c in plan.checkpoints] == ["mace-mp-0-medium"]
+    assert any("zero-environment state" in note for note in plan.notes)
 
 
 def test_suspicious_recorded_paths_are_refused(tmp_path):
@@ -545,6 +588,7 @@ def test_unrecorded_survivor_suppresses_repo_dir_release(tmp_path):
 def test_planner_emits_progress_before_slow_tree_walks(tmp_path):
     """Planning walks whole trees for byte counts; someone tailing a batch
     job's outfile must see each walk announced before it starts."""
+    register(tmp_path, "mace", env_source("mace-mp-0-medium"))
     build(tmp_path, "orb", env_source("orb-v2"))  # unregistered: gets sized
     save(tmp_path, {"orb": record(tmp_path, "orb")})
     stale = tmp_path / ".build" / "orb.1"
