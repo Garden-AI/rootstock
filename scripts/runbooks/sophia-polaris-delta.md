@@ -8,7 +8,7 @@ tree once, but run the compute-node check on both machines.
 
 ```bash
 # sophia/polaris:
-#   ROOT=/eagle/Garden-Ai/rootstock    GROUP=<eagle project group>
+#   ROOT=/eagle/projects/Rootstock/rootstock    GROUP=Rootstock
 # delta:
 #   ROOT=/work/hdd/data/rootstock      GROUP=<delta project group>
 ROOT=changeme
