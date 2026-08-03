@@ -78,6 +78,7 @@ import os
 import sys
 
 from . import __version__
+from .batch import DEFAULT_MIN_AGE_HOURS
 from .commands import (
     cmd_add,
     cmd_benchmark,
@@ -445,7 +446,10 @@ def main():
         "--checkpoint",
         action="append",
         metavar="ID",
-        help="Limit checkpoint pruning to this id; repeatable",
+        help=(
+            "Limit pruning to this checkpoint id (env pruning is skipped "
+            "unless --env is also given); repeatable"
+        ),
     )
     prune_parser.add_argument(
         "--gc-only",
@@ -464,11 +468,12 @@ def main():
     prune_parser.add_argument(
         "--min-age",
         type=float,
-        default=24.0,
+        default=DEFAULT_MIN_AGE_HOURS,
         metavar="HOURS",
         help=(
-            "Leave .build/.trash/interpreter entries younger than this alone "
-            "— they may belong to a build running on another node (default: 24)"
+            "Leave .build/.trash/interpreter entries (and --deep candidates) "
+            "younger than this alone — they may belong to work running on "
+            f"another node (default: {DEFAULT_MIN_AGE_HOURS:g})"
         ),
     )
     prune_parser.add_argument(

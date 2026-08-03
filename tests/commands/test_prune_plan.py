@@ -346,7 +346,15 @@ def test_env_and_checkpoint_filters_limit_scope(tmp_path):
     assert [e.env_name for e in plan.envs] == ["orb"]
     assert [c.checkpoint for c in plan.checkpoints] == ["orb-v2"]
 
+    # --checkpoint alone narrows the run to checkpoint pruning: with --yes in
+    # a batch job, env deletion must not ride along uninvited.
     plan = plan_prune(tmp_path, checkpoints=["g1"], cache_root=tmp_path)
+    assert [c.checkpoint for c in plan.checkpoints] == ["g1"]
+    assert plan.envs == []
+
+    # --env restores env pruning, scoped to the named envs.
+    plan = plan_prune(tmp_path, envs=["gemnet"], checkpoints=["g1"], cache_root=tmp_path)
+    assert [e.env_name for e in plan.envs] == ["gemnet"]
     assert [c.checkpoint for c in plan.checkpoints] == ["g1"]
 
     with pytest.raises(OperationError, match="Unknown environment"):
@@ -465,13 +473,68 @@ def test_unattributed_cache_is_reported_not_deleted(tmp_path):
     assert reported == {"mystery": 10, "models--never--read": 7, "matgl": 5}
     assert plan.is_empty  # report-only: nothing to execute
 
-    deep = plan_prune(tmp_path, deep=True, cache_root=tmp_path)
+    deep = plan_prune(tmp_path, deep=True, min_age_hours=0, cache_root=tmp_path)
     assert deep.unattributed == []
     assert {Path(i.path).name for i in deep.gc if i.kind == "unattributed"} == {
         "mystery",
         "models--never--read",
         "matgl",
     }
+
+
+def test_deep_respects_min_age_via_newest_mtime_in_tree(tmp_path):
+    """An in-flight download is unattributed by definition (records land only
+    after setup succeeds), so --deep must honor the age guard — judged by the
+    newest mtime anywhere in the tree, because the download writes deep inside
+    the repo dir without bumping its top-level mtime."""
+    source = env_source("mace-mp-0-medium")
+    register(tmp_path, "mace", source)
+    build(tmp_path, "mace", source)
+    save(tmp_path, {"mace": record(tmp_path, "mace", checkpoints={"mace-mp-0-medium": fetched()})})
+    # Old top-level dir, fresh write deep inside — exactly what a running
+    # download looks like from another node.
+    weight(tmp_path, "cache/huggingface/hub/models--in--flight/blobs/partial")
+    for p in (
+        tmp_path / "cache/huggingface/hub/models--in--flight",
+        tmp_path / "cache/huggingface/hub/models--in--flight/blobs",
+    ):
+        age(p)
+
+    plan = plan_prune(tmp_path, deep=True, cache_root=tmp_path)
+
+    assert [i for i in plan.gc if i.kind == "unattributed"] == []
+    assert [Path(u["path"]).name for u in plan.unattributed] == ["models--in--flight"]
+    assert any("--deep" in note and "younger than --min-age" in note for note in plan.notes)
+
+
+def test_unrecorded_survivor_suppresses_repo_dir_release(tmp_path):
+    """A fetched survivor with no weight record could be using any repo dir
+    without appearing in the attribution map — whole-dir release would delete
+    its weights out from under it. Per-file refcounted deletion still runs."""
+    source = env_source("uma-s-1p1")  # uma-m was dropped; uma-s survives unrecorded
+    register(tmp_path, "uma", source)
+    build(tmp_path, "uma", source)
+    pruned_blob = weight(tmp_path, "cache/huggingface/hub/models--facebook--UMA/blobs/aa")
+    save(
+        tmp_path,
+        {
+            "uma": record(
+                tmp_path,
+                "uma",
+                checkpoints={
+                    "uma-s-1p1": fetched(recorded=False),  # pre-tracking survivor
+                    "uma-m": fetched(pruned_blob),
+                },
+            )
+        },
+    )
+
+    plan = plan_prune(tmp_path, cache_root=tmp_path)
+
+    assert plan.weight_dirs == []  # no whole-dir release while the map is blind
+    item = checkpoint_items(plan)["uma-m"]
+    assert item.files == [pruned_blob["path"]]  # per-file deletion still happens
+    assert any("per-file deletion only" in note for note in plan.notes)
 
 
 # -----------------------------------------------------------------------------

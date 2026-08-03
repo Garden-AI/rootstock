@@ -26,34 +26,7 @@ from ..batch import (
 from ..layout import ensure_layout_compatible, write_layout_marker
 from ..manifest import ManifestError
 from ..operations import OperationError
-from .common import get_root_or_exit, resolve_cache_root, warn_on_permissions
-
-
-def _resolve_root(args) -> Path:
-    """``--root`` (or env/config fallback), with ``--cluster`` as a registry
-    bootstrap for admins driving a known cluster by name."""
-    if getattr(args, "cluster", None) and not args.root:
-        from ..clusters import get_root_for_cluster
-
-        return get_root_for_cluster(args.cluster)
-    return get_root_or_exit(args)
-
-
-def _confirm(say) -> bool:
-    """Interactive gate for the destructive path; never reached with --yes."""
-    if not sys.stdin.isatty():
-        print(
-            "Error: refusing to delete without --yes when stdin is not a tty "
-            "(use --dry-run to inspect the plan)",
-            file=sys.stderr,
-        )
-        return False
-    say("")
-    try:
-        answer = input("Proceed with deletion? [y/N] ")
-    except EOFError:
-        return False
-    return answer.strip().lower() in ("y", "yes")
+from .common import resolve_cache_root, resolve_root, warn_on_permissions
 
 
 def cmd_prune(args) -> int:
@@ -61,9 +34,9 @@ def cmd_prune(args) -> int:
     Plan and execute the removal of undeclared state plus internal garbage.
 
     Exit codes:
-        0: Pruned (or --dry-run, or nothing to prune, or user declined)
+        0: Pruned (or --dry-run, or nothing to prune, or an interactive "no")
         1: One or more delete items failed (re-run to retry)
-        2: Usage error
+        2: Usage error (including no --yes without a tty to confirm on)
     """
     # Same shared-install stance as install/sync: the manifest and layout
     # marker this rewrites must stay group-writable.
@@ -80,7 +53,7 @@ def cmd_prune(args) -> int:
         print("Error: --min-age must be >= 0", file=sys.stderr)
         return 2
 
-    root = _resolve_root(args)
+    root = resolve_root(args)
 
     # Never write into a root laid out by a newer rootstock.
     try:
@@ -134,9 +107,26 @@ def cmd_prune(args) -> int:
             print(json.dumps({"root": str(root), "plan": plan.to_dict(), "results": []}, indent=2))
         return 0
 
-    if not args.yes and not _confirm(say):
-        say("Aborted; nothing was deleted.")
-        return 0
+    if not args.yes:
+        if not sys.stdin.isatty():
+            # A batch job that forgot --yes must fail loudly (usage error),
+            # not "succeed" having deleted nothing.
+            print(
+                "Error: refusing to delete without --yes when stdin is not a tty "
+                "(use --dry-run to inspect the plan)",
+                file=sys.stderr,
+            )
+            return 2
+        # Prompt via stderr: with --json, stdout belongs to the machine-
+        # readable document alone.
+        print("\nProceed with deletion? [y/N] ", end="", file=sys.stderr, flush=True)
+        try:
+            answer = input()
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            say("Aborted; nothing was deleted.")
+            return 0
 
     # Mutating-command duties: surface permission problems that would turn a
     # half-executed plan into stranded state, and stamp the layout marker.

@@ -675,21 +675,40 @@ class PrunePlan:
         return asdict(self)
 
 
-def _tree_bytes(path: Path) -> int:
-    """Recursive apparent size; symlinks counted, never followed."""
+def _tree_stats(path: Path) -> tuple[int, float]:
+    """(recursive apparent size, newest mtime in the tree); symlinks counted,
+    never followed.
+
+    The mtime is the newest of *any* entry, not the top dir's: a download
+    writing deep inside an HF repo dir (``blobs/…``) never bumps the
+    top-level mtime, and the age guard must still see it as active.
+    """
     try:
-        if not path.is_dir() or path.is_symlink():
-            return path.lstat().st_size
+        top = path.lstat()
     except OSError:
-        return 0
-    total = 0
-    for dirpath, _dirnames, filenames in os.walk(path):
+        return 0, 0.0
+    if not path.is_dir() or path.is_symlink():
+        return top.st_size, top.st_mtime
+    total, newest = 0, top.st_mtime
+    for dirpath, dirnames, filenames in os.walk(path):
         for name in filenames:
             try:
-                total += (Path(dirpath) / name).lstat().st_size
+                st = (Path(dirpath) / name).lstat()
+            except OSError:
+                continue
+            total += st.st_size
+            newest = max(newest, st.st_mtime)
+        for name in dirnames:
+            try:
+                newest = max(newest, (Path(dirpath) / name).lstat().st_mtime)
             except OSError:
                 pass
-    return total
+    return total, newest
+
+
+def _tree_bytes(path: Path) -> int:
+    """Recursive apparent size; symlinks counted, never followed."""
+    return _tree_stats(path)[0]
 
 
 def format_bytes(n: int) -> str:
@@ -808,15 +827,20 @@ def plan_prune(
             )
 
     # ---- env items ------------------------------------------------------------
+    # --checkpoint alone narrows the run to checkpoint pruning: batch usage
+    # passes --yes, so "prune this one checkpoint id" must not ride along
+    # with env deletion nobody asked for. --env restores env pruning scoped
+    # to the named envs.
+    env_tier = not gc_only and (bool(envs) or not checkpoints)
     pruned_env_names: set[str] = set()
-    if not gc_only and source_dir is None and not registered and state.envs:
+    if env_tier and source_dir is None and not registered and state.envs:
         # A lost/empty environments/ dir would read as "delete everything";
         # the plan-confirm gate protects execution, but say it out loud.
         plan.notes.append(
             f"no env sources are registered under {root / 'environments'} — every "
             f"built env counts as undeclared (use --gc-only if that's not intended)"
         )
-    if not gc_only:
+    if env_tier:
         for name in sorted(set(state.envs) | set(registered)):
             if name in desired or (envs and name not in envs):
                 continue
@@ -902,7 +926,36 @@ def plan_prune(
                     if repo is not None:
                         repo_attribution.setdefault(repo, set()).add((env_name, ckpt_id))
 
-        released_repos = {repo for repo, keys in repo_attribution.items() if keys <= pruned_keys}
+        # Whole-dir release trusts the attribution map to be complete — but a
+        # *fetched* surviving checkpoint with no weight record (pre-tracking
+        # install, capture never ran) could be using any repo dir without
+        # appearing in it. One such survivor anywhere disables dir-level
+        # release; per-file refcounted deletion still runs, and one
+        # smoke-test run backfills the records. Custom checkpoints never
+        # have records or shipped weights, and unfetched ones have no bytes
+        # on disk — neither blinds the map.
+        unrecorded_survivors = sorted(
+            ckpt_id
+            for env_name, record in manifest.environments.items()
+            for ckpt_id, info in record.checkpoints.items()
+            if (env_name, ckpt_id) not in pruned_keys
+            and not is_custom_checkpoint(ckpt_id)
+            and info.fetched_at is not None
+            and not info.weight_files
+        )
+        if unrecorded_survivors:
+            released_repos: set[str] = set()
+            if repo_attribution:
+                plan.notes.append(
+                    "keeping HF repo dirs whole (per-file deletion only): surviving "
+                    "checkpoint(s) have no weight records and could share them: "
+                    f"{', '.join(unrecorded_survivors)}. One smoke-test run backfills "
+                    "the records."
+                )
+        else:
+            released_repos = {
+                repo for repo, keys in repo_attribution.items() if keys <= pruned_keys
+            }
 
         for env_name, ckpt_id, info, reason in pruned:
             weight_files = info.weight_files or []
@@ -1049,18 +1102,33 @@ def plan_prune(
         if candidates:
             emit("scanning cache/home for unattributed contents")
         released = {repo for repo in (i.path for i in plan.weight_dirs)}
+        deep_young = 0
         for candidate in candidates:
             rel = str(candidate.relative_to(cache_base))
             if rel in released or is_attributed(rel):
                 continue
             emit(f"sizing {rel}")
-            size = _tree_bytes(candidate)
-            if deep:
+            size, newest = _tree_stats(candidate)
+            # The age guard applies to --deep with extra force: a checkpoint
+            # another node is downloading *right now* is unattributed by
+            # definition (records are written only after setup succeeds).
+            # Judge by the newest mtime anywhere in the tree — the write
+            # lands deep inside the dir, not on the candidate itself.
+            if deep and newest <= cutoff:
                 plan.gc.append(
                     GCItem("unattributed", str(candidate), "no weight record claims it", size)
                 )
             else:
+                if deep:
+                    deep_young += 1
                 plan.unattributed.append({"path": str(candidate), "bytes": size})
+        if deep_young:
+            plan.notes.append(
+                f"--deep: left {deep_young} unattributed "
+                f"entr{'y' if deep_young == 1 else 'ies'} younger than --min-age "
+                f"({min_age_hours:g}h) alone — an in-flight download looks exactly "
+                f"like this; reported above instead"
+            )
 
     return plan
 
@@ -1130,12 +1198,16 @@ def execute_prune(
         try:
             with manifest_lock(root):
                 manifest = load_manifest(root)
-                if manifest is not None:
-                    for item in plan.checkpoints:
-                        record = manifest.environments.get(item.env_name)
-                        if record is not None:
-                            record.checkpoints.pop(item.checkpoint, None)
-                    save_manifest(manifest, root)
+                if manifest is None:
+                    # The plan's checkpoint items came from a manifest, so it
+                    # vanishing means the world changed under us; deleting the
+                    # files anyway would break records-drop-before-files.
+                    raise ops.OperationError("manifest disappeared between plan and execute")
+                for item in plan.checkpoints:
+                    record = manifest.environments.get(item.env_name)
+                    if record is not None:
+                        record.checkpoints.pop(item.checkpoint, None)
+                save_manifest(manifest, root)
         except Exception as exc:
             record_error = f"could not drop checkpoint records: {exc}"
 

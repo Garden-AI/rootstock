@@ -182,6 +182,24 @@ def test_record_drop_failure_blocks_weights_but_not_envs(tmp_path, refreshes, mo
     assert len(refreshes) == 1  # the env succeeded; state changed
 
 
+def test_vanished_manifest_fails_the_record_drop(tmp_path, refreshes):
+    """The plan's checkpoint items came from a manifest; it vanishing means
+    the world changed — deleting files anyway would break the record-first
+    invariant."""
+    weight_file = touch(tmp_path, "cache/mace/gone.pt")  # no manifest saved
+    plan = PrunePlan(
+        checkpoints=[
+            PruneCheckpointItem("mace", "gone", "not declared", files=["cache/mace/gone.pt"])
+        ]
+    )
+
+    report = execute_prune(tmp_path, plan, cache_root=tmp_path, say=lambda _: None)
+
+    assert statuses(report) == {("checkpoint", "mace/gone"): "failed"}
+    assert "manifest disappeared" in report.failed[0].reason
+    assert weight_file.exists()
+
+
 def test_gc_items_keep_going_past_failures(tmp_path, refreshes, monkeypatch):
     stale = tmp_path / ".build" / "mace.1"
     stale.mkdir(parents=True)
