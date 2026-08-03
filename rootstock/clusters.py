@@ -38,12 +38,12 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
         root=Path("/scratch/gpfs/ROSENGROUP/common/rootstock"),
     ),
     "sophia": Cluster(
-        root=Path("/eagle/Garden-Ai/rootstock"),
+        root=Path("/eagle/projects/Rootstock/rootstock"),
     ),
     # Polaris mounts the same Eagle filesystem as Sophia, so both ALCF
     # machines share one install.
     "polaris": Cluster(
-        root=Path("/eagle/Garden-Ai/rootstock"),
+        root=Path("/eagle/projects/Rootstock/rootstock"),
     ),
     "perlmutter": Cluster(
         root=Path("/global/cfs/cdirs/m5268/rootstock"),
