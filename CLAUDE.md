@@ -24,7 +24,9 @@ rootstock install <env_source.py> [--root <path>] [--force] [--upgrade]
 # Download + verify a checkpoint by canonical id (idempotent). Use --no-verify on login nodes.
 rootstock add <checkpoint-id> [--kwarg key=val ...] [--device cuda] [--no-verify]
 
-# Re-verify all fetched checkpoints (suitable for nightly cron)
+# Re-verify all fetched checkpoints, plus each '<family>:custom' weights= path
+# (re-loads a same-family checkpoint's cached weights and compares results).
+# Suitable for nightly cron.
 rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--json]
 
 # Show status (per-checkpoint verified/stale grid; --json for machine-readable)

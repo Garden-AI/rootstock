@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from ..config import DEFAULT_CONFIG_FILE
+from ..environment import is_custom_checkpoint
 from ..install_state import InstallState, read_install_state
 from ..manifest import is_verified
 from .common import get_root_or_exit, resolve_cache_root
@@ -17,10 +18,15 @@ def _short_date(iso: str | None) -> str:
 
 
 def _checkpoint_line(env, ckpt_name: str, ckpt) -> str:
-    fetched = f"fetched {_short_date(ckpt.fetched_at)}"
-    if ckpt.last_error and ckpt.fetched_at is None:
-        # Never successfully fetched.
-        return f"    {ckpt_name:<24}  not fetched   ⚠  {ckpt.last_error}"
+    if is_custom_checkpoint(ckpt_name):
+        # ':custom' rows record smoke-test's weights= leg (#200) — there is
+        # nothing to fetch, the user supplies the weights file.
+        fetched = "user weights"
+    else:
+        fetched = f"fetched {_short_date(ckpt.fetched_at)}"
+        if ckpt.last_error and ckpt.fetched_at is None:
+            # Never successfully fetched.
+            return f"    {ckpt_name:<24}  not fetched   ⚠  {ckpt.last_error}"
 
     if ckpt.verified_at is None:
         verified = "not verified"

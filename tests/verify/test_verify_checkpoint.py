@@ -229,3 +229,50 @@ def test_verify_opts_out_of_usage_recording(monkeypatch):
     monkeypatch.setattr("rootstock.server.RootstockServer", factory)
     verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
     assert captured["usage_client"] is None
+
+
+def test_verify_fills_results_on_success(stub_server):
+    stub_server(energy=-10.5, forces=_ok_forces(), virial=_ok_virial())
+    results: dict = {}
+    ok, _ = verify.verify_checkpoint(
+        Path("/tmp"), "mace", "mace-mp-0-medium", "cuda", results=results
+    )
+    assert ok is True
+    assert results["energy"] == -10.5
+    np.testing.assert_allclose(results["forces"], _ok_forces())
+    np.testing.assert_allclose(results["virial"], _ok_virial())
+
+
+def test_verify_leaves_results_empty_on_failure(stub_server):
+    """A failed run must not hand the caller half-trustworthy numbers."""
+    stub_server(energy=float("nan"), forces=_ok_forces(), virial=_ok_virial())
+    results: dict = {}
+    ok, _ = verify.verify_checkpoint(
+        Path("/tmp"), "mace", "mace-mp-0-medium", "cuda", results=results
+    )
+    assert ok is False
+    assert results == {}
+
+
+def test_results_mismatch_agrees_within_tolerance():
+    a = {"energy": -10.5, "forces": _ok_forces()}
+    b = {"energy": -10.5 + 5e-5, "forces": _ok_forces() + 5e-4}
+    assert verify.results_mismatch(a, b) is None
+
+
+def test_results_mismatch_flags_energy_difference():
+    a = {"energy": -10.5, "forces": _ok_forces()}
+    b = {"energy": -10.4, "forces": _ok_forces()}
+    msg = verify.results_mismatch(a, b)
+    assert msg is not None
+    assert "energy" in msg
+
+
+def test_results_mismatch_flags_force_difference():
+    a = {"energy": -10.5, "forces": _ok_forces()}
+    delta = np.zeros((3, 3))
+    delta[0, 0] = 0.01
+    b = {"energy": -10.5, "forces": _ok_forces() + delta}
+    msg = verify.results_mismatch(a, b)
+    assert msg is not None
+    assert "force" in msg
