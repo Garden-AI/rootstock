@@ -273,6 +273,37 @@ def test_download_wrapper_runs_capture_end_to_end(tmp_path: Path):
     assert files == [{"path": "cache/fake/model.bin", "size": 4096}]
 
 
+def test_download_wrapper_finalizes_while_calculator_is_alive(tmp_path: Path):
+    """The maps probe must scan before the calculator is GC'd — a discarded
+    setup() return value dies immediately under CPython refcounting, and
+    mmap-backed weights are munmap'd with it. The calculator's __del__ here
+    records whether the capture result already existed when it died."""
+    result_path = tmp_path / "weights.json"
+    marker = tmp_path / "del_marker.txt"
+    _fake_built_env(
+        tmp_path,
+        "    return _Calc()\n\n"
+        "class _Calc:\n"
+        "    def __del__(self):\n"
+        "        import os\n"
+        f"        with open({str(marker)!r}, 'w') as f:\n"
+        f"            f.write(str(os.path.exists({str(result_path)!r})))\n",
+    )
+
+    payload = {
+        "checkpoint": "c",
+        "device": "cpu",
+        "setup_kwargs": {},
+        "weights_capture": {"result_path": str(result_path), "cache_root": str(tmp_path)},
+    }
+    with spawn_in_env(tmp_path, "fake", DOWNLOAD_WRAPPER, payload) as spec:
+        result = subprocess.run(
+            spec.cmd, env=spec.env, cwd=spec.cwd, capture_output=True, text=True
+        )
+    assert result.returncode == 0, result.stderr
+    assert marker.read_text() == "True", "calculator was GC'd before finalize ran"
+
+
 def test_download_wrapper_without_capture_key_stays_silent(tmp_path: Path):
     """No spec key, no capture — today's spawns are byte-for-byte unaffected."""
     _fake_built_env(tmp_path, "    return None\n")

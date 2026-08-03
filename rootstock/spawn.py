@@ -116,9 +116,14 @@ finally:
 sys.path.insert(0, spec["env_dir"])
 from env_source import setup
 
-setup(spec["checkpoint"], spec["device"], **spec["setup_kwargs"])
+# wrap_setup, not a trailing finalize(): the maps probe must scan while the
+# calculator is still referenced. A discarded return value dies immediately
+# under CPython refcounting, and mmap-backed weights (safetensors) are
+# munmap'd with it — the wrapper's local reference holds them alive.
 if weights_capture is not None:
-    weights_capture.finalize(spec)
+    setup = weights_capture.wrap_setup(setup, spec)
+
+setup(spec["checkpoint"], spec["device"], **spec["setup_kwargs"])
 """
 
 

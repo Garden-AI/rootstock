@@ -170,11 +170,20 @@ def finalize(spec: dict) -> None:
 def wrap_setup(setup_fn, spec: dict):
     """Wrap a setup function so finalize() runs the moment it returns.
 
-    Used by WORKER_WRAPPER, where setup happens deep inside run_worker's
-    socket loop and the wrapper never regains control; the record is
-    written before the worker even connects. When the spec doesn't request
-    capture, returns ``setup_fn`` unchanged. A setup that raises writes no
-    record — a failed load has no working set worth recording.
+    Both wrappers use this, for two different reasons. In WORKER_WRAPPER,
+    setup happens deep inside run_worker's socket loop and the wrapper never
+    regains control — wrapping is the only way to run finalize at all (the
+    record is written before the worker even connects). In DOWNLOAD_WRAPPER
+    the wrapper *could* call finalize after setup returns, but the
+    ``calculator`` local below is load-bearing: it keeps the result — and
+    the mmap'd weight files it references — alive while finalize scans
+    /proc/self/maps. A discarded return value is freed immediately under
+    CPython refcounting, munmapping exactly the safetensors-style mappings
+    the maps probe exists to see.
+
+    When the spec doesn't request capture, returns ``setup_fn`` unchanged.
+    A setup that raises writes no record — a failed load has no working set
+    worth recording.
     """
     if not spec.get("weights_capture"):
         return setup_fn
