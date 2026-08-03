@@ -45,6 +45,29 @@ def test_non_benchmark_commands_reject_unknown_args(monkeypatch):
     assert _run_main(monkeypatch, ["list", "--bogus"]) == 2
 
 
+def test_verify_timeout_flag_parses_on_all_three_commands(monkeypatch):
+    seen = {}
+
+    def capture(name):
+        def cmd(args):
+            seen[name] = args.verify_timeout
+            return 0
+
+        return cmd
+
+    monkeypatch.setattr(cli, "cmd_sync", capture("sync"))
+    monkeypatch.setattr(cli, "cmd_smoke_test", capture("smoke-test"))
+    monkeypatch.setattr(cli, "cmd_add", capture("add"))
+
+    assert _run_main(monkeypatch, ["sync", "--verify-timeout", "1800"]) == 0
+    assert _run_main(monkeypatch, ["smoke-test", "--verify-timeout", "45.5"]) == 0
+    assert _run_main(monkeypatch, ["add", "mace-mp-0-medium", "--verify-timeout", "1800"]) == 0
+    assert seen == {"sync": 1800.0, "smoke-test": 45.5, "add": 1800.0}
+
+    _run_main(monkeypatch, ["smoke-test"])
+    assert seen["smoke-test"] == 600.0, "default must stay at 600s"
+
+
 def test_manifest_subcommands_dispatch_directly(monkeypatch):
     """Each manifest subparser binds its own func — no re-dispatch layer."""
     called = []

@@ -213,6 +213,22 @@ def test_verify_forwards_device_and_kwargs(fake_root, refresh_calls, monkeypatch
     assert _ckpt(fake_root).verified_device == "cuda:1"
 
 
+def test_verify_forwards_timeout(fake_root, refresh_calls, monkeypatch):
+    captured = {}
+
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **kwargs):
+        captured.update(kwargs)
+        return True, None
+
+    monkeypatch.setattr(operations, "verify_checkpoint", fake_verify)
+
+    verify_fetched_checkpoint(fake_root, "mace-mp-0-medium", timeout=1800.0)
+    assert captured["timeout"] == 1800.0
+
+    verify_fetched_checkpoint(fake_root, "mace-mp-0-medium")
+    assert captured["timeout"] == 600.0, "default must stay at 600s"
+
+
 # ---------- add_checkpoint (the composition) ---------------------------------
 
 
@@ -236,6 +252,20 @@ def test_add_no_verify_skips_verify_fields(fake_root, refresh_calls, monkeypatch
     assert result.verified_at is None
     assert result.verified_device is None
     assert len(refresh_calls) == 1
+
+
+def test_add_forwards_verify_timeout(fake_root, refresh_calls, monkeypatch):
+    monkeypatch.setattr(operations, "_run_download", lambda *a, **kw: (True, None))
+    captured = {}
+
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **kwargs):
+        captured.update(kwargs)
+        return True, None
+
+    monkeypatch.setattr(operations, "verify_checkpoint", fake_verify)
+
+    add_checkpoint(fake_root, "mace-mp-0-medium", verify_timeout=1800.0)
+    assert captured["timeout"] == 1800.0
 
 
 def test_add_failure_skips_the_trailing_refresh(fake_root, refresh_calls, monkeypatch):

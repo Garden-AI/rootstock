@@ -81,6 +81,7 @@ def cmd_add(args) -> int:
             args.checkpoint,
             device=args.device,
             verify=not args.no_verify,
+            verify_timeout=args.verify_timeout,
             push=not args.no_push,
             force=args.force,
             setup_kwargs=setup_kwargs,

@@ -28,6 +28,7 @@ from .environment import is_custom_checkpoint, parse_checkpoints_dict
 from .exceptions import RootstockError
 from .install_state import read_install_state
 from .manifest import compute_source_hash, is_verified
+from .verify import DEFAULT_VERIFY_TIMEOUT
 
 PHASES = ("build", "download", "verify")
 
@@ -358,6 +359,7 @@ def execute_sync(
     *,
     jobs: int = 4,
     verify_jobs: int = 1,
+    verify_timeout: float = DEFAULT_VERIFY_TIMEOUT,
     device: str = "cuda",
     upgrade: bool = False,
     fail_fast: bool = False,
@@ -478,6 +480,7 @@ def execute_sync(
                     cache_root=cache_root,
                     refresh=False,
                     progress=buffered.append,
+                    timeout=verify_timeout,
                 )
             finally:
                 device_pool.put(dev)

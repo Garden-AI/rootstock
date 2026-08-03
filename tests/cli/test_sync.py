@@ -32,6 +32,7 @@ def _make_args(root: Path, **overrides):
     args.phases = overrides.get("phases", "build,download,verify")
     args.jobs = overrides.get("jobs", 4)
     args.verify_jobs = overrides.get("verify_jobs", 1)
+    args.verify_timeout = overrides.get("verify_timeout", 600.0)
     args.device = overrides.get("device", "cuda")
     args.dry_run = overrides.get("dry_run", False)
     args.json = overrides.get("json", False)
@@ -103,13 +104,22 @@ def test_success_exits_0_and_forwards_knobs(tmp_path, stubbed):
     stubbed["report"] = SyncReport(results=[ItemResult("build", "mace", None, "ok", "not built")])
 
     rc = cmd_sync(
-        _make_args(tmp_path, jobs=8, verify_jobs=2, device="cuda", fail_fast=True, upgrade=True)
+        _make_args(
+            tmp_path,
+            jobs=8,
+            verify_jobs=2,
+            verify_timeout=1800.0,
+            device="cuda",
+            fail_fast=True,
+            upgrade=True,
+        )
     )
 
     assert rc == 0
     ((_, kwargs),) = stubbed["exec_calls"]
     assert kwargs["jobs"] == 8
     assert kwargs["verify_jobs"] == 2
+    assert kwargs["verify_timeout"] == 1800.0
     assert kwargs["fail_fast"] is True
     assert kwargs["upgrade"] is True
     assert kwargs["push"] is False  # from no_push=True

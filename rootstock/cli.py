@@ -92,6 +92,14 @@ from .commands import (
 from .commands.common import ROOTSTOCK_ROOT_ENV
 from .config import DEFAULT_CONFIG_FILE
 from .manifest import ManifestError
+from .verify import DEFAULT_VERIFY_TIMEOUT
+
+_VERIFY_TIMEOUT_HELP = (
+    "Seconds allowed per verification — worker startup (env import + model "
+    f"load) plus one forward pass (default: {DEFAULT_VERIFY_TIMEOUT:.0f}). "
+    "Raise on slow filesystems where cold reads of large checkpoints "
+    "exceed the default"
+)
 
 
 def main():
@@ -239,6 +247,13 @@ def main():
     )
     add_parser.add_argument("--device", default="cuda", help="Device for verify (default: cuda)")
     add_parser.add_argument(
+        "--verify-timeout",
+        type=float,
+        default=DEFAULT_VERIFY_TIMEOUT,
+        metavar="SECONDS",
+        help=_VERIFY_TIMEOUT_HELP,
+    )
+    add_parser.add_argument(
         "--no-verify",
         action="store_true",
         help="Skip the verify phase (download only). Login-node escape hatch.",
@@ -340,6 +355,13 @@ def main():
             "the GPU). With --device cuda, N workers round-robin cuda:0..N-1"
         ),
     )
+    sync_parser.add_argument(
+        "--verify-timeout",
+        type=float,
+        default=DEFAULT_VERIFY_TIMEOUT,
+        metavar="SECONDS",
+        help=_VERIFY_TIMEOUT_HELP,
+    )
     sync_parser.add_argument("--device", default="cuda", help="Device for verify (default: cuda)")
     sync_parser.add_argument(
         "--dry-run",
@@ -390,6 +412,13 @@ def main():
         ),
     )
     smoke_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
+    smoke_parser.add_argument(
+        "--verify-timeout",
+        type=float,
+        default=DEFAULT_VERIFY_TIMEOUT,
+        metavar="SECONDS",
+        help=_VERIFY_TIMEOUT_HELP,
+    )
     smoke_parser.add_argument("--json", action="store_true", help="Emit a JSON summary")
     smoke_parser.add_argument(
         "--root",

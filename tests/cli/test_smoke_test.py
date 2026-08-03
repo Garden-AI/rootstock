@@ -71,6 +71,7 @@ def _make_args(root: Path, **overrides):
     args.env = overrides.get("env")
     args.checkpoint = overrides.get("checkpoint")
     args.device = overrides.get("device", "cuda")
+    args.verify_timeout = overrides.get("verify_timeout", 600.0)
     args.json = overrides.get("json", False)
     args.root = str(root)
     args.no_push = overrides.get("no_push", True)
@@ -109,6 +110,20 @@ def test_smoke_test_always_uses_empty_kwargs(populated_root, monkeypatch):
     cmd_smoke_test(_make_args(populated_root))
     assert captured  # at least one verify happened
     assert all(k == {} for k in captured)
+
+
+def test_smoke_test_forwards_verify_timeout(populated_root, monkeypatch):
+    captured: list[float] = []
+
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, timeout, **_):
+        captured.append(timeout)
+        return True, None
+
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", fake_verify)
+
+    cmd_smoke_test(_make_args(populated_root, verify_timeout=1800.0))
+    assert captured  # at least one verify happened
+    assert all(t == 1800.0 for t in captured)
 
 
 def test_smoke_test_marks_pass_and_fail(populated_root, monkeypatch):
@@ -323,6 +338,7 @@ def _fake_verify_factory(calls: list[dict], custom_energy_offset: float = 0.0, f
         checkpoint_path=None,
         weights_capture_path=None,
         results=None,
+        timeout=None,
     ):
         calls.append(
             {"env": env_name, "checkpoint": checkpoint, "checkpoint_path": checkpoint_path}

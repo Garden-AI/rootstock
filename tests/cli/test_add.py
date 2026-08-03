@@ -93,6 +93,7 @@ def _make_args(root: Path, **overrides):
     args.list = overrides.get("list", False)
     args.kwarg = overrides.get("kwarg")
     args.device = overrides.get("device", "cuda")
+    args.verify_timeout = overrides.get("verify_timeout", 600.0)
     args.no_verify = overrides.get("no_verify", False)
     args.force = overrides.get("force", False)
     args.root = str(root)
@@ -127,6 +128,20 @@ def test_add_overrides_restrictive_umask(fake_root, monkeypatch):
         assert os.umask(0o022) == 0o002
     finally:
         os.umask(old)
+
+
+def test_add_forwards_verify_timeout(fake_root, monkeypatch):
+    monkeypatch.setattr(operations, "_run_download", lambda *a, **kw: (True, None))
+    captured = {}
+
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **kwargs):
+        captured.update(kwargs)
+        return True, None
+
+    monkeypatch.setattr(operations, "verify_checkpoint", fake_verify)
+
+    assert cmd_add(_make_args(fake_root, verify_timeout=1800.0)) == 0
+    assert captured["timeout"] == 1800.0
 
 
 def test_add_then_add_is_idempotent(fake_root, monkeypatch):

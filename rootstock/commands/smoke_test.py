@@ -164,6 +164,7 @@ def cmd_smoke_test(args) -> int:
     env_filter = args.env
     ckpt_filter = args.checkpoint
     device = args.device
+    verify_timeout = args.verify_timeout
     json_out = args.json
     no_push = args.no_push
 
@@ -243,6 +244,7 @@ def cmd_smoke_test(args) -> int:
                 cache_root=cache_root,
                 weights_capture_path=str(capture_path),
                 results=run_results,
+                timeout=verify_timeout,
             )
             weight_files = read_weights_capture(capture_path)
         elapsed = time.monotonic() - start
@@ -323,6 +325,7 @@ def cmd_smoke_test(args) -> int:
             cache_root=cache_root,
             checkpoint_path=str(weights_path),
             results=run_results,
+            timeout=verify_timeout,
         )
         if ok:
             mismatch = results_mismatch(baselines[key], run_results)

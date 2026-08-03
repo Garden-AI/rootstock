@@ -60,7 +60,7 @@ from .pep723 import (
     validate_environment_file,
 )
 from .spawn import DOWNLOAD_WRAPPER, spawn_in_env
-from .verify import verify_checkpoint
+from .verify import DEFAULT_VERIFY_TIMEOUT, verify_checkpoint
 
 ROOTSTOCK_GITHUB_URL = "https://github.com/Garden-AI/rootstock.git"
 
@@ -1221,6 +1221,7 @@ def verify_fetched_checkpoint(
     refresh: bool = True,
     push: bool = True,
     progress: Progress | None = None,
+    timeout: float = DEFAULT_VERIFY_TIMEOUT,
 ) -> VerifyResult:
     """
     Verify a checkpoint on ``device`` and record the outcome in the manifest.
@@ -1258,6 +1259,7 @@ def verify_fetched_checkpoint(
             setup_kwargs,
             cache_root=cache_root,
             weights_capture_path=str(capture_path),
+            timeout=timeout,
         )
         weight_files = read_weights_capture(capture_path)
     with _manifest_transaction(root) as manifest:
@@ -1304,6 +1306,7 @@ def add_checkpoint(
     setup_kwargs: dict | None = None,
     cache_root: Path | None = None,
     progress: Progress | None = None,
+    verify_timeout: float = DEFAULT_VERIFY_TIMEOUT,
 ) -> AddResult:
     """
     Idempotent download-or-verify for a checkpoint by canonical id.
@@ -1349,6 +1352,7 @@ def add_checkpoint(
             cache_root=cache_root,
             refresh=False,
             progress=progress,
+            timeout=verify_timeout,
         )
 
     # Refresh + push (takes the lock for its own load -> refresh -> save)

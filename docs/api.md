@@ -286,6 +286,7 @@ rootstock add esen-md-direct-all-omol --kwarg charge=-1 --kwarg enabled=true
 Options:
 
 - `--device <dev>`: Device for verification (default: `cuda`)
+- `--verify-timeout <seconds>`: Time allowed per verification — worker startup plus one forward pass (default: 600). Raise it on slow filesystems where cold reads of large checkpoints exceed the default. Also accepted by `sync` and `smoke-test`
 - `--no-verify`: Skip the verify phase (login-node escape hatch)
 - `--kwarg KEY=VAL`: Repeatable extra kwarg passed to `setup()`. Values are JSON-decoded first; on parse failure, fall back to a string
 - `--root <path>`: Root directory
@@ -305,6 +306,9 @@ rootstock smoke-test --env mace --checkpoint mace-mp-0-medium
 
 # JSON summary for cron
 rootstock smoke-test --json
+
+# Slow filesystem: allow more time per verification (default 600s)
+rootstock smoke-test --verify-timeout 1800
 ```
 
 Exit code is 0 if all tested checkpoints passed, 1 otherwise.
