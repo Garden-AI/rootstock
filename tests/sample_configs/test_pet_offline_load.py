@@ -51,9 +51,19 @@ def stubbed_libs(monkeypatch):
     upet_calculator.UPETCalculator = UPETCalculator
     upet.calculator = upet_calculator
 
+    # metatomic_ase comes with upet in the real env; setup() patches its
+    # HAS_NVALCHEMIOPS flag to force the vesin neighbor-list fallback.
+    metatomic_ase = types.ModuleType("metatomic_ase")
+    metatomic_neighbors = types.ModuleType("metatomic_ase._neighbors")
+    metatomic_neighbors.HAS_NVALCHEMIOPS = True
+    metatomic_ase._neighbors = metatomic_neighbors
+
     monkeypatch.setitem(sys.modules, "huggingface_hub", hf)
     monkeypatch.setitem(sys.modules, "upet", upet)
     monkeypatch.setitem(sys.modules, "upet.calculator", upet_calculator)
+    monkeypatch.setitem(sys.modules, "metatomic_ase", metatomic_ase)
+    monkeypatch.setitem(sys.modules, "metatomic_ase._neighbors", metatomic_neighbors)
+    captured["neighbors"] = metatomic_neighbors
     return captured
 
 
@@ -76,6 +86,16 @@ def test_setup_passes_checkpoint_path_not_model_name(stubbed_libs):
         "checkpoint_path": "/shared/cache/models/stub.ckpt",
         "device": "cpu",
     }
+
+
+def test_setup_forces_vesin_neighbor_fallback(stubbed_libs):
+    """metatomic-ase 0.1.2's nvalchemi fast path passes a float max_neighbors
+    into torch.full whenever the model cutoff exceeds ~5.04 Å, and it
+    auto-activates on CUDA — setup() must disable it before constructing the
+    calculator."""
+    env = _load_env_module()
+    env.setup("pet-oam-xl", device="cuda")
+    assert stubbed_libs["neighbors"].HAS_NVALCHEMIOPS is False
 
 
 def test_every_checkpoint_maps_to_parseable_filename():

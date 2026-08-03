@@ -5,10 +5,14 @@
 #     "ase>=3.22",
 #     "huggingface_hub",
 #     "matgl",
-#     # 0.4+ needs torch>=2.8 at runtime (custom-op registration uses string
-#     # annotations infer_schema can't parse on older torch) but only declares
-#     # the constraint on its extras, so the resolver won't catch it.
-#     "nvalchemi-toolkit-ops<0.4",
+#     # nvalchemi-toolkit-ops is deliberately absent. It's only an optional
+#     # matgl extra (accelerated neighbor lists), and no version can work on
+#     # this env's torch pin: 0.3.x registers torch custom ops in modules that
+#     # use `from __future__ import annotations`, which torch 2.4's
+#     # infer_schema can't parse — ValueError at import, and matgl's optional-
+#     # import guard in matgl/ext/ase.py only catches ImportError, so merely
+#     # importing PESCalculator crashes — while 0.4+ requires torch>=2.8.
+#     # Without it, matgl falls back to its own neighbor list.
 #     "pymatgen",
 #     "monty",
 #     "ruamel.yaml",
@@ -24,7 +28,10 @@
 # find-links = ["https://data.pyg.org/whl/torch-2.4.0+cu121.html"]
 #
 # [tool.uv.sources]
-# matgl = { git = "https://github.com/materialsvirtuallab/matgl.git" }
+# # Pinned: this recipe was originally written against matgl 1.0.0, and the
+# # unpinned git HEAD silently started building 4.x. setup() below is written
+# # for 4.0.3 — bump the tag deliberately, not by rebuild accident.
+# matgl = { git = "https://github.com/materialsvirtuallab/matgl.git", tag = "v4.0.3" }
 # ///
 """TensorNet env — hosts MatPES TensorNet checkpoints via MatGL."""
 
@@ -34,42 +41,23 @@ CHECKPOINTS = {
 
 
 def setup(checkpoint: str, device: str = "cuda"):
-    import torch
-
-    torch.set_default_device(device)
-
-    # matgl 1.0.0 imports ExpCellFilter from ase.constraints, but it moved to
-    # ase.filters in ASE 3.23. Patch it in before matgl imports.
-    import ase.constraints
-
-    if not hasattr(ase.constraints, "ExpCellFilter"):
-        from ase.filters import ExpCellFilter
-
-        ase.constraints.ExpCellFilter = ExpCellFilter
-
-    # DGL 2.x graphbolt imports torchdata submodules removed in torchdata>=0.7.
-    # Stub the entire graphbolt subpackage before `import dgl` runs; DGL's
-    # __init__ will use our empty stub and skip the real graphbolt initialisation.
-    # matgl only uses DGL for graph construction — graphbolt is never called.
-    import sys, types
-
-    for _name in [
-        "dgl.graphbolt",
-        "dgl.graphbolt.base",
-        "dgl.graphbolt.dataloader",
-        "dgl.graphbolt.feature_fetcher",
-        "dgl.graphbolt.minibatch_transformer",
-    ]:
-        if _name not in sys.modules:
-            sys.modules[_name] = types.ModuleType(_name)
-
     from huggingface_hub import snapshot_download
 
     import matgl
     from matgl.ext.ase import PESCalculator
 
-    # matgl 1.0.0 load_model only checks the GitHub manifest; HF models must
-    # be downloaded explicitly and passed as a local path.
+    # load_model only resolves names against matgl's own manifest; HF models
+    # must be downloaded explicitly and passed as a local path.
     local_path = snapshot_download(repo_id=CHECKPOINTS[checkpoint])
-    pot = matgl.load_model(local_path)
+
+    # Move with .to(device), never torch.set_default_device: under matgl 4.x
+    # the default-device hack splits the model across devices at load —
+    # Potential.__init__ registers data_mean from a constructor-kwarg tensor
+    # torch.load restored to cpu, while _eye3 (a persistent=False buffer, not
+    # in the state dict) is created fresh on the default device — and
+    # forward() then crashes with a cuda/cpu mismatch at
+    # `lat @ (self._eye3 + st)` in matgl/apps/pes.py. Module.to() moves
+    # params and all buffers coherently, and forward() migrates inputs to the
+    # model's device itself.
+    pot = matgl.load_model(local_path).to(device)
     return PESCalculator(potential=pot)
