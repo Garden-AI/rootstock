@@ -375,11 +375,20 @@ def main():
         description=(
             "Re-verify checkpoints by running a forward pass on each. Never downloads. "
             "Canonical checkpoints always use setup_kwargs={} — checkpoints requiring "
-            "non-default kwargs may show as failing here even if they work in practice."
+            "non-default kwargs may show as failing here even if they work in practice. "
+            "Each run also exercises every '<family>:custom' entry by re-loading a "
+            "same-family checkpoint's cached weights via the weights= path and "
+            "requiring identical results."
         ),
     )
     smoke_parser.add_argument("--env", help="Filter to a single environment")
-    smoke_parser.add_argument("--checkpoint", help="Filter to a single checkpoint (requires --env)")
+    smoke_parser.add_argument(
+        "--checkpoint",
+        help=(
+            "Filter to a single checkpoint (requires --env); a '<family>:custom' id "
+            "runs just that custom-weights leg and its baseline"
+        ),
+    )
     smoke_parser.add_argument("--device", default="cuda", help="Device (default: cuda)")
     smoke_parser.add_argument("--json", action="store_true", help="Emit a JSON summary")
     smoke_parser.add_argument(

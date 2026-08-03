@@ -28,6 +28,13 @@ if TYPE_CHECKING:
 # silent failure where a model returns zeros for everything.
 _FORCE_ZERO_THRESHOLD = 1e-8
 
+# Tolerances for results_mismatch: loose enough for GPU nondeterminism and
+# minor loader differences between setup() and setup_from_path() (e.g. dtype
+# defaults), tight enough that a different model cannot pass — wrong weights
+# move energies by orders of magnitude more than either.
+_ENERGY_ATOL = 1e-4  # eV
+_FORCES_ATOL = 1e-3  # eV/Å
+
 
 def _smoke_test_atoms() -> "Atoms":  # noqa: UP037 — Atoms is TYPE_CHECKING-only
     """Hardcoded H2O-in-a-box used as input for every smoke test."""
@@ -61,6 +68,7 @@ def verify_checkpoint(
     cache_root: Path | None = None,
     checkpoint_path: str | None = None,
     weights_capture_path: str | None = None,
+    results: dict | None = None,
 ) -> tuple[bool, str | None]:
     """
     Run a single forward pass to verify a checkpoint loads and computes.
@@ -78,6 +86,9 @@ def verify_checkpoint(
         weights_capture_path: When set, the worker writes the weight files
                     its setup() touched to this path as JSON (#177); the
                     caller reads it afterwards — a failed load writes nothing.
+        results: When a dict is passed and verification succeeds, it receives
+                    the computed ``energy``/``forces``/``virial`` so the
+                    caller can compare runs (see ``results_mismatch``).
 
     Returns:
         (success, error_message). On success, error_message is None.
@@ -136,4 +147,29 @@ def verify_checkpoint(
     if not np.all(np.isfinite(virial)):
         return False, "non-finite values in virial"
 
+    if results is not None:
+        results["energy"] = float(energy)
+        results["forces"] = np.asarray(forces, dtype=float)
+        results["virial"] = np.asarray(virial, dtype=float)
     return True, None
+
+
+def results_mismatch(baseline: dict, candidate: dict) -> str | None:
+    """
+    Compare two successful ``verify_checkpoint`` results (``results`` dicts)
+    from the same structure on the same device.
+
+    Used by smoke-test's custom-weights leg (#200): the same checkpoint loaded
+    via setup() and via setup_from_path(weights file) must agree — anything
+    beyond tolerance means the weights= path loaded something else.
+
+    Returns a short description of the first difference, or None when they
+    agree within tolerance.
+    """
+    d_energy = abs(candidate["energy"] - baseline["energy"])
+    if d_energy > _ENERGY_ATOL:
+        return f"energy differs by {d_energy:.3e} eV (tolerance {_ENERGY_ATOL:.0e})"
+    d_forces = float(np.max(np.abs(candidate["forces"] - baseline["forces"])))
+    if d_forces > _FORCES_ATOL:
+        return f"max force component differs by {d_forces:.3e} eV/Å (tolerance {_FORCES_ATOL:.0e})"
+    return None
