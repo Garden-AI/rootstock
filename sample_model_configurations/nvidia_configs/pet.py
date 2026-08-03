@@ -5,7 +5,7 @@
 #     "ase>=3.22",
 #     # upet pulls nvalchemi-toolkit-ops unpinned; 0.4+ needs torch>=2.8 at
 #     # runtime but only declares the constraint on its extras, so the
-#     # resolver won't catch it (same trap as the tensornet env).
+#     # resolver won't catch it (the same trap that bit the tensornet env).
 #     "torch>=2.8,<2.14",
 # ]
 # ///
@@ -26,6 +26,17 @@ CHECKPOINTS = {
 def setup(checkpoint: str, device: str = "cuda"):
     from huggingface_hub import hf_hub_download
     from upet.calculator import UPETCalculator
+
+    # Force metatomic's vesin neighbor-list fallback. metatomic-ase 0.1.2's
+    # nvalchemi fast path passes max_neighbors = len(system) * max(128,
+    # cutoff**3) — a float whenever the cutoff exceeds 128**(1/3) ≈ 5.04 Å —
+    # into nvalchemiops' torch.full size tuple, which raises TypeError. The
+    # path auto-activates on CUDA because upet hard-depends on
+    # nvalchemi-toolkit-ops, so the import always succeeds. The flag is read
+    # at call time, so patching after import works.
+    import metatomic_ase._neighbors as _neighbors
+
+    _neighbors.HAS_NVALCHEMIOPS = False
 
     # Passing model=/version= makes UPETCalculator resolve the name by listing
     # the hub repo — an uncached API call that fails on workers, which run
