@@ -134,6 +134,26 @@ def test_smoke_test_returns_zero_when_all_pass(populated_root, monkeypatch):
     assert cmd_smoke_test(_make_args(populated_root)) == 0
 
 
+def test_smoke_test_rerecords_weight_files(populated_root, monkeypatch):
+    """Every pass re-captures the weight files the load touched, so records
+    self-heal nightly like verified_at (#177) — and one smoke-test run
+    backfills an install that predates weight tracking."""
+    files = [{"path": "cache/fake/model.bin", "size": 9_000_000}]
+
+    def fake_verify(
+        root, env_name, checkpoint, device, setup_kwargs, *, weights_capture_path=None, **_
+    ):
+        Path(weights_capture_path).write_text(json.dumps({"files": files}))
+        return True, None
+
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", fake_verify)
+    assert cmd_smoke_test(_make_args(populated_root)) == 0
+
+    small = load_manifest(populated_root).environments["mace"].checkpoints["mace-mp-0-small"]
+    assert small.weight_files == files
+    assert small.weights_recorded_at is not None
+
+
 def test_smoke_test_filters_by_env(populated_root, monkeypatch):
     seen: list[tuple[str, str]] = []
     monkeypatch.setattr(

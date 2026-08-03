@@ -25,7 +25,7 @@ import subprocess
 import sys
 import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -936,6 +936,7 @@ def _run_download(
     checkpoint: str,
     setup_kwargs: dict,
     cache_root: Path | None = None,
+    weights_capture_path: str | Path | None = None,
 ) -> tuple[bool, str | None]:
     """Run ``setup(checkpoint, "cpu", **setup_kwargs)`` to trigger the cache-aware
     download path. Returns ``(ok, error)``."""
@@ -943,11 +944,18 @@ def _run_download(
     if not (env_dir / "bin" / "python").exists():
         return False, f"environment not built at {env_dir}"
 
+    payload = {"checkpoint": checkpoint, "device": "cpu", "setup_kwargs": setup_kwargs}
+    if weights_capture_path is not None:
+        payload["weights_capture"] = {
+            "result_path": str(weights_capture_path),
+            "cache_root": str(cache_root if cache_root is not None else root),
+        }
+
     with spawn_in_env(
         root,
         env_name,
         DOWNLOAD_WRAPPER,
-        {"checkpoint": checkpoint, "device": "cpu", "setup_kwargs": setup_kwargs},
+        payload,
         cache_root=cache_root,
     ) as spec:
         result = subprocess.run(
@@ -964,6 +972,81 @@ def _run_download(
         msg = err[-1] if err else f"setup() exited with code {result.returncode}"
         return False, msg
     return True, None
+
+
+# Captures totalling fewer bytes than this are presumed broken probes (a
+# helper failure, a load path neither probe sees) rather than real working
+# sets — real weight files are MBs at minimum. Such captures never replace
+# an existing record (#177).
+_WEIGHTS_BYTE_FLOOR = 1 << 20
+
+
+@contextmanager
+def weights_capture_file() -> Iterator[Path]:
+    """Yield a path for a capture subprocess to write its result to.
+
+    A fresh private directory rather than mkstemp: the file must not exist
+    until the wrapper writes it, so "no capture ran" stays distinguishable
+    from "capture wrote garbage"."""
+    tmp_dir = tempfile.mkdtemp(prefix="rootstock_weights_")
+    try:
+        yield Path(tmp_dir) / "weights.json"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def read_weights_capture(path: str | Path) -> list[dict] | None:
+    """Parse a capture result written by weights_capture.py.
+
+    Returns the validated ``[{"path", "size"}, ...]`` list, or None when no
+    usable capture exists — setup() failed before finishing, the helper hit
+    an error, or the file is malformed. None means "learn nothing", never
+    "forget the old record".
+    """
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        files = []
+        for entry in data["files"]:
+            rel, size = entry["path"], entry["size"]
+            if not isinstance(rel, str) or not isinstance(size, int):
+                return None
+            files.append({"path": rel, "size": size})
+        return files
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+def apply_weights_record(
+    ckpt: CheckpointInfo,
+    files: list[dict] | None,
+    *,
+    label: str = "",
+    progress: Progress | None = None,
+) -> None:
+    """Merge a weight-file capture into a checkpoint's manifest record (#177).
+
+    Merge policy: a non-trivial capture replaces the record (freshness
+    self-heals — every add/verify/smoke-test pass re-records); a
+    suspiciously small one keeps the previous record and says so; ``None``
+    (no capture ran) changes nothing, silently. Call inside a manifest
+    transaction.
+    """
+    if files is None:
+        return
+    total = sum(f["size"] for f in files)
+    if total < _WEIGHTS_BYTE_FLOOR:
+        if ckpt.weight_files:
+            _say(
+                progress,
+                f"  weight capture for {label} suspiciously small "
+                f"({total} bytes) — keeping the record from "
+                f"{ckpt.weights_recorded_at}",
+            )
+        return
+    ckpt.weight_files = sorted(files, key=lambda f: f["path"])
+    ckpt.weights_recorded_at = now_iso()
+    _say(progress, f"  recorded {len(files)} weight files ({total / 1e6:.0f} MB)")
 
 
 @contextmanager
@@ -1085,7 +1168,16 @@ def fetch_checkpoint(
     # ---- Download (runs outside the lock) -------------------------------
     if not already_fetched:
         _say(progress, f"Downloading {env_name}/{checkpoint} on CPU...")
-        ok, err = _run_download(root, env_name, checkpoint, setup_kwargs, cache_root=cache_root)
+        with weights_capture_file() as capture_path:
+            ok, err = _run_download(
+                root,
+                env_name,
+                checkpoint,
+                setup_kwargs,
+                cache_root=cache_root,
+                weights_capture_path=capture_path,
+            )
+            weight_files = read_weights_capture(capture_path)
         with _manifest_transaction(root) as manifest:
             _, ckpt = _ensure_manifest_entry(manifest, root, env_name, checkpoint)
             if ok:
@@ -1094,6 +1186,10 @@ def fetch_checkpoint(
                 fetched_at = ckpt.fetched_at
             else:
                 ckpt.last_error = f"download: {err}"
+            # A failed setup() writes no capture, so this is a no-op then.
+            apply_weights_record(
+                ckpt, weight_files, label=f"{env_name}/{checkpoint}", progress=progress
+            )
         if not ok:
             raise OperationError(f"download failed: {err}")
         _say(progress, f"  fetched_at = {fetched_at}")
@@ -1153,9 +1249,17 @@ def verify_fetched_checkpoint(
 
     # ---- Verify (runs outside the lock) ---------------------------------
     _say(progress, f"Verifying {env_name}/{checkpoint} on {device}...")
-    ok, err = verify_checkpoint(
-        root, env_name, checkpoint, device, setup_kwargs, cache_root=cache_root
-    )
+    with weights_capture_file() as capture_path:
+        ok, err = verify_checkpoint(
+            root,
+            env_name,
+            checkpoint,
+            device,
+            setup_kwargs,
+            cache_root=cache_root,
+            weights_capture_path=str(capture_path),
+        )
+        weight_files = read_weights_capture(capture_path)
     with _manifest_transaction(root) as manifest:
         _, ckpt = _ensure_manifest_entry(manifest, root, env_name, checkpoint)
         if ok:
@@ -1167,6 +1271,12 @@ def verify_fetched_checkpoint(
             ckpt.verified_at = None
             ckpt.verified_device = None
             ckpt.last_error = f"verify: {err}"
+        # Recorded even when verification fails: the capture only exists if
+        # setup() completed, and the load working set it saw is real whether
+        # or not the forward pass then produced good forces.
+        apply_weights_record(
+            ckpt, weight_files, label=f"{env_name}/{checkpoint}", progress=progress
+        )
     if not ok:
         raise OperationError(f"verify failed: {err}")
     _say(progress, f"  verified_at = {verified_at} ({device})")

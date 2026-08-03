@@ -28,7 +28,7 @@ from pathlib import Path
 from .config import UserConfig
 from .exceptions import RootstockError
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # manifest_lock defaults. The lock is only held across a load → mutate → save
 # cycle (plus the env refresh, which shells out to `uv pip list` per env), so
@@ -108,6 +108,19 @@ def _migrate_v3_to_v4(data: dict) -> tuple[dict, str | None]:
     return data, None
 
 
+def _migrate_v4_to_v5(data: dict) -> tuple[dict, str | None]:
+    """v5 added optional weight-tracking fields to CheckpointInfo.
+
+    ``weight_files``/``weights_recorded_at`` default to absent, so this is a
+    pure version bump. The bump still matters: without it a v4 client's
+    from_dict/asdict round-trip would silently drop the new fields on its
+    next save — refusing loudly (migrate_manifest_data's newer-schema check)
+    beats that.
+    """
+    data["schema_version"] = 5
+    return data, None
+
+
 # One entry per historical schema version, upgrading one step. A schema bump
 # without a migration here strands every deployed manifest of that vintage —
 # add the migration in the same change as the bump.
@@ -115,6 +128,7 @@ MIGRATIONS = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
     3: _migrate_v3_to_v4,
+    4: _migrate_v4_to_v5,
 }
 
 
@@ -192,6 +206,15 @@ class CheckpointInfo:
     verified_at: str | None = None  # ISO 8601, set when smoke test passes
     verified_device: str | None = None  # "cuda", "cpu", etc.
     last_error: str | None = None  # most recent error from add or smoke-test
+    # Weight files this checkpoint's setup() actually touched, captured at
+    # add/verify/smoke-test time (#177): list of {"path", "size"} dicts with
+    # paths relative to the cache root (so records survive split-cache
+    # installs) and sizes in bytes. None = never recorded. Granularity is
+    # deliberately files, not dirs: HF hub keeps one repo dir per model
+    # *family*, so dir-level records over-warm — and under a job's memory
+    # cgroup, over-warming evicts the pages the worker needs.
+    weight_files: list[dict] | None = None
+    weights_recorded_at: str | None = None  # ISO 8601
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -203,6 +226,8 @@ class CheckpointInfo:
             verified_at=data.get("verified_at"),
             verified_device=data.get("verified_device"),
             last_error=data.get("last_error"),
+            weight_files=data.get("weight_files"),
+            weights_recorded_at=data.get("weights_recorded_at"),
         )
 
 

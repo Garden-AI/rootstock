@@ -75,6 +75,7 @@ def test_v2_without_checkpoints_migrates_quietly():
     assert notes == [
         "migrated manifest schema v2 -> v3",
         "migrated manifest schema v3 -> v4",
+        "migrated manifest schema v4 -> v5",
     ]
 
 
@@ -101,8 +102,31 @@ def test_v3_drops_dead_status_fields():
     assert "error_message" not in migrated["environments"]["mace"]
     # v3 checkpoint ids are already canonical — they survive
     assert "mace-mp-0-medium" in migrated["environments"]["mace"]["checkpoints"]
-    assert notes == ["migrated manifest schema v3 -> v4"]
+    assert notes == [
+        "migrated manifest schema v3 -> v4",
+        "migrated manifest schema v4 -> v5",
+    ]
     assert "mace" in Manifest.from_dict(migrated).environments
+
+
+# --- v4 -> v5 -------------------------------------------------------------
+
+
+def test_v4_bumps_cleanly_with_checkpoints_intact():
+    """v5 only *added* optional weight-tracking fields; a v4 manifest's
+    checkpoint records survive untouched and load with the fields absent."""
+    env = _v2_env({"mace-mp-0-medium": {"fetched_at": "2026-01-02T00:00:00Z"}})
+    del env["status"]  # v4 dropped it
+    data = _base(4, {"mace": env})
+
+    migrated, notes = migrate_manifest_data(data)
+
+    assert migrated["schema_version"] == SCHEMA_VERSION
+    assert notes == ["migrated manifest schema v4 -> v5"]
+    ckpt = Manifest.from_dict(migrated).environments["mace"].checkpoints["mace-mp-0-medium"]
+    assert ckpt.fetched_at == "2026-01-02T00:00:00Z"
+    assert ckpt.weight_files is None
+    assert ckpt.weights_recorded_at is None
 
 
 # --- v1 -> v4 (full chain) --------------------------------------------------
@@ -116,7 +140,7 @@ def test_v1_chain_migrates_to_current():
     assert migrated["schema_version"] == SCHEMA_VERSION
     # v1->v2 mints empty CheckpointInfo dicts; v2->v3 then drops them
     assert migrated["environments"]["mace"]["checkpoints"] == {}
-    assert len(notes) == 3
+    assert len(notes) == 4
     assert Manifest.from_dict(migrated).environments["mace"].source_hash == "sha256:abc"
 
 

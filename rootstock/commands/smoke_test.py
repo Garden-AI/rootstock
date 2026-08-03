@@ -16,7 +16,12 @@ from ..manifest import (
     now_iso,
     save_manifest,
 )
-from ..operations import update_and_push_manifest
+from ..operations import (
+    apply_weights_record,
+    read_weights_capture,
+    update_and_push_manifest,
+    weights_capture_file,
+)
 from ..verify import verify_checkpoint
 from .common import get_root_or_exit, resolve_cache_root
 
@@ -75,20 +80,27 @@ def cmd_smoke_test(args) -> int:
     # loaded* manifest in one locked cycle afterwards — mutating the manifest
     # loaded before the loop and saving it at the end would silently revert
     # anything a co-maintainer wrote in between.
-    outcomes: list[tuple[str, str, bool, str | None]] = []
+    outcomes: list[tuple[str, str, bool, str | None, list[dict] | None]] = []
 
     for env_name, ckpt_name, env, ckpt in selected:
         start = time.monotonic()
-        ok, err = verify_checkpoint(
-            root=root,
-            env_name=env_name,
-            checkpoint=ckpt_name,
-            device=device,
-            setup_kwargs={},  # smoke-test always uses env defaults; see design §7.2
-            cache_root=cache_root,
-        )
+        # Each pass also re-captures which weight files the load touched, so
+        # per-checkpoint weight records self-heal nightly like verified_at
+        # (#177) — and backfilling them on an existing install is just one
+        # smoke-test run, no re-downloads.
+        with weights_capture_file() as capture_path:
+            ok, err = verify_checkpoint(
+                root=root,
+                env_name=env_name,
+                checkpoint=ckpt_name,
+                device=device,
+                setup_kwargs={},  # smoke-test always uses env defaults; see design §7.2
+                cache_root=cache_root,
+                weights_capture_path=str(capture_path),
+            )
+            weight_files = read_weights_capture(capture_path)
         elapsed = time.monotonic() - start
-        outcomes.append((env_name, ckpt_name, ok, err))
+        outcomes.append((env_name, ckpt_name, ok, err, weight_files))
 
         # Mirror the outcome onto the working copy so verified_current in the
         # report reflects this run.
@@ -125,7 +137,7 @@ def cmd_smoke_test(args) -> int:
     with manifest_lock(root):
         fresh = load_manifest(root)
         if fresh is not None:
-            for env_name, ckpt_name, ok, err in outcomes:
+            for env_name, ckpt_name, ok, err, weight_files in outcomes:
                 env_record = fresh.environments.get(env_name)
                 ckpt_record = env_record.checkpoints.get(ckpt_name) if env_record else None
                 if ckpt_record is None:
@@ -138,6 +150,12 @@ def cmd_smoke_test(args) -> int:
                     ckpt_record.verified_at = None
                     ckpt_record.verified_device = None
                     ckpt_record.last_error = f"smoke-test: {err}"
+                apply_weights_record(
+                    ckpt_record,
+                    weight_files,
+                    label=f"{env_name}/{ckpt_name}",
+                    progress=None if json_out else print,
+                )
             save_manifest(fresh, root)
     update_and_push_manifest(root, quiet=True, push=not no_push)
 
