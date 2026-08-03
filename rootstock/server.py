@@ -98,6 +98,7 @@ class RootstockServer:
         setup_kwargs: dict | None = None,
         checkpoint_path: str | None = None,
         usage_client: str | None = "calculator",
+        weights_capture_path: str | None = None,
     ):
         """
         Initialize the server.
@@ -128,6 +129,11 @@ class RootstockServer:
                 usage record (see usage.py), or None to record nothing —
                 verification passes None so synthetic smoke-test sessions
                 never pollute the spool.
+            weights_capture_path: When set, the worker records which weight
+                files its setup() touches and writes them (as JSON) to this
+                path the moment the load completes (see weights_capture.py).
+                Verification uses this to keep per-checkpoint weight records
+                fresh in the manifest (#177).
         """
         if root is None:
             raise ValueError("root is required for pre-built environments")
@@ -147,6 +153,7 @@ class RootstockServer:
         self.cache_root = Path(cache_root) if cache_root is not None else None
         self.setup_kwargs = setup_kwargs or {}
         self.usage_client = usage_client
+        self.weights_capture_path = weights_capture_path
 
         self._server_socket: socket.socket | None = None
         self._client_socket: socket.socket | None = None
@@ -199,19 +206,28 @@ class RootstockServer:
         """Start worker using pre-built environment; return the worker process."""
         from .spawn import WORKER_WRAPPER, spawn_in_env
 
+        payload = {
+            "checkpoint": self.checkpoint,
+            "checkpoint_path": self.checkpoint_path,
+            "device": self.device,
+            "socket_path": self.socket_path,
+            "setup_kwargs": self.setup_kwargs,
+        }
+        if self.weights_capture_path:
+            # Records are relative to the cache root so they survive
+            # split-cache installs; base mirrors get_model_cache_env's.
+            payload["weights_capture"] = {
+                "result_path": self.weights_capture_path,
+                "cache_root": str(self.cache_root or self.root),
+            }
+
         self._spawn_stack = contextlib.ExitStack()
         spec = self._spawn_stack.enter_context(
             spawn_in_env(
                 self.root,
                 self.env_name,
                 WORKER_WRAPPER,
-                {
-                    "checkpoint": self.checkpoint,
-                    "checkpoint_path": self.checkpoint_path,
-                    "device": self.device,
-                    "socket_path": self.socket_path,
-                    "setup_kwargs": self.setup_kwargs,
-                },
+                payload,
                 cache_root=self.cache_root,
                 offline=True,
             )

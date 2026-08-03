@@ -60,6 +60,7 @@ def verify_checkpoint(
     setup_kwargs: dict | None = None,
     cache_root: Path | None = None,
     checkpoint_path: str | None = None,
+    weights_capture_path: str | None = None,
 ) -> tuple[bool, str | None]:
     """
     Run a single forward pass to verify a checkpoint loads and computes.
@@ -74,6 +75,9 @@ def verify_checkpoint(
                     redirected HOME. Defaults to ``root``.
         checkpoint_path: Path to a local (user-registered) weights file; the
                     worker then loads via setup_from_path() instead of setup().
+        weights_capture_path: When set, the worker writes the weight files
+                    its setup() touched to this path as JSON (#177); the
+                    caller reads it afterwards — a failed load writes nothing.
 
     Returns:
         (success, error_message). On success, error_message is None.
@@ -96,6 +100,7 @@ def verify_checkpoint(
         setup_kwargs=setup_kwargs,
         timeout=600.0,
         checkpoint_path=checkpoint_path,
+        weights_capture_path=weights_capture_path,
         # Verification sessions are synthetic — the nightly smoke-test cron
         # would otherwise spool one fake "session" per checkpoint per night,
         # and rollups merge irreversibly.

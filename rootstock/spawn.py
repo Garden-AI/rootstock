@@ -40,7 +40,7 @@ with open(sys.argv[1]) as f:
 
 # Warm the page cache before the heavy imports below fault their way
 # through multi-GB mmap'd libraries at network-round-trip speed (#167).
-# The helper is staged next to this wrapper; best-effort, never fatal.
+# The helpers are staged next to this wrapper; best-effort, never fatal.
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _here)
 try:
@@ -48,6 +48,14 @@ try:
     prewarm.prewarm_from_spec(spec)
 except ImportError:
     pass  # wrapper run without staged helper (e.g. tests); warming is optional
+try:
+    # Record which weight files setup() touches (#177); a no-op unless the
+    # spec requests capture. The hook must be live before env_source's
+    # imports so nothing loaded at import time slips past it.
+    import weights_capture
+    weights_capture.begin(spec)
+except ImportError:
+    weights_capture = None
 finally:
     sys.path.remove(_here)
 
@@ -64,6 +72,11 @@ if spec.get("checkpoint_path"):
 else:
     from env_source import setup as setup_fn
     target = spec["checkpoint"]
+
+# setup runs deep inside run_worker's socket loop, so the capture record is
+# written by a wrapped setup_fn the moment the load completes.
+if weights_capture is not None:
+    setup_fn = weights_capture.wrap_setup(setup_fn, spec)
 
 run_worker(
     setup_fn=setup_fn,
@@ -89,11 +102,26 @@ try:
     prewarm.prewarm_from_spec(spec)
 except ImportError:
     pass  # wrapper run without staged helper (e.g. tests); warming is optional
+try:
+    # Same weight capture as WORKER_WRAPPER (#177) — a fresh download's
+    # setup() writes and then loads the weights, so its touched set is the
+    # same working set a verify-time load produces.
+    import weights_capture
+    weights_capture.begin(spec)
+except ImportError:
+    weights_capture = None
 finally:
     sys.path.remove(_here)
 
 sys.path.insert(0, spec["env_dir"])
 from env_source import setup
+
+# wrap_setup, not a trailing finalize(): the maps probe must scan while the
+# calculator is still referenced. A discarded return value dies immediately
+# under CPython refcounting, and mmap-backed weights (safetensors) are
+# munmap'd with it — the wrapper's local reference holds them alive.
+if weights_capture is not None:
+    setup = weights_capture.wrap_setup(setup, spec)
 
 setup(spec["checkpoint"], spec["device"], **spec["setup_kwargs"])
 """
@@ -127,6 +155,10 @@ def spawn_in_env(
         wrapper_source: One of the static wrapper sources in this module.
         payload: JSON-serializable values the wrapper reads from the sidecar.
             ``env_dir`` is filled in here; everything else is the caller's.
+            A ``weights_capture`` entry of ``{"result_path", "cache_root"}``
+            makes the wrapper record which weight files setup() touches
+            (see weights_capture.py); the caller reads ``result_path`` after
+            the process exits.
         cache_root: Optional split cache root (see get_model_cache_env).
         offline: Forbid HuggingFace Hub network access (HF_HUB_OFFLINE=1).
             Workers serve weights pre-fetched by ``rootstock add`` and often
@@ -150,12 +182,11 @@ def spawn_in_env(
     try:
         wrapper = Path(tmp_dir) / "wrapper.py"
         wrapper.write_text(wrapper_source)
-        # The prewarm helper runs inside the env's (different) Python, so it
-        # travels as staged source next to the wrapper rather than being
+        # These helpers run inside the env's (different) Python, so they
+        # travel as staged source next to the wrapper rather than being
         # imported from the client's installation.
-        (Path(tmp_dir) / "prewarm.py").write_text(
-            (Path(__file__).parent / "prewarm.py").read_text()
-        )
+        for helper in ("prewarm.py", "weights_capture.py"):
+            (Path(tmp_dir) / helper).write_text((Path(__file__).parent / helper).read_text())
         sidecar = Path(tmp_dir) / "spec.json"
         sidecar.write_text(json.dumps({**payload, "env_dir": str(env_dir)}))
 

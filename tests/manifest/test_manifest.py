@@ -39,7 +39,7 @@ def _make_manifest(envs: dict[str, EnvironmentInfo] | None = None) -> Manifest:
 
 
 def test_schema_version_constant():
-    assert SCHEMA_VERSION == 4
+    assert SCHEMA_VERSION == 5
 
 
 def test_checkpoint_info_round_trip():
@@ -136,6 +136,8 @@ def test_to_dict_key_layout_is_stable():
         "verified_at",
         "verified_device",
         "last_error",
+        "weight_files",
+        "weights_recorded_at",
     ]
 
 
