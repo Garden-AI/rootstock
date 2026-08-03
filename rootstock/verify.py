@@ -35,6 +35,12 @@ _FORCE_ZERO_THRESHOLD = 1e-8
 _ENERGY_ATOL = 1e-4  # eV
 _FORCES_ATOL = 1e-3  # eV/Å
 
+# Default envelope for one verification: worker startup (env import + model
+# load + socket connect) plus the single forward pass. Cold Lustre reads of
+# large checkpoints can exceed it — every layer up to the CLI's
+# --verify-timeout exposes an override.
+DEFAULT_VERIFY_TIMEOUT = 600.0
+
 
 def _smoke_test_atoms() -> "Atoms":  # noqa: UP037 — Atoms is TYPE_CHECKING-only
     """Hardcoded H2O-in-a-box used as input for every smoke test."""
@@ -69,6 +75,7 @@ def verify_checkpoint(
     checkpoint_path: str | None = None,
     weights_capture_path: str | None = None,
     results: dict | None = None,
+    timeout: float = DEFAULT_VERIFY_TIMEOUT,
 ) -> tuple[bool, str | None]:
     """
     Run a single forward pass to verify a checkpoint loads and computes.
@@ -89,6 +96,7 @@ def verify_checkpoint(
         results: When a dict is passed and verification succeeds, it receives
                     the computed ``energy``/``forces``/``virial`` so the
                     caller can compare runs (see ``results_mismatch``).
+        timeout: Seconds allowed for worker startup + the forward pass.
 
     Returns:
         (success, error_message). On success, error_message is None.
@@ -109,7 +117,7 @@ def verify_checkpoint(
         root=Path(root),
         cache_root=Path(cache_root) if cache_root is not None else None,
         setup_kwargs=setup_kwargs,
-        timeout=600.0,
+        timeout=timeout,
         checkpoint_path=checkpoint_path,
         weights_capture_path=weights_capture_path,
         # Verification sessions are synthetic — the nightly smoke-test cron

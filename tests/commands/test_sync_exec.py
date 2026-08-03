@@ -152,6 +152,22 @@ def test_verify_devices_round_robin_with_plain_cuda(tmp_path, calls):
     assert len(calls["verify"]) == 6
 
 
+def test_verify_timeout_reaches_each_verify(tmp_path, calls):
+    plan = plan_for(verifies=(("mace", "m1"), ("mace", "m2")))
+
+    execute_sync(tmp_path, plan, verify_timeout=1800.0, say=lambda _: None)
+
+    assert [kw["timeout"] for _, kw in calls["verify"]] == [1800.0, 1800.0]
+
+
+def test_verify_timeout_defaults_to_600(tmp_path, calls):
+    plan = plan_for(verifies=(("mace", "m1"),))
+
+    execute_sync(tmp_path, plan, say=lambda _: None)
+
+    assert [kw["timeout"] for _, kw in calls["verify"]] == [600.0]
+
+
 def test_explicit_device_is_never_rewritten(tmp_path, calls):
     plan = plan_for(verifies=(("mace", "m1"), ("mace", "m2")))
 

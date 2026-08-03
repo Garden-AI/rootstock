@@ -130,6 +130,7 @@ def cmd_sync(args) -> int:
         plan,
         jobs=args.jobs,
         verify_jobs=args.verify_jobs,
+        verify_timeout=args.verify_timeout,
         device=args.device,
         upgrade=args.upgrade,
         fail_fast=args.fail_fast,

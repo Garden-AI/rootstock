@@ -153,6 +153,30 @@ def test_verify_defaults_checkpoint_path_to_none(monkeypatch):
     assert captured["checkpoint_path"] is None
 
 
+def test_verify_forwards_timeout(monkeypatch):
+    captured = {}
+
+    def factory(**ctor_kwargs):
+        captured.update(ctor_kwargs)
+        return _StubServer(energy=-10.5, forces=_ok_forces(), virial=_ok_virial())
+
+    monkeypatch.setattr("rootstock.server.RootstockServer", factory)
+    verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda", timeout=1800.0)
+    assert captured["timeout"] == 1800.0
+
+
+def test_verify_default_timeout_is_600(monkeypatch):
+    captured = {}
+
+    def factory(**ctor_kwargs):
+        captured.update(ctor_kwargs)
+        return _StubServer(energy=-10.5, forces=_ok_forces(), virial=_ok_virial())
+
+    monkeypatch.setattr("rootstock.server.RootstockServer", factory)
+    verify.verify_checkpoint(Path("/tmp"), "mace", "mace-mp-0-medium", "cuda")
+    assert captured["timeout"] == verify.DEFAULT_VERIFY_TIMEOUT == 600.0
+
+
 def test_verify_rejects_all_zero_forces(stub_server):
     """The silent-failure guard — model returned zeros for everything."""
     stub_server(energy=-1.0, forces=np.zeros((3, 3)), virial=_ok_virial())
