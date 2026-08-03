@@ -288,6 +288,23 @@ class SyncReport:
         }
 
 
+class _LiveList(list):
+    """A progress sink that records lines *and* surfaces them immediately.
+
+    Only safe when the phase runs serially — live output from parallel
+    workers would interleave unreadably, which is why the default path
+    buffers instead.
+    """
+
+    def __init__(self, say: Say):
+        super().__init__()
+        self._say = say
+
+    def append(self, line: str) -> None:
+        super().append(line)
+        self._say(f"    {line}")
+
+
 class _PhaseRunner:
     """Run one phase's items through a bounded thread pool.
 
@@ -295,12 +312,17 @@ class _PhaseRunner:
     progress would interleave unreadably), so each item's progress lines are
     buffered and only surfaced — through the shared, locked ``say`` — when
     the item fails; successes get a one-line completion mark.
+
+    ``live`` inverts that for serial phases (prune): every progress line
+    streams as it happens, so someone tailing a batch job's outfile sees the
+    slow deletes moving — and, on a hang, what they hung on.
     """
 
-    def __init__(self, phase: str, total: int, say: Say):
+    def __init__(self, phase: str, total: int, say: Say, live: bool = False):
         self.phase = phase
         self.total = total
         self.say = say
+        self.live = live
         self._lock = threading.Lock()
         self._done = 0
 
@@ -311,14 +333,16 @@ class _PhaseRunner:
             took = f", {result.seconds:.0f}s" if result.seconds is not None else ""
             self.say(f"[{self.phase} {self._done}/{self.total}] {result.label}: {mark}{took}")
             if result.status == "failed":
-                for line in buffered:
-                    self.say(f"    {line}")
+                if not self.live:  # live lines were already surfaced
+                    for line in buffered:
+                        self.say(f"    {line}")
                 self.say(f"    error: {result.reason}")
 
     def run_item(self, item, work: Callable[[list[str]], None]) -> ItemResult:
-        """Execute one item, buffering its progress; never raises."""
+        """Execute one item, buffering (or live-streaming) its progress;
+        never raises."""
         checkpoint = getattr(item, "checkpoint", None)
-        buffered: list[str] = []
+        buffered: list[str] = _LiveList(self.say) if self.live else []
         start = time.monotonic()
         try:
             work(buffered)
@@ -340,10 +364,11 @@ def _run_phase(
     max_workers: int,
     fail_fast: bool,
     say: Say,
+    live: bool = False,
 ) -> list[ItemResult]:
     if not items:
         return []
-    runner = _PhaseRunner(phase, len(items), say)
+    runner = _PhaseRunner(phase, len(items), say, live=live)
     results: list[ItemResult] = []
     with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(items)))) as pool:
         futures = {pool.submit(runner.run_item, item, make_work(item)): item for item in items}
@@ -709,6 +734,7 @@ def plan_prune(
     deep: bool = False,
     min_age_hours: float = DEFAULT_MIN_AGE_HOURS,
     cache_root: Path | None = None,
+    progress: Say | None = None,
 ) -> PrunePlan:
     """Compute what pruning would remove from ``root``.
 
@@ -722,9 +748,19 @@ def plan_prune(
     meaningless on a shared filesystem (the build owning ``.build/<env>.<pid>``
     may be on another node), so anything mtime-newer than the guard is left
     alone and noted.
+
+    ``progress`` receives a line before each potentially slow step — the
+    per-item byte counts come from full tree walks, which on a loaded
+    shared filesystem can each take minutes with nothing else to show.
     """
     root = Path(root)
     cache_base = Path(cache_root) if cache_root is not None else resolve_cache_root(root)
+
+    def emit(line: str) -> None:
+        if progress is not None:
+            progress(line)
+
+    emit(f"reading install state under {root}")
     state = read_install_state(root)
     manifest = state.manifest
     plan = PrunePlan()
@@ -786,6 +822,8 @@ def plan_prune(
                 continue
             built = state.envs.get(name)
             reason = f"not in {source_dir}" if source_dir is not None else "no registered source"
+            if built is not None:
+                emit(f"sizing envs/{name}")
             # In default mode a cruft env by definition has no registered
             # source; only SOURCE_DIR mode unregisters source files.
             unregister = source_dir is not None and name in registered
@@ -900,6 +938,7 @@ def plan_prune(
             repo_path = _safe_weight_path(cache_base, repo)
             if repo_path is None or not repo_path.exists():
                 continue
+            emit(f"sizing {repo}")
             plan.weight_dirs.append(
                 PruneWeightDirItem(
                     path=repo,
@@ -917,6 +956,7 @@ def plan_prune(
             if young(entry):
                 age_skipped[kind] = age_skipped.get(kind, 0) + 1
                 continue
+            emit(f"sizing {entry}")
             plan.gc.append(GCItem(kind, str(entry), reason_for(entry), _tree_bytes(entry)))
 
     build_root = root / ".build"
@@ -1006,11 +1046,14 @@ def plan_prune(
                 else:
                     candidates.append(child)
 
+        if candidates:
+            emit("scanning cache/home for unattributed contents")
         released = {repo for repo in (i.path for i in plan.weight_dirs)}
         for candidate in candidates:
             rel = str(candidate.relative_to(cache_base))
             if rel in released or is_attributed(rel):
                 continue
+            emit(f"sizing {rel}")
             size = _tree_bytes(candidate)
             if deep:
                 plan.gc.append(
@@ -1083,6 +1126,7 @@ def execute_prune(
     # ---- records first: one manifest transaction for every pruned checkpoint --
     record_error: str | None = None
     if plan.checkpoints:
+        say(f"dropping {len(plan.checkpoints)} checkpoint record(s) from the manifest")
         try:
             with manifest_lock(root):
                 manifest = load_manifest(root)
@@ -1112,12 +1156,23 @@ def execute_prune(
     aborted = fail_fast and record_error is not None
 
     # ---- phase: per-checkpoint weight files ------------------------------------
+    # Every action is logged *before* it runs: on a shared filesystem a
+    # single unlink or rmtree can stall for minutes, and someone tailing a
+    # batch job's outfile should see what it stalled on.
     def checkpoint_work(item: PruneCheckpointItem):
         def work(buffered: list[str]) -> None:
+            if not item.files:
+                buffered.append("record dropped; no weight files to delete")
+                return
             for relpath in item.files:
                 target = _safe_weight_path(cache_base, relpath)
                 if target is None:
                     continue
+                try:
+                    size = format_bytes(target.lstat().st_size)
+                except OSError:
+                    size = "already gone"
+                buffered.append(f"rm {relpath} ({size})")
                 try:
                     target.unlink()
                 except FileNotFoundError:
@@ -1127,7 +1182,9 @@ def execute_prune(
         return work
 
     if record_error is None and not aborted:
-        results = _run_phase("checkpoint", plan.checkpoints, checkpoint_work, 1, fail_fast, say)
+        results = _run_phase(
+            "checkpoint", plan.checkpoints, checkpoint_work, 1, fail_fast, say, live=True
+        )
         report.results.extend(results)
         aborted = fail_fast and any(r.status == "failed" for r in results)
 
@@ -1135,8 +1192,11 @@ def execute_prune(
             def work(buffered: list[str]) -> None:
                 target = _safe_weight_path(cache_base, item.path)
                 if target is not None and target.exists():
+                    buffered.append(f"rm -r {item.path} ({format_bytes(item.reclaim_bytes)})")
                     shutil.rmtree(target)
                     _prune_empty_parents(target.parent, cache_base)
+                else:
+                    buffered.append(f"{item.path} already gone")
 
             return work
 
@@ -1146,7 +1206,9 @@ def execute_prune(
                     ItemResult("weights", dir_item.env_name, None, "skipped", "--fail-fast")
                 )
         else:
-            results = _run_phase("weights", plan.weight_dirs, dir_work, 1, fail_fast, say)
+            results = _run_phase(
+                "weights", plan.weight_dirs, dir_work, 1, fail_fast, say, live=True
+            )
             report.results.extend(results)
             aborted = fail_fast and any(r.status == "failed" for r in results)
 
@@ -1159,10 +1221,15 @@ def execute_prune(
                     trash = root / ".trash"
                     trash.mkdir(exist_ok=True)
                     doomed = trash / f"{item.env_name}.{int(time.time())}"
+                    buffered.append(f"mv envs/{item.env_name} -> .trash/{doomed.name}")
                     env_path.rename(doomed)
+                    buffered.append(
+                        f"rm -r .trash/{doomed.name} ({format_bytes(item.reclaim_bytes)})"
+                    )
                     shutil.rmtree(doomed)
             if item.source_file:
                 source = Path(item.source_file)
+                buffered.append(f"unregistering {source.name} (+ lockfile)")
                 source.unlink(missing_ok=True)
                 Path(f"{source}.lock").unlink(missing_ok=True)
 
@@ -1172,7 +1239,7 @@ def execute_prune(
         for item in plan.envs:
             report.results.append(ItemResult("env", item.env_name, None, "skipped", "--fail-fast"))
     else:
-        results = _run_phase("env", plan.envs, env_work, 1, fail_fast, say)
+        results = _run_phase("env", plan.envs, env_work, 1, fail_fast, say, live=True)
         report.results.extend(results)
         aborted = fail_fast and any(r.status == "failed" for r in results)
 
@@ -1183,6 +1250,7 @@ def execute_prune(
             if item.kind == "uv-cache":
                 if shutil.which("uv") is None:
                     raise ops.OperationError("uv not found in PATH")
+                buffered.append("running `uv cache prune`")
                 proc = subprocess.run(
                     ["uv", "cache", "prune"],
                     env={**os.environ, "UV_CACHE_DIR": str(path)},
@@ -1194,7 +1262,16 @@ def execute_prune(
                     raise ops.OperationError(
                         f"uv cache prune failed: {proc.stderr.strip() or proc.stdout.strip()}"
                     )
+                for line in (proc.stderr + proc.stdout).splitlines():
+                    if line.strip():
+                        buffered.append(f"uv: {line.strip()}")
                 return
+            size = f" ({format_bytes(item.reclaim_bytes)})" if item.reclaim_bytes else ""
+            try:
+                shown = path.relative_to(root)
+            except ValueError:
+                shown = path
+            buffered.append(f"rm -r {shown}{size}")
             if path.is_dir() and not path.is_symlink():
                 shutil.rmtree(path)
             else:
@@ -1206,10 +1283,14 @@ def execute_prune(
         for item in plan.gc:
             report.results.append(ItemResult("gc", item.env_name, None, "skipped", "--fail-fast"))
     else:
-        report.results.extend(_run_phase("gc", plan.gc, gc_work, 1, fail_fast, say))
+        report.results.extend(_run_phase("gc", plan.gc, gc_work, 1, fail_fast, say, live=True))
 
     # ---- final: one refresh + push -------------------------------------------------
     if any(r.status == "ok" for r in report.results):
+        say(
+            "refreshing manifest (runs `uv pip list` per env)"
+            + ("; pushing to backend" if push else "; push disabled")
+        )
         ops.update_and_push_manifest(root, quiet=True, push=push)
 
     return report

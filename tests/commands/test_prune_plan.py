@@ -472,3 +472,28 @@ def test_unattributed_cache_is_reported_not_deleted(tmp_path):
         "models--never--read",
         "matgl",
     }
+
+
+# -----------------------------------------------------------------------------
+# Progress
+# -----------------------------------------------------------------------------
+
+
+def test_planner_emits_progress_before_slow_tree_walks(tmp_path):
+    """Planning walks whole trees for byte counts; someone tailing a batch
+    job's outfile must see each walk announced before it starts."""
+    build(tmp_path, "orb", env_source("orb-v2"))  # unregistered: gets sized
+    save(tmp_path, {"orb": record(tmp_path, "orb")})
+    stale = tmp_path / ".build" / "orb.1"
+    stale.mkdir(parents=True)
+    age(stale)
+    weight(tmp_path, "cache/mystery/junk.bin")
+
+    lines: list[str] = []
+    plan_prune(tmp_path, cache_root=tmp_path, progress=lines.append)
+
+    assert any(line.startswith("reading install state") for line in lines)
+    assert "sizing envs/orb" in lines
+    assert any(line == f"sizing {stale}" for line in lines)
+    assert "scanning cache/home for unattributed contents" in lines
+    assert "sizing cache/mystery" in lines

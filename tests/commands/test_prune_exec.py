@@ -228,6 +228,39 @@ def test_uv_cache_runs_uv_cache_prune_with_the_roots_cache_dir(tmp_path, refresh
     assert calls == [(["uv", "cache", "prune"], str(uv_cache))]
 
 
+def test_execution_streams_each_action_live(tmp_path, refreshes):
+    """Deletes stream as they happen (serial phases use live output, not the
+    buffer-until-failure idiom sync's parallel phases need) — and each action
+    is logged *before* it runs, so a hung delete shows its target."""
+    save(tmp_path, {"mace": env_record({"gone": CheckpointInfo(fetched_at="x")})})
+    touch(tmp_path, "cache/mace/gone.pt")
+    touch(tmp_path, "cache/huggingface/hub/models--a--b/blobs/aa")
+    env_dir = tmp_path / "envs" / "orb"
+    env_dir.mkdir(parents=True)
+    plan = PrunePlan(
+        checkpoints=[
+            PruneCheckpointItem("mace", "gone", "not declared", files=["cache/mace/gone.pt"])
+        ],
+        weight_dirs=[PruneWeightDirItem("cache/huggingface/hub/models--a--b", "released")],
+        envs=[PruneEnvItem("orb", "no registered source")],
+    )
+
+    lines: list[str] = []
+    report = execute_prune(tmp_path, plan, cache_root=tmp_path, say=lines.append)
+
+    assert not report.failed
+    stripped = [line.strip() for line in lines]
+    assert any(line.startswith("dropping 1 checkpoint record") for line in stripped)
+    assert "rm cache/mace/gone.pt (4 B)" in stripped
+    assert any(line.startswith("rm -r cache/huggingface/hub/models--a--b") for line in stripped)
+    assert any(line.startswith("mv envs/orb -> .trash/orb.") for line in stripped)
+    assert any(line.startswith("refreshing manifest") for line in stripped)
+    # The live lines land *before* the item's completion mark.
+    assert stripped.index("rm cache/mace/gone.pt (4 B)") < next(
+        i for i, line in enumerate(stripped) if line.startswith("[checkpoint 1/1]")
+    )
+
+
 def test_missing_files_are_tolerated_for_idempotent_reruns(tmp_path, refreshes):
     save(tmp_path, {"mace": env_record({"gone": CheckpointInfo(fetched_at="x")})})
     plan = PrunePlan(

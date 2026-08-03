@@ -92,8 +92,18 @@ def cmd_prune(args) -> int:
     cache_root = resolve_cache_root(root)
 
     # With --json the machine-readable document owns stdout; everything
-    # human-oriented (plan, progress, summary) moves to stderr.
-    say = (lambda line: print(line, file=sys.stderr)) if args.json else print
+    # human-oriented (plan, progress, summary) moves to stderr. Every line is
+    # flushed: prune runs inside batch jobs whose stdout is a redirected file
+    # (block-buffered by default), and `tail -f` on the job's outfile must
+    # show slow deletes as they happen, not when the buffer fills.
+    if args.json:
+
+        def say(line: str) -> None:
+            print(line, file=sys.stderr, flush=True)
+    else:
+
+        def say(line: str) -> None:
+            print(line, flush=True)
 
     try:
         plan = plan_prune(
@@ -105,10 +115,12 @@ def cmd_prune(args) -> int:
             deep=args.deep,
             min_age_hours=args.min_age,
             cache_root=cache_root,
+            progress=say,
         )
     except (OperationError, ManifestError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    say("")
 
     render_prune_plan(plan, say=say, root=root, cache_root=cache_root)
 
