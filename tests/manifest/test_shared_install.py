@@ -145,6 +145,8 @@ def test_migrated_v5_round_trips_through_dataclasses():
 
 
 def _v6_manifest() -> Manifest:
+    """Universal mace (medium verified on sophia, small failed on polaris)
+    plus a polaris-only variant that records medium — the shadowing case."""
     return Manifest(
         schema_version=SCHEMA_VERSION,
         clusters=["sophia", "polaris"],
@@ -167,6 +169,11 @@ def _v6_manifest() -> Manifest:
                             "sophia": VerificationRecord(
                                 verified_at="2026-01-03T00:00:00Z", verified_device="cuda"
                             ),
+                        },
+                    ),
+                    "mace-mp-0-small": CheckpointInfo(
+                        fetched_at="2026-01-02T00:00:00Z",
+                        verifications={
                             "polaris": VerificationRecord(last_error="smoke-test: boom"),
                         },
                     ),
@@ -204,7 +211,7 @@ def test_push_payload_is_flat_per_cluster_v5():
 
 def test_push_payload_carries_only_that_clusters_results():
     payload = manifest_push_payload(_v6_manifest(), "polaris")
-    ckpt = payload["environments"]["mace"]["checkpoints"]["mace-mp-0-medium"]
+    ckpt = payload["environments"]["mace"]["checkpoints"]["mace-mp-0-small"]
     assert ckpt["verified_at"] is None
     assert ckpt["last_error"] == "smoke-test: boom"
 
@@ -222,16 +229,63 @@ def test_push_payload_omits_envs_not_serving_the_cluster():
 
 def test_push_payload_verify_error_beats_shared_download_error():
     manifest = _v6_manifest()
-    ckpt = manifest.environments["mace"].checkpoints["mace-mp-0-medium"]
+    ckpt = manifest.environments["mace"].checkpoints["mace-mp-0-small"]
     ckpt.last_error = "download: flaky mirror"
 
     sophia = manifest_push_payload(manifest, "sophia")["environments"]["mace"]["checkpoints"]
     polaris = manifest_push_payload(manifest, "polaris")["environments"]["mace"]["checkpoints"]
 
-    # sophia verified cleanly -> its payload falls back to the shared fetch error;
-    # polaris has its own verify error, which wins.
-    assert sophia["mace-mp-0-medium"]["last_error"] == "download: flaky mirror"
-    assert polaris["mace-mp-0-medium"]["last_error"] == "smoke-test: boom"
+    # sophia has no verify error -> its payload falls back to the shared fetch
+    # error; polaris has its own verify error, which wins.
+    assert sophia["mace-mp-0-small"]["last_error"] == "download: flaky mirror"
+    assert polaris["mace-mp-0-small"]["last_error"] == "smoke-test: boom"
+
+
+# --- per-id shadowing in the projection (#208, checkpoint-first) ---------------
+
+
+def test_push_payload_variant_shadows_universal_per_id():
+    manifest = _v6_manifest()
+    polaris = manifest_push_payload(manifest, "polaris")
+    sophia = manifest_push_payload(manifest, "sophia")
+
+    # polaris: the overridden id is listed under the variant only; the id the
+    # variant doesn't record stays under the universal env.
+    assert "mace-mp-0-medium" not in polaris["environments"]["mace"]["checkpoints"]
+    assert "mace-mp-0-medium" in polaris["environments"]["mace-polaris"]["checkpoints"]
+    assert "mace-mp-0-small" in polaris["environments"]["mace"]["checkpoints"]
+    # sophia's payload is untouched — the variant doesn't serve it.
+    assert "mace-mp-0-medium" in sophia["environments"]["mace"]["checkpoints"]
+    assert "mace-mp-0-small" in sophia["environments"]["mace"]["checkpoints"]
+
+
+def test_push_payload_shadowing_reads_records_not_declarations():
+    # Before the first checkpoint-first run writes the variant's record, the
+    # universal row must stay — dropping it with nothing to show under the
+    # variant would hide the id from the almanac entirely.
+    manifest = _v6_manifest()
+    manifest.environments["mace-polaris"].checkpoints.clear()
+    polaris = manifest_push_payload(manifest, "polaris")
+    assert "mace-mp-0-medium" in polaris["environments"]["mace"]["checkpoints"]
+
+
+def test_push_payload_equal_specificity_never_shadows():
+    # Two variants both serving polaris and recording the same id: an
+    # authoring error resolution rejects loudly — keep both rows rather than
+    # silently dropping one.
+    manifest = _v6_manifest()
+    manifest.environments["mace-polaris-b"] = EnvironmentInfo(
+        built_at="2026-01-01T00:00:00Z",
+        source_hash="sha256:ghi",
+        source="",
+        python_requires=">=3.11",
+        dependencies={},
+        clusters=["polaris"],
+        checkpoints={"mace-mp-0-medium": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z")},
+    )
+    polaris = manifest_push_payload(manifest, "polaris")
+    assert "mace-mp-0-medium" in polaris["environments"]["mace-polaris"]["checkpoints"]
+    assert "mace-mp-0-medium" in polaris["environments"]["mace-polaris-b"]["checkpoints"]
 
 
 def test_client_pushes_one_payload_per_cluster(monkeypatch):

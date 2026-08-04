@@ -457,15 +457,38 @@ def manifest_push_payload(manifest: Manifest, cluster: str) -> dict:
     checkpoint carries only this cluster's verification state (its verify
     error, or the shared download error when there is none).
 
+    Cluster-specific variants shadow per id (#208): when a variant serving
+    ``cluster`` records a checkpoint id, the universal env's row for that id
+    is omitted from this cluster's payload. Smoke-test tests the variant's
+    copy there (checkpoint-first selection), so keeping the universal row
+    would advertise a permanently-unverified checkpoint. Shadowing reads the
+    manifest's *records*, not the source declarations — this stays a pure
+    function of the manifest, no disk access — so until the first
+    checkpoint-first smoke-test/add run on that cluster writes the variant's
+    record, an overridden id may transiently still appear under the universal
+    env; that gap self-heals on the first run. Equal specificity (two
+    universal envs, or two variants both serving the cluster) never shadows:
+    resolution errors on that authoring mistake anyway, and a loud duplicate
+    in the almanac beats silently dropping one.
+
     Key order matters only cosmetically, but it is kept identical to a v5
     manifest so dumps diff cleanly across the transition.
     """
+    # Ids recorded by cluster-specific envs serving this cluster — these
+    # shadow the universal envs' rows below.
+    variant_ids: set[str] = set()
+    for env in manifest.environments.values():
+        if env.clusters is not None and cluster in env.clusters:
+            variant_ids.update(env.checkpoints)
+
     environments: dict[str, dict] = {}
     for env_name, env in manifest.environments.items():
         if not env.serves(cluster):
             continue
         checkpoints = {}
         for ckpt_name, ckpt in env.checkpoints.items():
+            if env.clusters is None and ckpt_name in variant_ids:
+                continue
             v = ckpt.verification(cluster)
             checkpoints[ckpt_name] = {
                 "fetched_at": ckpt.fetched_at,

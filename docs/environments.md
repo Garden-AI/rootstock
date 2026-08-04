@@ -187,9 +187,14 @@ get the right env; `root=`-only construction resolves unrestricted envs and
 asks for a cluster when only variants declare an id. The two envs share
 downloaded weights automatically — the cache is keyed by checkpoint, not env.
 
-If the original env genuinely *cannot* run on one machine, restrict it too
-(`CLUSTERS = ["sophia"]` on the original): that cluster's smoke-test then
-skips it and its manifest no longer advertises it there.
+`smoke-test` and the pushed manifests follow the same per-id resolution
+(checkpoint-first): on the variant's clusters, each overridden id is tested
+via the variant and listed under it in that cluster's manifest — the
+universal env's copy is shadowed there, never reported as a permanently
+failing row. Ids the variant doesn't declare keep resolving to (and being
+tested via) the universal env. Restricting the original with
+`CLUSTERS = ["sophia"]` is only needed in the rare case where *every* id it
+declares is broken on a machine and the variant doesn't cover them all.
 
 Absent `CLUSTERS` (the normal case) means the env serves every cluster its
 install does. Like `CHECKPOINTS`, the list is AST-parsed — string literals
