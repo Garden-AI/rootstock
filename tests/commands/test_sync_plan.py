@@ -18,6 +18,7 @@ from rootstock.batch import plan_sync
 from rootstock.manifest import (
     CheckpointInfo,
     EnvironmentInfo,
+    VerificationRecord,
     compute_source_hash,
     create_manifest,
     save_manifest,
@@ -76,12 +77,15 @@ def record(
 def save(root: Path, environments: dict[str, EnvironmentInfo]) -> None:
     from rootstock.config import UserConfig
 
-    manifest = create_manifest(root, "test", UserConfig(name="t", email="t@t.t"))
+    manifest = create_manifest(root, ["test"], UserConfig(name="t", email="t@t.t"))
     manifest.environments = environments
     save_manifest(manifest, root)
 
 
-VERIFIED = CheckpointInfo(fetched_at=NEWER, verified_at=NEWER, verified_device="cuda")
+VERIFIED = CheckpointInfo(
+    fetched_at=NEWER,
+    verifications={"test": VerificationRecord(verified_at=NEWER, verified_device="cuda")},
+)
 
 
 @pytest.fixture
@@ -204,7 +208,10 @@ def test_verified_before_last_build_is_stale(tmp_path):
     source = env_source("mace-mp-0-medium")
     register(tmp_path, "mace", source)
     build(tmp_path, "mace", source)
-    stale = CheckpointInfo(fetched_at=OLD, verified_at=OLD, verified_device="cuda")
+    stale = CheckpointInfo(
+        fetched_at=OLD,
+        verifications={"test": VerificationRecord(verified_at=OLD, verified_device="cuda")},
+    )
     save(
         tmp_path,
         {"mace": record(tmp_path, "mace", built_at=NEWER, checkpoints={"mace-mp-0-medium": stale})},

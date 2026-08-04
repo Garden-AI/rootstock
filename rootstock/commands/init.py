@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from ..clusters import CLUSTER_REGISTRY, get_cluster_for_root
+from ..clusters import CLUSTER_REGISTRY, get_clusters_for_root
 from ..config import DEFAULT_CONFIG_FILE, load_config, save_config
 from ..layout import write_layout_marker
 from ..manifest import create_manifest, manifest_lock, save_manifest
@@ -117,16 +117,21 @@ def cmd_init(args) -> int:
         print("Error: Root directory is required.", file=sys.stderr)
         return 1
 
-    # Check if input is a cluster name
+    # Check if input is a cluster name. A shared root serves every registry
+    # sibling (sophia/polaris), so the manifest records them all (#208).
     if root_input in CLUSTER_REGISTRY:
-        cluster = root_input
         root = CLUSTER_REGISTRY[root_input].root
-        print(f"  -> Using cluster '{cluster}' root: {root}")
+        siblings = [c for c in get_clusters_for_root(root) if c != root_input]
+        clusters = [root_input, *siblings]
+        print(f"  -> Using cluster '{root_input}' root: {root}")
+        if siblings:
+            print(f"  -> This root also serves: {', '.join(siblings)}")
     else:
         root = Path(root_input).expanduser().resolve()
-        cluster = get_cluster_for_root(root)
-        if cluster:
-            print(f"  -> Detected cluster: {cluster}")
+        clusters = get_clusters_for_root(root)
+        if clusters:
+            print(f"  -> Detected cluster(s): {', '.join(clusters)}")
+    cluster = clusters[0] if clusters else None
 
     config.root = str(root)
 
@@ -205,10 +210,10 @@ def cmd_init(args) -> int:
             print(f"  Skipped (no permission): {root / 'layout.json'}")
 
     # Initialize manifest if we have a cluster
-    if cluster and not args.skip_manifest:
+    if clusters and not args.skip_manifest:
         print("\nInitializing manifest...")
         with manifest_lock(root):
-            manifest = create_manifest(root, cluster, config)
+            manifest = create_manifest(root, clusters, config)
             # Scan for existing built environments
             manifest = refresh_manifest_environments(manifest, root)
             save_manifest(manifest, root)

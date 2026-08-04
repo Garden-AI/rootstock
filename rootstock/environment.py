@@ -275,6 +275,48 @@ def parse_custom_checkpoint_ids(env_source_path: Path) -> list[str]:
     return _parse_checkpoints(env_source_path)[1]
 
 
+def parse_clusters_list(env_source_path: Path) -> list[str] | None:
+    """AST-extract the optional module-level ``CLUSTERS`` list literal.
+
+    ``CLUSTERS = ["polaris"]`` restricts an env to those clusters — a
+    cluster-specific variant on a shared install (#208): declare the same
+    canonical ids as the family's main env, and resolution picks the variant
+    on its clusters while the other machines keep the main env. Absent (the
+    normal case) means the env serves every cluster its install does.
+
+    Items must be string literals; an empty list — an env nobody could
+    serve — is an authoring error. Raises ValueError on either, matching
+    ``parse_checkpoints_dict``.
+    """
+    tree = ast.parse(env_source_path.read_text(), filename=str(env_source_path))
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if not (
+            len(targets) == 1 and isinstance(targets[0], ast.Name) and targets[0].id == "CLUSTERS"
+        ):
+            continue
+        if not isinstance(value, (ast.List, ast.Tuple)):
+            raise ValueError(f"{env_source_path}: CLUSTERS must be a list literal.")
+        clusters: list[str] = []
+        for item in value.elts:
+            if not (isinstance(item, ast.Constant) and isinstance(item.value, str)):
+                raise ValueError(f"{env_source_path}: CLUSTERS items must be string literals.")
+            clusters.append(item.value)
+        if not clusters:
+            raise ValueError(
+                f"{env_source_path}: CLUSTERS is empty — no cluster could "
+                f"serve this env. Remove the declaration to serve every "
+                f"cluster, or list the clusters it runs on."
+            )
+        return clusters
+    return None
+
+
 def declares_setup_from_path(env_source_path: Path) -> bool:
     """
     Return True when the env source declares a module-level ``setup_from_path``.
@@ -431,10 +473,78 @@ def list_custom_checkpoints(root: Path | str) -> dict[str, list[str]]:
     return declared
 
 
-def find_env_for_checkpoint(root: Path | str, checkpoint_id: str) -> tuple[str, dict[str, str]]:
+def _pick_hosting_env(
+    root: Path,
+    candidates: list[str],
+    checkpoint_id: str,
+    cluster: str | None,
+) -> str:
+    """Choose the hosting env among ``candidates`` that declare the same id,
+    honoring each env's CLUSTERS restriction.
+
+    With a known ``cluster``, a cluster-specific env beats an unrestricted
+    one — that is the variant override (#208). Without one, only
+    unrestricted envs are eligible: picking a variant would silently assume
+    a machine. Several eligible envs at the same specificity is an authoring
+    error and raises, rather than resolving by directory order.
+    """
+    restrictions: dict[str, list[str] | None] = {}
+    for env_name in candidates:
+        source = root / "envs" / env_name / "env_source.py"
+        try:
+            restrictions[env_name] = parse_clusters_list(source)
+        except (OSError, ValueError):
+            # A missing source or malformed CLUSTERS must never widen a
+            # variant to universal; drop the env from contention, like the
+            # checkpoint listings drop malformed CHECKPOINTS.
+            continue
+
+    if cluster is not None:
+        serving = {e: r for e, r in restrictions.items() if r is None or cluster in r}
+        pool = [e for e, r in serving.items() if r is not None] or list(serving)
+        if not pool:
+            details = (
+                "; ".join(f"{e} serves {', '.join(r)}" for e, r in restrictions.items() if r)
+                or "no readable candidates"
+            )
+            raise CheckpointNotFoundError(
+                f"No env serves checkpoint '{checkpoint_id}' on cluster "
+                f"'{cluster}' — it is declared only by envs restricted to "
+                f"other clusters ({details})."
+            )
+    else:
+        pool = [e for e, r in restrictions.items() if r is None]
+        if not pool:
+            details = (
+                "; ".join(f"{e} serves {', '.join(r)}" for e, r in restrictions.items() if r)
+                or "no readable candidates"
+            )
+            raise CheckpointNotFoundError(
+                f"Checkpoint '{checkpoint_id}' is declared only by "
+                f"cluster-specific envs ({details}). Say which machine you "
+                f"are on (cluster= in Python, --cluster on the CLI) so the "
+                f"right variant can be picked."
+            )
+
+    if len(pool) > 1:
+        where = f" on cluster '{cluster}'" if cluster is not None else ""
+        raise CheckpointNotFoundError(
+            f"Checkpoint '{checkpoint_id}' is declared by several envs that "
+            f"all serve{where}: {', '.join(sorted(pool))}. Ids must resolve "
+            f"to one env — restrict the variants with CLUSTERS in their env "
+            f"sources."
+        )
+    return pool[0]
+
+
+def find_env_for_checkpoint(
+    root: Path | str, checkpoint_id: str, cluster: str | None = None
+) -> tuple[str, dict[str, str]]:
     """
     Return ``(env_name, CHECKPOINTS)`` for the installed env that declares
-    ``checkpoint_id``.
+    ``checkpoint_id`` — honoring CLUSTERS restrictions when several envs
+    declare it (``cluster`` names the machine being resolved for; see
+    :func:`_pick_hosting_env`).
 
     Raises ``CheckpointNotFoundError`` with a message listing every canonical
     id declared by any installed env, plus a hint to ``rootstock install`` if
@@ -442,9 +552,10 @@ def find_env_for_checkpoint(root: Path | str, checkpoint_id: str) -> tuple[str, 
     """
     root = Path(root)
     declared = list_declared_checkpoints(root)
-    for env_name, ckpts in declared.items():
-        if checkpoint_id in ckpts:
-            return env_name, ckpts
+    candidates = [env_name for env_name, ckpts in declared.items() if checkpoint_id in ckpts]
+    if candidates:
+        env_name = _pick_hosting_env(root, candidates, checkpoint_id, cluster)
+        return env_name, declared[env_name]
 
     if declared:
         # The ':custom' entries are part of the menu — list them alongside
@@ -488,19 +599,23 @@ class ResolvedCheckpoint:
     is_custom: bool = False
 
 
-def _resolve_custom(root: Path | str, checkpoint_id: str) -> ResolvedCheckpoint:
+def _resolve_custom(
+    root: Path | str, checkpoint_id: str, cluster: str | None = None
+) -> ResolvedCheckpoint:
     """
     Resolve a ``<family>:custom`` checkpoint via the entries installed envs
     declare in ``CHECKPOINTS``.
 
     The entry carries no weights (its value is ``None``) — the user's
     ``weights`` file is bound at the call site. Which env hosts the id is
-    determined by which env's dict declares it, exactly like a canonical id.
+    determined by which env's dict declares it, exactly like a canonical id
+    (including CLUSTERS restrictions).
     """
     declared = list_custom_checkpoints(root)
-    for env_name, custom_ids in declared.items():
-        if checkpoint_id in custom_ids:
-            return ResolvedCheckpoint(checkpoint=checkpoint_id, env_name=env_name, is_custom=True)
+    candidates = [env_name for env_name, ids in declared.items() if checkpoint_id in ids]
+    if candidates:
+        env_name = _pick_hosting_env(Path(root), candidates, checkpoint_id, cluster)
+        return ResolvedCheckpoint(checkpoint=checkpoint_id, env_name=env_name, is_custom=True)
 
     if declared:
         listing = "\n".join(f"  {env}: {', '.join(ids)}" for env, ids in declared.items())
@@ -519,11 +634,17 @@ def _resolve_custom(root: Path | str, checkpoint_id: str) -> ResolvedCheckpoint:
     raise CheckpointNotFoundError(msg)
 
 
-def resolve_checkpoint(root: Path | str, checkpoint_id: str) -> ResolvedCheckpoint:
+def resolve_checkpoint(
+    root: Path | str, checkpoint_id: str, cluster: str | None = None
+) -> ResolvedCheckpoint:
     """
     Resolve a checkpoint id to its hosting env. A ``<family>:custom`` id
     looks up the ``:custom`` entries, everything else the canonical ids (the
     two can't collide: canonical ids may not contain ``:``).
+
+    ``cluster`` names the machine being resolved for; it only matters when
+    envs restrict themselves with CLUSTERS (cluster-specific variants on a
+    shared install), where the variant serving ``cluster`` wins.
 
     Deliberately does not check that the env is built — resolution is also
     used for metadata lookups; callers that spawn a worker check before
@@ -532,8 +653,8 @@ def resolve_checkpoint(root: Path | str, checkpoint_id: str) -> ResolvedCheckpoi
     Raises CheckpointNotFoundError when nothing matches.
     """
     if is_custom_checkpoint(checkpoint_id):
-        return _resolve_custom(root, checkpoint_id)
-    env_name, _ = find_env_for_checkpoint(root, checkpoint_id)
+        return _resolve_custom(root, checkpoint_id, cluster)
+    env_name, _ = find_env_for_checkpoint(root, checkpoint_id, cluster)
     return ResolvedCheckpoint(checkpoint=checkpoint_id, env_name=env_name)
 
 

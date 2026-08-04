@@ -285,6 +285,16 @@ def main():
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
     )
     add_parser.add_argument(
+        "--cluster",
+        help=(
+            "Cluster this machine is (e.g. 'sophia'). Required to verify on "
+            "a shared install — sophia/polaris serve one root, and results "
+            "must be recorded for the right machine. Also picks the right "
+            "env among cluster-specific variants (CLUSTERS). Single-cluster "
+            "installs need no flag."
+        ),
+    )
+    add_parser.add_argument(
         "--no-push",
         action="store_true",
         help="Don't push manifest to backend",
@@ -320,7 +330,11 @@ def main():
     )
     sync_parser.add_argument(
         "--cluster",
-        help="Resolve the root from the cluster registry instead of --root",
+        help=(
+            "Resolve the root from the cluster registry instead of --root; "
+            "also names the machine verification results are recorded for "
+            "(required to verify on a shared install like sophia/polaris)"
+        ),
     )
     sync_parser.add_argument(
         "--env",
@@ -541,6 +555,15 @@ def main():
     )
     smoke_parser.add_argument("--json", action="store_true", help="Emit a JSON summary")
     smoke_parser.add_argument(
+        "--cluster",
+        help=(
+            "Cluster this machine is (e.g. 'sophia'). Required on a shared "
+            "install — sophia/polaris serve one root, and results must be "
+            "recorded (and pushed) for the right machine. Single-cluster "
+            "installs need no flag."
+        ),
+    )
+    smoke_parser.add_argument(
         "--root",
         default=os.environ.get(ROOTSTOCK_ROOT_ENV),
         help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
@@ -758,6 +781,14 @@ def main():
             "checkpoint id; loaded via the env's setup_from_path hook."
         ),
     )
+    serve_parser.add_argument(
+        "--cluster",
+        help=(
+            "Cluster this machine is (e.g. 'polaris'). Only needed on shared "
+            "installs whose envs declare cluster-specific variants (CLUSTERS) "
+            "— picks the variant serving this machine."
+        ),
+    )
     serve_parser.set_defaults(func=cmd_serve)
 
     # benchmark command. Everything after the subcommand is forwarded to the
@@ -815,7 +846,7 @@ def main():
     # manifest init
     manifest_init_parser = manifest_subparsers.add_parser(
         "init",
-        help="Initialize manifest for a cluster",
+        help="Initialize manifest for the cluster(s) an install serves",
     )
     manifest_init_parser.add_argument(
         "--root",
@@ -825,7 +856,12 @@ def main():
     manifest_init_parser.add_argument(
         "--cluster",
         required=True,
-        help="Cluster name (e.g., delta or perlmutter)",
+        action="append",
+        help=(
+            "Cluster name (e.g., delta). Repeatable for shared installs "
+            "(--cluster sophia --cluster polaris); registry siblings of the "
+            "root are included automatically."
+        ),
     )
     manifest_init_parser.add_argument(
         "--force",

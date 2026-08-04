@@ -36,7 +36,7 @@ def test_corrupt_json_raises_with_path(tmp_path: Path):
 
 def test_missing_required_field_raises(tmp_path: Path):
     """Valid JSON with required keys stripped is corruption, not absence."""
-    manifest = create_manifest(tmp_path, "test", UserConfig(name="t", email="t@t.t"))
+    manifest = create_manifest(tmp_path, ["test"], UserConfig(name="t", email="t@t.t"))
     save_manifest(manifest, tmp_path)
     data = json.loads((tmp_path / "manifest.json").read_text())
     del data["maintainer"]
@@ -54,19 +54,19 @@ def test_wrong_top_level_type_raises(tmp_path: Path):
 
 
 def test_valid_manifest_still_loads(tmp_path: Path):
-    manifest = create_manifest(tmp_path, "test", UserConfig(name="t", email="t@t.t"))
+    manifest = create_manifest(tmp_path, ["test"], UserConfig(name="t", email="t@t.t"))
     save_manifest(manifest, tmp_path)
 
     loaded = load_manifest(tmp_path)
 
     assert loaded is not None
-    assert loaded.cluster == "test"
+    assert loaded.clusters == ["test"]
 
 
 def test_newer_schema_raises_manifest_error(tmp_path: Path):
     """Schema mismatches share the taxonomy: a clean ManifestError, not a
     bare RuntimeError traceback."""
-    manifest = create_manifest(tmp_path, "test", UserConfig(name="t", email="t@t.t"))
+    manifest = create_manifest(tmp_path, ["test"], UserConfig(name="t", email="t@t.t"))
     save_manifest(manifest, tmp_path)
     data = json.loads((tmp_path / "manifest.json").read_text())
     data["schema_version"] = 99

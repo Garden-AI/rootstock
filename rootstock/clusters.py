@@ -82,6 +82,16 @@ def get_cache_root_for_cluster(cluster: str) -> Path:
     return get_cluster(cluster).resolved_cache_root
 
 
+def get_clusters_for_root(root: Path | str) -> list[str]:
+    """Reverse lookup: every registered cluster served by an install root.
+
+    More than one entry means a shared install (e.g. sophia/polaris on
+    Eagle); empty means the root is unknown to the registry.
+    """
+    root_str = str(root)
+    return [name for name, info in CLUSTER_REGISTRY.items() if str(info.root) == root_str]
+
+
 def get_cluster_for_root(root: Path | str) -> str | None:
     """Reverse lookup: cluster name for a given install root path.
 
@@ -90,8 +100,7 @@ def get_cluster_for_root(root: Path | str) -> str | None:
     which case picking one by registry order would be a guess. Callers that
     need a definite identity must ask for an explicit cluster name.
     """
-    root_str = str(root)
-    matches = [name for name, info in CLUSTER_REGISTRY.items() if str(info.root) == root_str]
+    matches = get_clusters_for_root(root)
     if len(matches) == 1:
         return matches[0]
     return None

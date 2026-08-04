@@ -277,6 +277,24 @@ rootstock manifest init --cluster delta --force
 rootstock manifest init --cluster delta --no-push
 ```
 
+#### Shared installs (one root, several clusters)
+
+When several machines mount the same install (sophia and polaris share one
+Eagle root), the install keeps **one** manifest listing every cluster it
+serves — `--cluster` is repeatable, and registry siblings of the root are
+included automatically:
+
+```bash
+rootstock manifest init --cluster sophia --cluster polaris
+```
+
+Build and fetch state is shared (one filesystem), but **verification is
+per-cluster**: passing on sophia says nothing about polaris. Commands that
+record verification (`add`, `smoke-test`, `sync`) therefore need to know
+which machine they are on — pass `--cluster <name>`; single-cluster installs
+need no flag. Pushes send one manifest per cluster to the dashboard, each
+carrying that machine's own verification results.
+
 ## Verifying the installation
 
 After setup, verify that everything works:

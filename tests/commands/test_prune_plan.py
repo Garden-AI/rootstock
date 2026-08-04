@@ -20,6 +20,7 @@ from rootstock.batch import plan_prune
 from rootstock.manifest import (
     CheckpointInfo,
     EnvironmentInfo,
+    VerificationRecord,
     compute_source_hash,
     create_manifest,
     save_manifest,
@@ -69,7 +70,7 @@ def record(
 def save(root: Path, environments: dict[str, EnvironmentInfo]) -> None:
     from rootstock.config import UserConfig
 
-    manifest = create_manifest(root, "test", UserConfig(name="t", email="t@t.t"))
+    manifest = create_manifest(root, ["test"], UserConfig(name="t", email="t@t.t"))
     manifest.environments = environments
     save_manifest(manifest, root)
 
@@ -85,8 +86,7 @@ def weight(root: Path, relpath: str, size: int = 4) -> dict:
 def fetched(*weight_entries: dict, recorded: bool = True) -> CheckpointInfo:
     return CheckpointInfo(
         fetched_at=OLD,
-        verified_at=NEWER,
-        verified_device="cuda",
+        verifications={"test": VerificationRecord(verified_at=NEWER, verified_device="cuda")},
         weight_files=list(weight_entries) if recorded else None,
     )
 

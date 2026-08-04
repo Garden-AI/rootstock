@@ -35,7 +35,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import operations as ops
-from .environment import is_custom_checkpoint, parse_checkpoints_dict
+from .environment import is_custom_checkpoint, parse_checkpoints_dict, parse_clusters_list
 from .exceptions import RootstockError
 from .install_state import read_install_state
 from .layout import resolve_cache_root
@@ -136,6 +136,7 @@ def plan_sync(
     checkpoints: list[str] | None = None,
     rebuild: bool = False,
     phases: Sequence[str] = PHASES,
+    cluster: str | None = None,
 ) -> SyncPlan:
     """Compute the work needed to converge ``root`` to its declared state.
 
@@ -144,7 +145,14 @@ def plan_sync(
         ``env_source.py``; or ``rebuild``.
       - download: declared (non-``:custom``) checkpoint with no ``fetched_at``.
       - verify: newly fetched or rebuilt this run, or ``verified_at`` missing
-        or older than ``built_at`` (the existing staleness rule).
+        or older than ``built_at`` (the existing staleness rule), judged
+        against the current cluster's verification record (#208).
+
+    ``cluster`` is the machine this sync runs on; resolved from the manifest
+    or registry when omitted (an error on shared installs, where verification
+    must not be attributed by guess). Envs whose CLUSTERS excludes it are
+    still built and their checkpoints downloaded — those artifacts are shared
+    — but their verifies are skipped with a note.
 
     Rootstock-pin drift is reported as a note, never acted on implicitly —
     otherwise installing a newer CLI and syncing to add one checkpoint would
@@ -153,6 +161,8 @@ def plan_sync(
     from . import __version__
 
     root = Path(root)
+    if cluster is None and "verify" in phases:
+        cluster = ops.resolve_current_cluster(root)
     state = read_install_state(root)
     plan = SyncPlan()
 
@@ -210,6 +220,28 @@ def plan_sync(
             )
         declared = {key: None for key in declared if key[1] in checkpoints}
 
+    # ---- cluster-restricted envs (#208) --------------------------------------
+    # Only a machine an env serves can verify it; builds and downloads are
+    # shared artifacts and proceed regardless. This skip is env-level and
+    # conservative; smoke-test resolves per id (checkpoint-first), which is
+    # the eventual model here too — a universal env's overridden ids would
+    # then verify via the variant instead of being planned twice.
+    unservable: set[str] = set()
+    if cluster is not None:
+        for name in sorted(desired):
+            _, parse_path = desired[name]
+            try:
+                restriction = parse_clusters_list(parse_path)
+            except ValueError as exc:
+                plan.notes.append(f"{name}: cannot parse CLUSTERS ({exc}); skipping its verifies")
+                unservable.add(name)
+                continue
+            if restriction is not None and cluster not in restriction:
+                plan.notes.append(
+                    f"{name}: serves only {', '.join(restriction)} — skipping verify on {cluster}"
+                )
+                unservable.add(name)
+
     # ---- download / verify items -------------------------------------------
     manifest = state.manifest
     for env_name, ckpt_id in declared:
@@ -221,13 +253,20 @@ def plan_sync(
         if needs_download:
             plan.downloads.append(CheckpointItem(env_name, ckpt_id, "not fetched"))
 
+        if env_name in unservable:
+            continue
+        verified_at = (
+            ckpt_record.verification(cluster).verified_at
+            if ckpt_record is not None and cluster is not None
+            else None
+        )
         if env_name in rebuilt_envs:
             verify_reason = "stale after rebuild"
         elif needs_download:
             verify_reason = "newly fetched"
-        elif ckpt_record is None or ckpt_record.verified_at is None:
+        elif verified_at is None or ckpt_record is None or cluster is None:
             verify_reason = "never verified"
-        elif record is not None and not is_verified(record, ckpt_record):
+        elif record is not None and not is_verified(record, ckpt_record, cluster):
             verify_reason = "stale (verified before last build)"
         else:
             continue
@@ -409,6 +448,7 @@ def execute_sync(
     fail_fast: bool = False,
     push: bool = True,
     cache_root: Path | None = None,
+    cluster: str | None = None,
     say: Say = print,
 ) -> SyncReport:
     """Execute a plan: build → download → verify, then one manifest refresh.
@@ -468,6 +508,7 @@ def execute_sync(
                 item.checkpoint,
                 cache_root=cache_root,
                 refresh=False,
+                cluster=cluster,
                 progress=buffered.append,
             )
 
@@ -523,6 +564,7 @@ def execute_sync(
                     device=dev,
                     cache_root=cache_root,
                     refresh=False,
+                    cluster=cluster,
                     progress=buffered.append,
                     timeout=verify_timeout,
                 )

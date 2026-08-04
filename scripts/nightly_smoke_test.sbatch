@@ -37,6 +37,11 @@ set -euo pipefail
 # manifest.json here. Required.
 export ROOTSTOCK_ROOT="${ROOTSTOCK_ROOT:-/CHANGEME/path/to/rootstock}"
 
+# Cluster this chain runs on. REQUIRED on shared installs (e.g. two machines
+# mounting one root): each machine's chain must record and push results under
+# its own name. Leave empty on single-cluster installs.
+CLUSTER="${CLUSTER:-}"
+
 # Cadence. Default weekly: drift-free wall-clock time CADENCE_DAYS ahead at
 # RUN_HOUR (not "now+24h", which would creep later every run). Set
 # CADENCE_DAYS=1 for nightly. RESCHEDULE_BEGIN overrides the whole computation
@@ -96,7 +101,18 @@ fi
 #   source ~/.venvs/rootstock/bin/activate
 
 nvidia-smi | head -4 || true
-echo "=== rootstock smoke-test (root=$ROOTSTOCK_ROOT) ==="
+echo "=== rootstock smoke-test (root=$ROOTSTOCK_ROOT cluster=${CLUSTER:-<default>}) ==="
+
+# Feature-detect --cluster (ships in the release carrying manifest schema
+# v6) so a not-yet-upgraded CLI generation still runs.
+cluster_args=()
+if [[ -n "$CLUSTER" ]]; then
+  if rootstock smoke-test --help 2>/dev/null | grep -q -- '--cluster'; then
+    cluster_args=(--cluster "$CLUSTER")
+  else
+    echo "WARNING: this rootstock predates --cluster; results record under the manifest default." >&2
+  fi
+fi
 
 # Re-verify every fetched checkpoint on GPU and PUSH the manifest (no
 # --no-push): this is an unattended substitute for CI and must leave the
@@ -104,5 +120,6 @@ echo "=== rootstock smoke-test (root=$ROOTSTOCK_ROOT) ==="
 # alongside the streaming SLURM .out log.
 rootstock smoke-test \
   --device cuda \
+  ${cluster_args[@]+"${cluster_args[@]}"} \
   --json \
   | tee "rootstock-nightly-${SLURM_JOB_ID:-manual}.json"

@@ -17,7 +17,24 @@ def _short_date(iso: str | None) -> str:
     return iso[:10]
 
 
-def _checkpoint_line(env, ckpt_name: str, ckpt) -> str:
+def _verification_fragment(env, ckpt, cluster: str, label: bool) -> tuple[str, str]:
+    """One cluster's verification cell: ``(text, marker)``. ``label`` appends
+    the cluster name — used on shared installs, where one flat cell would
+    hide which machine the result came from (#208)."""
+    v = ckpt.verification(cluster)
+    suffix = f" on {cluster}" if label else ""
+    if v.verified_at is None:
+        return f"not verified{suffix}", "⚠"
+    if is_verified(env, ckpt, cluster):
+        return f"verified {_short_date(v.verified_at)} ({v.verified_device}){suffix}", "✓"
+    return (
+        f"verified {_short_date(v.verified_at)} ({v.verified_device}){suffix}  "
+        f"⚠ stale (env rebuilt {_short_date(env.built_at)})",
+        "",
+    )
+
+
+def _checkpoint_line(env, ckpt_name: str, ckpt, clusters: list[str]) -> str:
     if is_custom_checkpoint(ckpt_name):
         # ':custom' rows record smoke-test's weights= leg (#200) — there is
         # nothing to fetch, the user supplies the weights file.
@@ -28,22 +45,27 @@ def _checkpoint_line(env, ckpt_name: str, ckpt) -> str:
             # Never successfully fetched.
             return f"    {ckpt_name:<24}  not fetched   ⚠  {ckpt.last_error}"
 
-    if ckpt.verified_at is None:
-        verified = "not verified"
-        marker = "⚠"
-    elif is_verified(env, ckpt):
-        verified = f"verified {_short_date(ckpt.verified_at)} ({ckpt.verified_device})"
+    # One verification cell per cluster the env serves (just one on
+    # single-cluster installs, unlabeled — the common case reads as before).
+    served = [c for c in clusters if env.serves(c)] or ["unknown"]
+    fragments = [_verification_fragment(env, ckpt, c, label=len(served) > 1) for c in served]
+    verified = " · ".join(text for text, _ in fragments)
+    markers = [m for _, m in fragments]
+    if all(m == "✓" for m in markers):
         marker = "✓"
+    elif any(m == "⚠" for m in markers):
+        marker = "⚠"
     else:
-        verified = (
-            f"verified {_short_date(ckpt.verified_at)} ({ckpt.verified_device})  "
-            f"⚠ stale (env rebuilt {_short_date(env.built_at)})"
-        )
         marker = ""
 
     line = f"    {ckpt_name:<24}  {fetched}  {verified}  {marker}".rstrip()
     if ckpt.last_error:
         line += f"\n      last error: {ckpt.last_error}"
+    for c in served:
+        v_err = ckpt.verification(c).last_error
+        if v_err:
+            where = f" ({c})" if len(served) > 1 else ""
+            line += f"\n      last error{where}: {v_err}"
     return line
 
 
@@ -56,6 +78,9 @@ def cmd_status(args) -> int:
         return _cmd_status_json(state)
 
     print(f"Rootstock root: {root}")
+    clusters = state.manifest.clusters if state.manifest else []
+    if len(clusters) > 1:
+        print(f"Serves clusters: {', '.join(clusters)}")
 
     # List environment sources
     print("\nEnvironment sources:")
@@ -72,7 +97,10 @@ def cmd_status(args) -> int:
     else:
         for name, env in state.envs.items():
             status = "ready" if env.source_file is not None else "incomplete"
-            print(f"  {name:<20} [{status}]")
+            restriction = ""
+            if env.record is not None and env.record.clusters is not None:
+                restriction = f"  [{', '.join(env.record.clusters)} only]"
+            print(f"  {name:<20} [{status}]{restriction}")
 
             if env.source_hash_drifted:
                 print(
@@ -88,7 +116,7 @@ def cmd_status(args) -> int:
             print(f"    Built: {env.record.built_at}")
             print(f"    Checkpoints ({len(env.record.checkpoints)}):")
             for ckpt_name, ckpt in env.record.checkpoints.items():
-                print(_checkpoint_line(env.record, ckpt_name, ckpt))
+                print(_checkpoint_line(env.record, ckpt_name, ckpt, clusters))
 
         # Records the manifest still carries for envs that are gone from disk.
         for name in sorted(state.manifest_only_envs):
@@ -144,13 +172,20 @@ def _cmd_status_json(state: InstallState) -> int:
     is joined in where it exists. Manifest records for envs no longer on
     disk are listed separately rather than passed off as installed.
     """
+    manifest = state.manifest
+    clusters = manifest.clusters if manifest else []
+
     environments = {}
     for name, env in state.envs.items():
         checkpoints = {}
         if env.record is not None:
             for ckpt_name, ckpt in env.record.checkpoints.items():
                 ckpt_data = ckpt.to_dict()
-                ckpt_data["verified_current"] = is_verified(env.record, ckpt)
+                # verified_current per cluster the env serves — one flat bool
+                # can't say *where* a checkpoint is verified (#208).
+                ckpt_data["verified_current"] = {
+                    c: is_verified(env.record, ckpt, c) for c in clusters if env.record.serves(c)
+                }
                 checkpoints[ckpt_name] = ckpt_data
         environments[name] = {
             "has_source": env.source_file is not None,
@@ -160,13 +195,13 @@ def _cmd_status_json(state: InstallState) -> int:
             "in_manifest": env.record is not None,
             "built_at": env.record.built_at if env.record else None,
             "manifest_source_hash": env.record.source_hash if env.record else None,
+            "clusters": env.record.clusters if env.record else None,
             "checkpoints": checkpoints,
         }
 
-    manifest = state.manifest
     payload = {
         "root": str(state.root),
-        "cluster": manifest.cluster if manifest else None,
+        "clusters": clusters or None,
         "maintainer": manifest.maintainer.to_dict() if manifest else None,
         "rootstock_version": manifest.rootstock_version if manifest else None,
         "last_updated": manifest.last_updated if manifest else None,

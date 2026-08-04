@@ -36,6 +36,11 @@ set -euo pipefail
 # --- Knobs (override via env: qsub -v VAR=val) ------------------------------
 export ROOTSTOCK_ROOT="${ROOTSTOCK_ROOT:-/CHANGEME/path/to/rootstock}"
 
+# Cluster this chain runs on. REQUIRED on shared installs (sophia/polaris
+# serve one root): each machine's chain must record and push results under
+# its own name. Leave empty on single-cluster installs.
+CLUSTER="${CLUSTER:-}"
+
 # Cadence. Default weekly at RUN_HOUR, drift-free wall-clock (not "now+24h").
 # Set CADENCE_DAYS=1 for nightly. PBS -a takes [[CC]YY]MMDDhhmm.
 CADENCE_DAYS="${CADENCE_DAYS:-7}"
@@ -87,11 +92,23 @@ fi
 #   source ~/.venvs/rootstock/bin/activate
 
 nvidia-smi | head -4 || true
-echo "=== rootstock smoke-test (root=$ROOTSTOCK_ROOT) ==="
+echo "=== rootstock smoke-test (root=$ROOTSTOCK_ROOT cluster=${CLUSTER:-<default>}) ==="
+
+# Feature-detect --cluster (ships in the release carrying manifest schema
+# v6) so a not-yet-upgraded CLI generation still runs.
+cluster_args=()
+if [[ -n "$CLUSTER" ]]; then
+  if rootstock smoke-test --help 2>/dev/null | grep -q -- '--cluster'; then
+    cluster_args=(--cluster "$CLUSTER")
+  else
+    echo "WARNING: this rootstock predates --cluster; results record under the manifest default." >&2
+  fi
+fi
 
 # Re-verify every fetched checkpoint on GPU and PUSH the manifest (no
 # --no-push): unattended substitute for CI, must leave the backend as CI would.
 rootstock smoke-test \
   --device cuda \
+  ${cluster_args[@]+"${cluster_args[@]}"} \
   --json \
   | tee "rootstock-nightly-${PBS_JOBID:-manual}.json"

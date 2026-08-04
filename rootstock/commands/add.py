@@ -84,6 +84,7 @@ def cmd_add(args) -> int:
             verify_timeout=args.verify_timeout,
             push=not args.no_push,
             force=args.force,
+            cluster=args.cluster,
             setup_kwargs=setup_kwargs,
             progress=print,
         )

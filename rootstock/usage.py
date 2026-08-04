@@ -112,6 +112,7 @@ def record_session(
     started_at: str,
     duration_s: float,
     n_calculations: int | None,
+    cluster: str | None = None,
 ) -> Path | None:
     """Best-effort: write one usage record for a finished worker session.
 
@@ -119,8 +120,11 @@ def record_session(
     spool directory not provisioned, or any error at all. Never raises.
 
     Args:
-        root: Install root (identifies "where" alongside the cluster name,
-            which is reverse-looked-up from it).
+        root: Install root (identifies "where" alongside the cluster name).
+        cluster: Cluster the session ran on, when the caller knows it (the
+            user's ``cluster=`` / ``--cluster``). Falls back to a reverse
+            lookup from ``root`` — which is honest only for single-cluster
+            roots; a shared root (sophia/polaris) reverse-maps to None (#208).
         cache_root: Resolved cache root; the spool lives under it.
         env_name: Pre-built environment that hosted the session.
         checkpoint: The checkpoint id, recorded verbatim. Both forms are
@@ -154,7 +158,7 @@ def record_session(
             "schema_version": RECORD_SCHEMA_VERSION,
             "started_at": started_at,
             "duration_s": round(duration_s, 1),
-            "cluster": get_cluster_for_root(root),
+            "cluster": cluster or get_cluster_for_root(root),
             "root": str(root),
             "env": env_name,
             "checkpoint": checkpoint,

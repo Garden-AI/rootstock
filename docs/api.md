@@ -352,4 +352,8 @@ rootstock manifest push
 # Initialize new manifest
 rootstock manifest init --cluster delta
 rootstock manifest init --cluster delta --force
+
+# Shared install (one root, several clusters): --cluster is repeatable;
+# registry siblings of the root are included automatically
+rootstock manifest init --cluster sophia --cluster polaris
 ```

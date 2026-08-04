@@ -74,7 +74,7 @@ def fake_root(tmp_path: Path, monkeypatch) -> Path:
     from rootstock.manifest import create_manifest, save_manifest
 
     cfg = UserConfig(name="t", email="t@t.t")
-    save_manifest(create_manifest(root, "test", cfg), root)
+    save_manifest(create_manifest(root, ["test"], cfg), root)
 
     # Stub update_and_push_manifest — not under test here.
     monkeypatch.setattr(
@@ -98,6 +98,7 @@ def _make_args(root: Path, **overrides):
     args.force = overrides.get("force", False)
     args.root = str(root)
     args.no_push = overrides.get("no_push", True)
+    args.cluster = overrides.get("cluster")
     return args
 
 
@@ -110,7 +111,7 @@ def test_add_no_verify_sets_fetched_at(fake_root, monkeypatch):
     m = load_manifest(fake_root)
     ckpt = m.environments["mace"].checkpoints["mace-mp-0-medium"]
     assert ckpt.fetched_at is not None
-    assert ckpt.verified_at is None
+    assert ckpt.verification("test").verified_at is None
     assert ckpt.last_error is None
 
 
@@ -170,9 +171,11 @@ def test_add_then_add_is_idempotent(fake_root, monkeypatch):
     m = load_manifest(fake_root)
     ckpt = m.environments["mace"].checkpoints["mace-mp-0-medium"]
     assert ckpt.fetched_at is not None
-    assert ckpt.verified_at is not None
-    assert ckpt.verified_device == "cuda"
+    record = ckpt.verification("test")
+    assert record.verified_at is not None
+    assert record.verified_device == "cuda"
     assert ckpt.last_error is None
+    assert record.last_error is None
 
 
 def test_add_force_redownloads(fake_root, monkeypatch):
@@ -221,10 +224,11 @@ def test_add_records_verify_failure_and_returns_1(fake_root, monkeypatch):
     m = load_manifest(fake_root)
     ckpt = m.environments["mace"].checkpoints["mace-mp-0-medium"]
     assert ckpt.fetched_at is not None  # download succeeded, was preserved
-    assert ckpt.verified_at is None
-    assert ckpt.verified_device is None
-    assert "CUDA OOM" in ckpt.last_error
-    assert ckpt.last_error.startswith("verify:")
+    record = ckpt.verification("test")
+    assert record.verified_at is None
+    assert record.verified_device is None
+    assert "CUDA OOM" in record.last_error
+    assert record.last_error.startswith("verify:")
 
 
 def test_add_clears_last_error_on_success(fake_root, monkeypatch):
@@ -239,7 +243,8 @@ def test_add_clears_last_error_on_success(fake_root, monkeypatch):
     cmd_add(_make_args(fake_root, no_verify=False))
 
     m = load_manifest(fake_root)
-    assert m.environments["mace"].checkpoints["mace-mp-0-medium"].last_error is not None
+    ckpt = m.environments["mace"].checkpoints["mace-mp-0-medium"]
+    assert ckpt.verification("test").last_error is not None
 
     # Second attempt: verify succeeds. last_error should clear.
     monkeypatch.setattr(operations, "verify_checkpoint", lambda *a, **kw: (True, None))
@@ -247,7 +252,9 @@ def test_add_clears_last_error_on_success(fake_root, monkeypatch):
     assert rc == 0
 
     m = load_manifest(fake_root)
-    assert m.environments["mace"].checkpoints["mace-mp-0-medium"].last_error is None
+    ckpt = m.environments["mace"].checkpoints["mace-mp-0-medium"]
+    assert ckpt.verification("test").last_error is None
+    assert ckpt.last_error is None
 
 
 def test_add_forwards_kwargs_to_download_and_verify(fake_root, monkeypatch):
@@ -286,7 +293,9 @@ def test_add_errors_when_no_envs_installed(tmp_path):
     from rootstock.config import UserConfig
     from rootstock.manifest import create_manifest, save_manifest
 
-    save_manifest(create_manifest(tmp_path, "test", UserConfig(name="t", email="t@t.t")), tmp_path)
+    save_manifest(
+        create_manifest(tmp_path, ["test"], UserConfig(name="t", email="t@t.t")), tmp_path
+    )
 
     rc = cmd_add(_make_args(tmp_path, checkpoint="mace-mp-0-medium", no_verify=True))
     assert rc == 1

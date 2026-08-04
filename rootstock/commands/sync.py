@@ -15,7 +15,7 @@ from pathlib import Path
 from ..batch import PHASES, execute_sync, plan_sync, render_plan, render_summary
 from ..environment import CheckpointNotFoundError
 from ..layout import ensure_layout_compatible, write_layout_marker
-from ..operations import OperationError
+from ..operations import OperationError, resolve_current_cluster
 from .common import resolve_cache_root, resolve_root, warn_on_permissions
 
 
@@ -79,6 +79,17 @@ def cmd_sync(args) -> int:
 
     cache_root = resolve_cache_root(root)
 
+    # The verification identity: --cluster doubles as the machine name, so
+    # on a shared install (sophia/polaris) results land under the right
+    # cluster (#208). Resolved strictly only when this run verifies.
+    cluster = args.cluster
+    if "verify" in phases:
+        try:
+            cluster = resolve_current_cluster(root, cluster)
+        except OperationError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+
     # With --json the machine-readable document owns stdout; everything
     # human-oriented (progress, plan, summary) moves to stderr.
     say = (lambda line: print(line, file=sys.stderr)) if args.json else print
@@ -91,6 +102,7 @@ def cmd_sync(args) -> int:
             checkpoints=args.checkpoint,
             rebuild=args.rebuild,
             phases=phases,
+            cluster=cluster,
         )
     except (OperationError, CheckpointNotFoundError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -126,6 +138,7 @@ def cmd_sync(args) -> int:
         fail_fast=args.fail_fast,
         push=not args.no_push,
         cache_root=cache_root,
+        cluster=cluster,
         say=say,
     )
 

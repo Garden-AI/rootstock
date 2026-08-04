@@ -31,12 +31,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .client import RootstockClient
-from .clusters import get_cluster_for_root
+from .clusters import get_clusters_for_root
 from .config import load_config
 from .environment import (
     declares_setup_from_path,
     find_env_for_checkpoint,
     parse_checkpoints_dict,
+    parse_clusters_list,
     parse_custom_checkpoint_ids,
 )
 from .exceptions import RootstockError
@@ -45,6 +46,7 @@ from .manifest import (
     CheckpointInfo,
     EnvironmentInfo,
     Manifest,
+    VerificationRecord,
     built_at_estimate,
     create_manifest,
     get_installed_versions,
@@ -206,6 +208,14 @@ def refresh_manifest_environments(
         # Get checkpoints (from existing manifest if available)
         checkpoints = env.record.checkpoints if env.record else {}
 
+        # Mirror the source's CLUSTERS restriction (#208). A malformed
+        # declaration keeps the previous record rather than silently widening
+        # a variant to every cluster.
+        try:
+            env_clusters = parse_clusters_list(env.source_file)
+        except ValueError:
+            env_clusters = env.record.clusters if env.record else None
+
         if env_name == built_env:
             built_at = now_iso()
         elif env.record:
@@ -221,6 +231,7 @@ def refresh_manifest_environments(
             dependencies=dependencies,
             checkpoints=checkpoints,
             lock_hash=env.lock_hash,
+            clusters=env_clusters,
         )
 
     # The filesystem is the truth for what's installed: a record whose env
@@ -237,7 +248,7 @@ def refresh_manifest_environments(
 
 def update_and_push_manifest(
     root: Path,
-    cluster: str | None = None,
+    clusters: list[str] | None = None,
     quiet: bool = False,
     push: bool = True,
     built_env: str | None = None,
@@ -245,11 +256,13 @@ def update_and_push_manifest(
     """
     Update manifest with current state and optionally push to backend.
 
-    Called after any state-changing operation.
+    Called after any state-changing operation. The push sends one payload
+    per cluster the install serves (see ``manifest_push_payload``).
 
     Args:
         root: Rootstock root directory
-        cluster: Cluster name (optional, will try to detect)
+        clusters: Clusters the install serves (optional; detected from the
+            existing manifest, then the registry)
         quiet: Suppress output
         push: Whether to push to backend (default True)
         built_env: Env name that was (re)built by the calling command, if any;
@@ -267,14 +280,14 @@ def update_and_push_manifest(
     with manifest_lock(root):
         manifest = load_manifest(root)
 
-        # Determine cluster: provided > existing manifest > detect from path
-        if cluster is None:
+        # Determine clusters: provided > existing manifest > detect from path
+        if clusters is None:
             if manifest is not None:
-                cluster = manifest.cluster
+                clusters = manifest.clusters
             else:
-                cluster = get_cluster_for_root(root)
+                clusters = get_clusters_for_root(root)
 
-        if cluster is None:
+        if not clusters:
             if not quiet:
                 print(
                     "Warning: Cannot update manifest - cluster not specified and "
@@ -286,7 +299,7 @@ def update_and_push_manifest(
 
         # Create manifest if it doesn't exist
         if manifest is None:
-            manifest = create_manifest(root, cluster, config)
+            manifest = create_manifest(root, clusters, config)
 
         # Refresh environment info from current state
         manifest = refresh_manifest_environments(manifest, root, built_env=built_env)
@@ -1049,6 +1062,45 @@ def apply_weights_record(
     _say(progress, f"  recorded {len(files)} weight files ({total / 1e6:.0f} MB)")
 
 
+def resolve_current_cluster(root: Path, cluster: str | None = None) -> str:
+    """The cluster name verification results should be recorded under.
+
+    Explicit wins; otherwise the manifest's (or registry's) sole cluster.
+    On a shared install (several clusters, e.g. sophia/polaris) there is no
+    honest default — the caller must say which machine it is on, or results
+    get attributed to the wrong cluster (#208).
+
+    Raises OperationError when ambiguous, or when an explicit name isn't one
+    the install serves (a typo would otherwise mint a new verification key).
+    """
+    known = None
+    manifest = load_manifest(root)
+    if manifest is not None:
+        known = manifest.clusters
+    if not known:
+        known = get_clusters_for_root(root)
+
+    if cluster is not None:
+        if known and cluster not in known:
+            raise OperationError(
+                f"cluster '{cluster}' is not one this install serves "
+                f"({', '.join(known)}). Re-run 'rootstock manifest init' if "
+                f"the install now serves it."
+            )
+        return cluster
+    if len(known) == 1:
+        return known[0]
+    if not known:
+        # Matches the "unknown" identity _manifest_transaction mints when no
+        # manifest exists and the root isn't registered.
+        return "unknown"
+    raise OperationError(
+        f"this install serves several clusters ({', '.join(known)}) — pass "
+        f"--cluster (cluster= in Python) to record results for the machine "
+        f"you are on."
+    )
+
+
 @contextmanager
 def _manifest_transaction(root: Path, cluster_hint: str | None = None):
     """Lock → load-fresh (or create) → yield → save-once → unlock.
@@ -1062,7 +1114,8 @@ def _manifest_transaction(root: Path, cluster_hint: str | None = None):
         manifest = load_manifest(root)
         if manifest is None:
             config = load_config()
-            manifest = create_manifest(root, cluster_hint or "unknown", config)
+            clusters = get_clusters_for_root(root) or [cluster_hint or "unknown"]
+            manifest = create_manifest(root, clusters, config)
         yield manifest
         save_manifest(manifest, root)
 
@@ -1102,11 +1155,11 @@ def _ensure_manifest_entry(
     return env, env.checkpoints[checkpoint]
 
 
-def _resolve_built_env(root: Path, checkpoint: str) -> str:
+def _resolve_built_env(root: Path, checkpoint: str, cluster: str | None = None) -> str:
     """Resolve the hosting env for a checkpoint id, failing fast when it
     isn't built (checked again inside each transaction by
     :func:`_ensure_manifest_entry`, whose refresh needs it too)."""
-    env_name, _ = find_env_for_checkpoint(root, checkpoint)
+    env_name, _ = find_env_for_checkpoint(root, checkpoint, cluster)
     env_dir = root / "envs" / env_name
     if not (env_dir / "bin" / "python").exists():
         raise OperationError(
@@ -1125,6 +1178,7 @@ def fetch_checkpoint(
     refresh: bool = True,
     push: bool = True,
     force: bool = False,
+    cluster: str | None = None,
     progress: Progress | None = None,
 ) -> FetchResult:
     """
@@ -1145,6 +1199,10 @@ def fetch_checkpoint(
     that stamped anyway). The underlying download is cache-aware, so a
     forced fetch of an intact checkpoint costs a cache hit, not a transfer.
 
+    ``cluster`` only matters for resolving cluster-specific env variants
+    (CLUSTERS, #208) — the fetch itself is shared: one weights cache,
+    however many machines mount it.
+
     Raises CheckpointNotFoundError when no installed env declares the id,
     and OperationError when the download fails (also recorded in the
     manifest's ``last_error``).
@@ -1154,7 +1212,7 @@ def fetch_checkpoint(
     if cache_root is None:
         cache_root = resolve_cache_root(root)
 
-    env_name = _resolve_built_env(root, checkpoint)
+    env_name = _resolve_built_env(root, checkpoint, cluster)
 
     # Unlocked peek for idempotence; every write below loads fresh inside
     # its own transaction, so a racing writer costs at most a redundant
@@ -1220,6 +1278,7 @@ def verify_fetched_checkpoint(
     cache_root: Path | None = None,
     refresh: bool = True,
     push: bool = True,
+    cluster: str | None = None,
     progress: Progress | None = None,
     timeout: float = DEFAULT_VERIFY_TIMEOUT,
 ) -> VerifyResult:
@@ -1233,10 +1292,12 @@ def verify_fetched_checkpoint(
     ``device``, so a batch driver must bound its concurrency, unlike the
     freely-parallel fetch.
 
-    Success stamps ``verified_at``/``verified_device`` and clears
-    ``last_error``; failure clears the verified stamps and records the error.
-    ``refresh=False`` skips the trailing full manifest refresh (+ push), for
-    batch drivers that refresh once at the end.
+    The outcome is recorded under the current cluster's verification record
+    (#208): success stamps ``verified_at``/``verified_device``, failure
+    clears them and records the error. On a shared install ``cluster`` is
+    required — see :func:`resolve_current_cluster`. ``refresh=False`` skips
+    the trailing full manifest refresh (+ push), for batch drivers that
+    refresh once at the end.
 
     Raises CheckpointNotFoundError when no installed env declares the id,
     and OperationError when verification fails.
@@ -1246,7 +1307,8 @@ def verify_fetched_checkpoint(
     if cache_root is None:
         cache_root = resolve_cache_root(root)
 
-    env_name = _resolve_built_env(root, checkpoint)
+    cluster = resolve_current_cluster(root, cluster)
+    env_name = _resolve_built_env(root, checkpoint, cluster)
 
     # ---- Verify (runs outside the lock) ---------------------------------
     _say(progress, f"Verifying {env_name}/{checkpoint} on {device}...")
@@ -1265,14 +1327,12 @@ def verify_fetched_checkpoint(
     with _manifest_transaction(root) as manifest:
         _, ckpt = _ensure_manifest_entry(manifest, root, env_name, checkpoint)
         if ok:
-            ckpt.verified_at = now_iso()
-            ckpt.verified_device = device
-            ckpt.last_error = None
-            verified_at = ckpt.verified_at
+            verified_at = now_iso()
+            ckpt.verifications[cluster] = VerificationRecord(
+                verified_at=verified_at, verified_device=device
+            )
         else:
-            ckpt.verified_at = None
-            ckpt.verified_device = None
-            ckpt.last_error = f"verify: {err}"
+            ckpt.verifications[cluster] = VerificationRecord(last_error=f"verify: {err}")
         # Recorded even when verification fails: the capture only exists if
         # setup() completed, and the load working set it saw is real whether
         # or not the forward pass then produced good forces.
@@ -1281,7 +1341,7 @@ def verify_fetched_checkpoint(
         )
     if not ok:
         raise OperationError(f"verify failed: {err}")
-    _say(progress, f"  verified_at = {verified_at} ({device})")
+    _say(progress, f"  verified_at = {verified_at} ({device}, cluster {cluster})")
 
     if refresh:
         # Refresh + push (takes the lock for its own load -> refresh -> save)
@@ -1303,6 +1363,7 @@ def add_checkpoint(
     verify: bool = True,
     push: bool = True,
     force: bool = False,
+    cluster: str | None = None,
     setup_kwargs: dict | None = None,
     cache_root: Path | None = None,
     progress: Progress | None = None,
@@ -1330,6 +1391,11 @@ def add_checkpoint(
     if cache_root is None:
         cache_root = resolve_cache_root(root)
 
+    if verify:
+        # Resolve the identity up front so a missing --cluster on a shared
+        # install fails before the download, not after it.
+        cluster = resolve_current_cluster(root, cluster)
+
     fetched = fetch_checkpoint(
         root,
         checkpoint,
@@ -1337,6 +1403,7 @@ def add_checkpoint(
         cache_root=cache_root,
         refresh=False,
         force=force,
+        cluster=cluster,
         progress=progress,
     )
 
@@ -1351,6 +1418,7 @@ def add_checkpoint(
             setup_kwargs=setup_kwargs,
             cache_root=cache_root,
             refresh=False,
+            cluster=cluster,
             progress=progress,
             timeout=verify_timeout,
         )

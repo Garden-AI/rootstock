@@ -81,7 +81,7 @@ _PUSH_CONFIG = UserConfig(
 
 
 def _seed_manifest(tmp_path, config=_PUSH_CONFIG, cluster="testcluster"):
-    save_manifest(create_manifest(tmp_path, cluster, config), tmp_path)
+    save_manifest(create_manifest(tmp_path, [cluster], config), tmp_path)
 
 
 def _patch_config(monkeypatch, config=_PUSH_CONFIG):

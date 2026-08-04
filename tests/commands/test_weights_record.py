@@ -131,7 +131,7 @@ def fake_root(tmp_path: Path) -> Path:
     from rootstock.manifest import create_manifest, save_manifest
 
     cfg = UserConfig(name="t", email="t@t.t")
-    save_manifest(create_manifest(root, "test", cfg), root)
+    save_manifest(create_manifest(root, ["test"], cfg), root)
     return root
 
 
@@ -199,7 +199,7 @@ def test_verify_records_weight_files_even_on_failure(fake_root, no_refresh, monk
         verify_fetched_checkpoint(fake_root, "mace-mp-0-medium")
 
     ckpt = _ckpt(fake_root)
-    assert ckpt.verified_at is None
+    assert ckpt.verification("test").verified_at is None
     assert ckpt.weight_files == _FILES
 
 
@@ -223,5 +223,5 @@ def test_verify_success_records_weight_files(fake_root, no_refresh, monkeypatch)
     verify_fetched_checkpoint(fake_root, "mace-mp-0-medium")
 
     ckpt = _ckpt(fake_root)
-    assert ckpt.verified_at is not None
+    assert ckpt.verification("test").verified_at is not None
     assert ckpt.weight_files == _FILES
