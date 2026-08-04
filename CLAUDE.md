@@ -118,11 +118,13 @@ predate the declaration. Most clusters use the same path for both.
 | Cluster | Install Root | Cache Root (if split) |
 |---------|--------------|-----------------------|
 | `della` | `/scratch/gpfs/ROSENGROUP/common/rootstock` | (same as install root) |
-| `sophia` | `/eagle/projects/Rootstock/rootstock` | (same as install root) |
-| `polaris` | `/eagle/projects/Rootstock/rootstock` (shared with sophia) | (same as install root) |
+| `sophia` | `/lus/eagle/projects/catalyst/world-shared/rootstock` | (same as install root) |
+| `polaris` | `/lus/eagle/projects/catalyst/world-shared/rootstock` (shared with sophia) | (same as install root) |
 | `perlmutter` | `/global/cfs/cdirs/m5268/rootstock` | `/pscratch/sd/o/oprice/rootstock-cache` |
 | `delta` | `/work/hdd/data/rootstock` | (same as install root) |
 | `frontier` | `/sw/frontier/ums/ums047/rootstock` | `/lustre/orion/ums047/world-shared/rootstock-cache` |
+
+The sophia/polaris registry path is a world-shared *serving copy*, periodically rsync'd from the `/eagle/projects/Rootstock/rootstock` build root (not world-readable); admin sync/smoke-test jobs target the build root via explicit `--root`/`ROOTSTOCK_ROOT`.
 
 sophia/polaris share one install and one manifest (`clusters: ["sophia", "polaris"]`), but verification records and pushed manifests are per-cluster; verify-recording commands there need `--cluster`. An env source may declare `CLUSTERS = ["polaris"]` to ship a cluster-specific variant (see `docs/environments.md`); smoke-test selection and the pushed payloads are checkpoint-first — each id is tested and reported via the env it resolves to on that cluster.
 
