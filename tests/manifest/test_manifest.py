@@ -1,4 +1,4 @@
-"""Tests for the v3 manifest schema."""
+"""Tests for the v6 manifest schema."""
 
 from __future__ import annotations
 
@@ -10,7 +10,9 @@ from rootstock.manifest import (
     EnvironmentInfo,
     Maintainer,
     Manifest,
+    VerificationRecord,
     is_verified,
+    manifest_push_payload,
 )
 
 
@@ -28,7 +30,7 @@ def _make_env(built_at: str = "2026-01-01T00:00:00Z", **ckpts: CheckpointInfo) -
 def _make_manifest(envs: dict[str, EnvironmentInfo] | None = None) -> Manifest:
     return Manifest(
         schema_version=SCHEMA_VERSION,
-        cluster="test",
+        clusters=["test"],
         root="/tmp/x",
         maintainer=Maintainer(name="a", email="a@b.c"),
         rootstock_version="0.0.0",
@@ -39,15 +41,19 @@ def _make_manifest(envs: dict[str, EnvironmentInfo] | None = None) -> Manifest:
 
 
 def test_schema_version_constant():
-    assert SCHEMA_VERSION == 5
+    assert SCHEMA_VERSION == 6
 
 
 def test_checkpoint_info_round_trip():
     ckpt = CheckpointInfo(
         fetched_at="2026-01-02T00:00:00Z",
-        verified_at="2026-01-03T00:00:00Z",
-        verified_device="cuda",
         last_error=None,
+        verifications={
+            "test": VerificationRecord(
+                verified_at="2026-01-03T00:00:00Z",
+                verified_device="cuda",
+            )
+        },
     )
     assert CheckpointInfo.from_dict(ckpt.to_dict()) == ckpt
 
@@ -55,9 +61,12 @@ def test_checkpoint_info_round_trip():
 def test_checkpoint_info_defaults_to_none():
     ckpt = CheckpointInfo()
     assert ckpt.fetched_at is None
-    assert ckpt.verified_at is None
-    assert ckpt.verified_device is None
     assert ckpt.last_error is None
+    assert ckpt.verifications == {}
+    # Never-verified clusters read as an empty record, not a KeyError.
+    assert ckpt.verification("test").verified_at is None
+    assert ckpt.verification("test").verified_device is None
+    assert ckpt.verification("test").last_error is None
 
 
 def test_environment_info_with_dict_checkpoints_round_trip():
@@ -92,8 +101,12 @@ def test_manifest_round_trip_preserves_checkpoint_metadata():
                 **{
                     "mace-mp-0-medium": CheckpointInfo(
                         fetched_at="2026-01-02T00:00:00Z",
-                        verified_at="2026-01-03T00:00:00Z",
-                        verified_device="cuda",
+                        verifications={
+                            "test": VerificationRecord(
+                                verified_at="2026-01-03T00:00:00Z",
+                                verified_device="cuda",
+                            )
+                        },
                     ),
                     "mace-mp-0-small": CheckpointInfo(),
                 }
@@ -102,14 +115,18 @@ def test_manifest_round_trip_preserves_checkpoint_metadata():
     )
     restored = Manifest.from_dict(m.to_dict())
     ckpts = restored.environments["mace"].checkpoints
-    assert ckpts["mace-mp-0-medium"].verified_device == "cuda"
+    assert ckpts["mace-mp-0-medium"].verification("test").verified_device == "cuda"
     assert ckpts["mace-mp-0-small"].fetched_at is None
 
 
-def test_to_dict_key_layout_is_stable():
+def test_push_payload_key_layout_is_stable():
     """Pushed manifests are consumed downstream (the Almanac renders them) —
-    the JSON key layout is a contract, not an implementation detail."""
-    data = _make_manifest({"mace": _make_env(**{"mace-mp-0-small": CheckpointInfo()})}).to_dict()
+    the wire payload keeps the flat single-cluster v5 layout; that key layout
+    is a contract, not an implementation detail."""
+    m = _make_manifest({"mace": _make_env(**{"mace-mp-0-small": CheckpointInfo()})})
+    data = manifest_push_payload(m, "test")
+    assert data["schema_version"] == 5
+    assert data["cluster"] == "test"
     assert list(data) == [
         "schema_version",
         "cluster",
@@ -186,19 +203,31 @@ def test_from_dict_rejects_missing_schema_version():
         Manifest.from_dict(no_version)
 
 
+def _verified(at: str, device: str = "cuda") -> dict[str, VerificationRecord]:
+    return {"test": VerificationRecord(verified_at=at, verified_device=device)}
+
+
 def test_is_verified_unverified_checkpoint():
     env = _make_env()
     ckpt = CheckpointInfo(fetched_at="2026-01-02T00:00:00Z")
-    assert is_verified(env, ckpt) is False
+    assert is_verified(env, ckpt, "test") is False
 
 
 def test_is_verified_after_build():
     env = _make_env(built_at="2026-01-01T00:00:00Z")
-    ckpt = CheckpointInfo(verified_at="2026-01-02T00:00:00Z", verified_device="cuda")
-    assert is_verified(env, ckpt) is True
+    ckpt = CheckpointInfo(verifications=_verified("2026-01-02T00:00:00Z"))
+    assert is_verified(env, ckpt, "test") is True
 
 
 def test_is_verified_stale_when_env_rebuilt_after_verify():
     env = _make_env(built_at="2026-02-01T00:00:00Z")
-    ckpt = CheckpointInfo(verified_at="2026-01-15T00:00:00Z", verified_device="cuda")
-    assert is_verified(env, ckpt) is False
+    ckpt = CheckpointInfo(verifications=_verified("2026-01-15T00:00:00Z"))
+    assert is_verified(env, ckpt, "test") is False
+
+
+def test_is_verified_is_per_cluster():
+    """Verification on one cluster says nothing about another (#208)."""
+    env = _make_env(built_at="2026-01-01T00:00:00Z")
+    ckpt = CheckpointInfo(verifications=_verified("2026-01-02T00:00:00Z"))
+    assert is_verified(env, ckpt, "test") is True
+    assert is_verified(env, ckpt, "other") is False

@@ -21,12 +21,14 @@ from ..environment import (
     CUSTOM_CHECKPOINT_SUFFIX,
     is_custom_checkpoint,
     parse_checkpoints_dict,
+    parse_clusters_list,
     parse_custom_checkpoint_ids,
 )
 from ..manifest import (
     CheckpointInfo,
     EnvironmentInfo,
     Manifest,
+    VerificationRecord,
     is_verified,
     load_manifest,
     manifest_lock,
@@ -35,8 +37,10 @@ from ..manifest import (
 )
 from ..operations import (
     _WEIGHTS_BYTE_FLOOR,
+    OperationError,
     apply_weights_record,
     read_weights_capture,
+    resolve_current_cluster,
     update_and_push_manifest,
     weights_capture_file,
 )
@@ -44,13 +48,31 @@ from ..verify import results_mismatch, verify_checkpoint
 from .common import get_root_or_exit, resolve_cache_root
 
 
+def _serves_here(root: Path, env_name: str, env: EnvironmentInfo, cluster: str) -> bool:
+    """Whether an env serves the cluster this run is on: the live source's
+    CLUSTERS when readable (so a fresh restriction takes effect this run, not
+    after the next refresh), else the manifest record."""
+    source = root / "envs" / env_name / "env_source.py"
+    if source.exists():
+        try:
+            restriction = parse_clusters_list(source)
+        except ValueError:
+            return env.serves(cluster)
+        return restriction is None or cluster in restriction
+    return env.serves(cluster)
+
+
 def _select(
-    manifest, env_filter: str | None, checkpoint_filter: str | None
+    root: Path, manifest, env_filter: str | None, checkpoint_filter: str | None, cluster: str
 ) -> list[tuple[str, str, EnvironmentInfo, CheckpointInfo]]:
     """Pick which (env, checkpoint) pairs to test."""
     selected: list[tuple[str, str, EnvironmentInfo, CheckpointInfo]] = []
     for env_name, env in manifest.environments.items():
         if env_filter is not None and env_name != env_filter:
+            continue
+        if not _serves_here(root, env_name, env, cluster):
+            # A cluster-restricted variant can only be verified by a machine
+            # it serves (#208); its own cluster's chain covers it.
             continue
         for ckpt_name, ckpt in env.checkpoints.items():
             if checkpoint_filter is not None and ckpt_name != checkpoint_filter:
@@ -96,6 +118,7 @@ def _plan_custom_legs(
     manifest: Manifest,
     env_filter: str | None,
     ckpt_filter: str | None,
+    cluster: str,
 ) -> tuple[list[CustomLeg], list[tuple[str, str, str]]]:
     """Plan one weights= leg per ``<family>:custom`` entry declared by a
     manifest env's built source (#200).
@@ -109,6 +132,8 @@ def _plan_custom_legs(
     skipped: list[tuple[str, str, str]] = []
     for env_name, env in manifest.environments.items():
         if env_filter is not None and env_name != env_filter:
+            continue
+        if not _serves_here(root, env_name, env, cluster):
             continue
         source = Path(root) / "envs" / env_name / "env_source.py"
         if not source.exists():
@@ -177,20 +202,31 @@ def cmd_smoke_test(args) -> int:
         print(f"Error: no manifest at {root}/manifest.json", file=sys.stderr)
         return 1
 
-    custom_legs, custom_skips = _plan_custom_legs(root, manifest, env_filter, ckpt_filter)
+    # Which machine is this? Results are recorded (and pushed) under this
+    # cluster's name; on a shared install it must be given explicitly (#208).
+    try:
+        cluster = resolve_current_cluster(root, args.cluster)
+    except OperationError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
 
-    selected = _select(manifest, env_filter, ckpt_filter)
+    custom_legs, custom_skips = _plan_custom_legs(root, manifest, env_filter, ckpt_filter, cluster)
+
+    selected = _select(root, manifest, env_filter, ckpt_filter, cluster)
     if ckpt_filter is not None and is_custom_checkpoint(ckpt_filter):
         # A ':custom' filter matches no canonical row; run just the base
         # checkpoint(s) the leg needs for its comparison.
         needed = {(leg.env_name, leg.base) for leg in custom_legs}
-        selected = [t for t in _select(manifest, env_filter, None) if (t[0], t[1]) in needed]
+        selected = [
+            t for t in _select(root, manifest, env_filter, None, cluster) if (t[0], t[1]) in needed
+        ]
 
     if not selected and not custom_legs:
         if json_out:
             print(
                 json.dumps(
                     {
+                        "cluster": cluster,
                         "results": [],
                         "passed": 0,
                         "failed": 0,
@@ -258,25 +294,24 @@ def cmd_smoke_test(args) -> int:
         # report reflects this run.
         if ok:
             passed_keys.add((env_name, ckpt_name))
-            ckpt.verified_at = now_iso()
-            ckpt.verified_device = device
-            ckpt.last_error = None
+            ckpt.verifications[cluster] = VerificationRecord(
+                verified_at=now_iso(), verified_device=device
+            )
             n_passed += 1
         else:
-            ckpt.verified_at = None
-            ckpt.verified_device = None
-            ckpt.last_error = f"smoke-test: {err}"
+            ckpt.verifications[cluster] = VerificationRecord(last_error=f"smoke-test: {err}")
             n_failed += 1
 
         results.append(
             {
                 "env": env_name,
                 "checkpoint": ckpt_name,
+                "cluster": cluster,
                 "device": device,
                 "passed": ok,
                 "elapsed_s": round(elapsed, 2),
                 "error": err,
-                "verified_current": is_verified(env, ckpt),
+                "verified_current": is_verified(env, ckpt, cluster),
             }
         )
 
@@ -337,14 +372,12 @@ def cmd_smoke_test(args) -> int:
         env = manifest.environments[leg.env_name]
         ckpt = env.checkpoints.setdefault(leg.custom_id, CheckpointInfo())
         if ok:
-            ckpt.verified_at = now_iso()
-            ckpt.verified_device = device
-            ckpt.last_error = None
+            ckpt.verifications[cluster] = VerificationRecord(
+                verified_at=now_iso(), verified_device=device
+            )
             n_passed += 1
         else:
-            ckpt.verified_at = None
-            ckpt.verified_device = None
-            ckpt.last_error = f"smoke-test: {err}"
+            ckpt.verifications[cluster] = VerificationRecord(last_error=f"smoke-test: {err}")
             n_failed += 1
 
         results.append(
@@ -352,11 +385,12 @@ def cmd_smoke_test(args) -> int:
                 "env": leg.env_name,
                 "checkpoint": leg.custom_id,
                 "base_checkpoint": leg.base,
+                "cluster": cluster,
                 "device": device,
                 "passed": ok,
                 "elapsed_s": round(elapsed, 2),
                 "error": err,
-                "verified_current": is_verified(env, ckpt),
+                "verified_current": is_verified(env, ckpt, cluster),
             }
         )
 
@@ -383,13 +417,13 @@ def cmd_smoke_test(args) -> int:
                 if ckpt_record is None:
                     continue  # env/checkpoint removed while we were testing
                 if ok:
-                    ckpt_record.verified_at = now_iso()
-                    ckpt_record.verified_device = device
-                    ckpt_record.last_error = None
+                    ckpt_record.verifications[cluster] = VerificationRecord(
+                        verified_at=now_iso(), verified_device=device
+                    )
                 else:
-                    ckpt_record.verified_at = None
-                    ckpt_record.verified_device = None
-                    ckpt_record.last_error = f"smoke-test: {err}"
+                    ckpt_record.verifications[cluster] = VerificationRecord(
+                        last_error=f"smoke-test: {err}"
+                    )
                 apply_weights_record(
                     ckpt_record,
                     weight_files,
@@ -404,13 +438,13 @@ def cmd_smoke_test(args) -> int:
                 # so nothing else ever writes them into the manifest.
                 ckpt_record = env_record.checkpoints.setdefault(custom_id, CheckpointInfo())
                 if ok:
-                    ckpt_record.verified_at = now_iso()
-                    ckpt_record.verified_device = device
-                    ckpt_record.last_error = None
+                    ckpt_record.verifications[cluster] = VerificationRecord(
+                        verified_at=now_iso(), verified_device=device
+                    )
                 else:
-                    ckpt_record.verified_at = None
-                    ckpt_record.verified_device = None
-                    ckpt_record.last_error = f"smoke-test: {err}"
+                    ckpt_record.verifications[cluster] = VerificationRecord(
+                        last_error=f"smoke-test: {err}"
+                    )
             save_manifest(fresh, root)
     update_and_push_manifest(root, quiet=True, push=not no_push)
 
@@ -420,6 +454,7 @@ def cmd_smoke_test(args) -> int:
         print(
             json.dumps(
                 {
+                    "cluster": cluster,
                     "results": results,
                     "passed": n_passed,
                     "failed": n_failed,

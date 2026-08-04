@@ -192,8 +192,12 @@ class RootstockCalculator(Calculator):
         self.checkpoint = checkpoint
         self.device = device
         self.timeout = timeout
+        # Kept beyond root resolution: on a shared install (sophia/polaris)
+        # the cluster name also picks the right env among cluster-specific
+        # variants and attributes the session's usage record (#208).
+        self.cluster = cluster
 
-        # Resolve the install root: the cluster name is only a name -> path
+        # Resolve the install root: the cluster name is a name -> path
         # bootstrap. Everything else about the install (including where its
         # cache lives) is read from the install itself, identically for both
         # entry points — see resolve_cache_root.
@@ -224,7 +228,7 @@ class RootstockCalculator(Calculator):
         # Resolve the checkpoint id: env-declared ids, canonical and
         # ':custom' entries alike. Raises CheckpointNotFoundError with a
         # listing if nothing matches.
-        resolved = resolve_checkpoint(self.root, checkpoint)
+        resolved = resolve_checkpoint(self.root, checkpoint, cluster)
         self.env_name = resolved.env_name
         # Enforce the ':custom' / weights= pairing (both directions — a
         # misspelled weights kwarg is absorbed by ASE, and with a custom id
@@ -256,6 +260,7 @@ class RootstockCalculator(Calculator):
                 setup_kwargs=self.setup_kwargs,
                 timeout=self.timeout,
                 checkpoint_path=self.checkpoint_path,
+                cluster=self.cluster,
             )
             server.start()
         return server

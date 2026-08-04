@@ -36,7 +36,7 @@ def _wire_fake_worker(monkeypatch, returncode=0):
     monkeypatch.setattr("rootstock.spawn.spawn_in_env", fake_spawn)
     monkeypatch.setattr(
         "rootstock.environment.resolve_checkpoint",
-        lambda root, ckpt: ResolvedCheckpoint(checkpoint=ckpt, env_name="mace"),
+        lambda root, ckpt, cluster=None: ResolvedCheckpoint(checkpoint=ckpt, env_name="mace"),
     )
     monkeypatch.setattr("rootstock.environment.get_env_python", lambda root, env: "python")
     monkeypatch.setattr(

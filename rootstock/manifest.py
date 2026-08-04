@@ -28,7 +28,7 @@ from pathlib import Path
 from .config import UserConfig
 from .exceptions import RootstockError
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # manifest_lock defaults. The lock is only held across a load → mutate → save
 # cycle (plus the env refresh, which shells out to `uv pip list` per env), so
@@ -121,6 +121,57 @@ def _migrate_v4_to_v5(data: dict) -> tuple[dict, str | None]:
     return data, None
 
 
+def _migrate_v5_to_v6(data: dict) -> tuple[dict, str | None]:
+    """v6 made cluster identity plural and verification per-cluster (#208).
+
+    A shared install (sophia/polaris on Eagle) serves machines that differ in
+    node image and drivers, so one flat ``verified_at`` misattributes results.
+    ``cluster: str`` becomes ``clusters: list[str]``, seeded from the cluster
+    registry so a root known to serve several machines starts serving them all
+    without a manual re-init. Each checkpoint's flat verification fields move
+    under ``verifications[<old cluster>]`` — pre-v6 results can't be
+    attributed to any other cluster, so siblings start unverified. The mixed
+    ``last_error`` splits by its writer's prefix: ``download:`` errors stay on
+    the (shared) checkpoint, everything else was a verification error.
+    EnvironmentInfo gains ``clusters`` (None = serves every cluster), picked
+    up from each env source's CLUSTERS on the next refresh.
+    """
+    from .clusters import get_clusters_for_root
+
+    old = data.pop("cluster", None) or "unknown"
+    siblings = get_clusters_for_root(data.get("root", ""))
+    data["clusters"] = [old] + [c for c in siblings if c != old]
+
+    for env in data.get("environments", {}).values():
+        env.setdefault("clusters", None)
+        for ckpt in (env.get("checkpoints") or {}).values():
+            verified_at = ckpt.pop("verified_at", None)
+            verified_device = ckpt.pop("verified_device", None)
+            last_error = ckpt.pop("last_error", None)
+            is_fetch_error = last_error is not None and last_error.startswith("download:")
+            ckpt["last_error"] = last_error if is_fetch_error else None
+            verify_error = None if is_fetch_error else last_error
+            ckpt["verifications"] = {}
+            if verified_at is not None or verify_error is not None:
+                ckpt["verifications"][old] = {
+                    "verified_at": verified_at,
+                    "verified_device": verified_device,
+                    "last_error": verify_error,
+                }
+
+    data["schema_version"] = 6
+
+    note = None
+    if len(data["clusters"]) > 1:
+        others = ", ".join(data["clusters"][1:])
+        note = (
+            f"this root also serves {others} (per the cluster registry); "
+            f"prior verification history stays attributed to '{old}' and the "
+            f"other cluster(s) start unverified."
+        )
+    return data, note
+
+
 # One entry per historical schema version, upgrading one step. A schema bump
 # without a migration here strands every deployed manifest of that vintage —
 # add the migration in the same change as the bump.
@@ -129,6 +180,7 @@ MIGRATIONS = {
     2: _migrate_v2_to_v3,
     3: _migrate_v3_to_v4,
     4: _migrate_v4_to_v5,
+    5: _migrate_v5_to_v6,
 }
 
 
@@ -199,13 +251,41 @@ class Maintainer:
 
 
 @dataclass
-class CheckpointInfo:
-    """Metadata for a single checkpoint registered with an environment."""
+class VerificationRecord:
+    """One cluster's verification state for a checkpoint.
 
-    fetched_at: str | None = None  # ISO 8601, set when download succeeds
+    Verification is per-cluster (v6, #208): a shared install serves machines
+    that differ in node image and drivers, so passing on one says nothing
+    about the others.
+    """
+
     verified_at: str | None = None  # ISO 8601, set when smoke test passes
     verified_device: str | None = None  # "cuda", "cpu", etc.
-    last_error: str | None = None  # most recent error from add or smoke-test
+    last_error: str | None = None  # most recent verify/smoke-test error here
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> VerificationRecord:
+        return cls(
+            verified_at=data.get("verified_at"),
+            verified_device=data.get("verified_device"),
+            last_error=data.get("last_error"),
+        )
+
+
+@dataclass
+class CheckpointInfo:
+    """Metadata for a single checkpoint registered with an environment.
+
+    Fetch state is shared across clusters — the weights cache is one
+    filesystem however many machines mount it — while verification is
+    recorded per cluster in ``verifications``.
+    """
+
+    fetched_at: str | None = None  # ISO 8601, set when download succeeds
+    last_error: str | None = None  # most recent download error (shared)
     # Weight files this checkpoint's setup() actually touched, captured at
     # add/verify/smoke-test time (#177): list of {"path", "size"} dicts with
     # paths relative to the cache root (so records survive split-cache
@@ -215,6 +295,13 @@ class CheckpointInfo:
     # cgroup, over-warming evicts the pages the worker needs.
     weight_files: list[dict] | None = None
     weights_recorded_at: str | None = None  # ISO 8601
+    # Per-cluster verification state, keyed by cluster name. Absent key =
+    # never verified there.
+    verifications: dict[str, VerificationRecord] = field(default_factory=dict)
+
+    def verification(self, cluster: str) -> VerificationRecord:
+        """This cluster's verification state (empty record if never verified)."""
+        return self.verifications.get(cluster) or VerificationRecord()
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -223,11 +310,13 @@ class CheckpointInfo:
     def from_dict(cls, data: dict) -> CheckpointInfo:
         return cls(
             fetched_at=data.get("fetched_at"),
-            verified_at=data.get("verified_at"),
-            verified_device=data.get("verified_device"),
             last_error=data.get("last_error"),
             weight_files=data.get("weight_files"),
             weights_recorded_at=data.get("weights_recorded_at"),
+            verifications={
+                cluster: VerificationRecord.from_dict(v)
+                for cluster, v in (data.get("verifications") or {}).items()
+            },
         )
 
 
@@ -252,9 +341,17 @@ class EnvironmentInfo:
     # rootstock or because the env defeats universal resolution — and can
     # only be re-resolved, not faithfully rebuilt.
     lock_hash: str | None = None
+    # Clusters this env serves, mirrored from the source's CLUSTERS at
+    # refresh time. None = serves every cluster the install does; a list
+    # restricts it (a cluster-specific variant on a shared install, #208).
+    clusters: list[str] | None = None
     # Field order is the JSON key order (asdict): lock_hash stays ahead of
     # checkpoints to match the layout pushed manifests have always had.
     checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
+
+    def serves(self, cluster: str) -> bool:
+        """Whether this env serves ``cluster`` (unrestricted envs serve all)."""
+        return self.clusters is None or cluster in self.clusters
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -274,22 +371,30 @@ class EnvironmentInfo:
             dependencies=data["dependencies"],
             checkpoints=checkpoints,
             lock_hash=data.get("lock_hash"),
+            clusters=data.get("clusters"),
         )
 
 
-def is_verified(env: EnvironmentInfo, ckpt: CheckpointInfo) -> bool:
-    """Return True if checkpoint was verified after the env was last built."""
-    if ckpt.verified_at is None:
+def is_verified(env: EnvironmentInfo, ckpt: CheckpointInfo, cluster: str) -> bool:
+    """True if the checkpoint was verified on ``cluster`` after the env was
+    last built."""
+    verified_at = ckpt.verification(cluster).verified_at
+    if verified_at is None:
         return False
-    return ckpt.verified_at > env.built_at  # ISO 8601 sorts lexically
+    return verified_at > env.built_at  # ISO 8601 sorts lexically
 
 
 @dataclass
 class Manifest:
-    """Root manifest for a rootstock installation."""
+    """Root manifest for a rootstock installation.
+
+    One file per install, however many clusters mount it: build/fetch state
+    is genuinely shared, so splitting the file would just invite drift. The
+    per-cluster split happens at push time — see :func:`manifest_push_payload`.
+    """
 
     schema_version: int
-    cluster: str
+    clusters: list[str]  # every cluster this install serves; first = "home"
     root: str
     maintainer: Maintainer
     rootstock_version: str
@@ -310,7 +415,7 @@ class Manifest:
 
         return cls(
             schema_version=data["schema_version"],
-            cluster=data["cluster"],
+            clusters=list(data["clusters"]),
             root=data["root"],
             maintainer=Maintainer.from_dict(data["maintainer"]),
             rootstock_version=data["rootstock_version"],
@@ -329,8 +434,8 @@ class Manifest:
         # Check required fields
         if not self.schema_version:
             return False, "Missing schema_version"
-        if not self.cluster:
-            return False, "Missing cluster"
+        if not self.clusters:
+            return False, "Missing clusters"
         if not self.root:
             return False, "Missing root"
         if not self.maintainer.name:
@@ -339,6 +444,57 @@ class Manifest:
             return False, "Missing maintainer email"
 
         return True, "OK"
+
+
+def manifest_push_payload(manifest: Manifest, cluster: str) -> dict:
+    """Project the manifest into one cluster's wire payload.
+
+    The backend files each pushed payload under its single ``cluster`` string
+    and the almanac reads the flat pre-v6 checkpoint shape, and a per-cluster
+    projection *is* exactly the manifest a dedicated single-cluster install
+    would have written — so the wire format stays schema v5 and neither needs
+    any change. Envs that don't serve ``cluster`` are omitted; each
+    checkpoint carries only this cluster's verification state (its verify
+    error, or the shared download error when there is none).
+
+    Key order matters only cosmetically, but it is kept identical to a v5
+    manifest so dumps diff cleanly across the transition.
+    """
+    environments: dict[str, dict] = {}
+    for env_name, env in manifest.environments.items():
+        if not env.serves(cluster):
+            continue
+        checkpoints = {}
+        for ckpt_name, ckpt in env.checkpoints.items():
+            v = ckpt.verification(cluster)
+            checkpoints[ckpt_name] = {
+                "fetched_at": ckpt.fetched_at,
+                "verified_at": v.verified_at,
+                "verified_device": v.verified_device,
+                "last_error": v.last_error or ckpt.last_error,
+                "weight_files": ckpt.weight_files,
+                "weights_recorded_at": ckpt.weights_recorded_at,
+            }
+        environments[env_name] = {
+            "built_at": env.built_at,
+            "source_hash": env.source_hash,
+            "source": env.source,
+            "python_requires": env.python_requires,
+            "dependencies": env.dependencies,
+            "lock_hash": env.lock_hash,
+            "checkpoints": checkpoints,
+        }
+
+    return {
+        "schema_version": 5,  # the flat single-cluster shape the wire has always carried
+        "cluster": cluster,
+        "root": manifest.root,
+        "maintainer": manifest.maintainer.to_dict(),
+        "rootstock_version": manifest.rootstock_version,
+        "python_version": manifest.python_version,
+        "last_updated": manifest.last_updated,
+        "environments": environments,
+    }
 
 
 def compute_source_hash(source_path: Path) -> str:
@@ -634,7 +790,7 @@ def save_manifest(manifest: Manifest, root: Path) -> None:
 
 def create_manifest(
     root: Path,
-    cluster: str,
+    clusters: list[str],
     config: UserConfig,
 ) -> Manifest:
     """
@@ -642,7 +798,9 @@ def create_manifest(
 
     Args:
         root: Rootstock root directory
-        cluster: Cluster name (e.g., "delta", "perlmuter")
+        clusters: Every cluster this install serves (e.g. ["delta"], or
+            ["sophia", "polaris"] for a shared root); first entry is the
+            install's "home" cluster
         config: User config with maintainer info
 
     Returns:
@@ -652,7 +810,7 @@ def create_manifest(
 
     return Manifest(
         schema_version=SCHEMA_VERSION,
-        cluster=cluster,
+        clusters=list(clusters),
         root=str(root),
         maintainer=Maintainer(
             name=config.name or "Unknown",

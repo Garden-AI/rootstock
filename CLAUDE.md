@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rootstock runs MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments on HPC clusters, communicating via the i-PI protocol over Unix sockets.
 
-Versioning is dynamic (git tags via uv-dynamic-versioning) — check `rootstock --version`. Manifest schema v5 (older schemas migrate in place on load); canonical-checkpoint-id API.
+Versioning is dynamic (git tags via uv-dynamic-versioning) — check `rootstock --version`. Manifest schema v6 (older schemas migrate in place on load; verification is per-cluster, and shared installs like sophia/polaris push one manifest per cluster); canonical-checkpoint-id API.
 
 ## Commands
 
@@ -26,8 +26,9 @@ rootstock add <checkpoint-id> [--kwarg key=val ...] [--device cuda] [--no-verify
 
 # Re-verify all fetched checkpoints, plus each '<family>:custom' weights= path
 # (re-loads a same-family checkpoint's cached weights and compares results).
-# Suitable for nightly cron.
-rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--json]
+# Suitable for nightly cron. --cluster names the machine (required on shared
+# installs like sophia/polaris; add/sync take it too).
+rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--cluster NAME] [--json]
 
 # Show status (per-checkpoint verified/stale grid; --json for machine-readable)
 rootstock status [--root <path>] [--json]
@@ -119,6 +120,8 @@ predate the declaration. Most clusters use the same path for both.
 | `della` | `/scratch/gpfs/ROSENGROUP/common/rootstock` | (same as install root) |
 | `sophia` | `/eagle/projects/Rootstock/rootstock` | (same as install root) |
 | `polaris` | `/eagle/projects/Rootstock/rootstock` (shared with sophia) | (same as install root) |
+
+sophia/polaris share one install and one manifest (`clusters: ["sophia", "polaris"]`), but verification records and pushed manifests are per-cluster; verify-recording commands there need `--cluster`. An env source may declare `CLUSTERS = ["polaris"]` to ship a cluster-specific variant (see `docs/environments.md`).
 | `perlmutter` | `/global/cfs/cdirs/m5268/rootstock` | `/pscratch/sd/o/oprice/rootstock-cache` |
 | `delta` | `/work/hdd/data/rootstock` | (same as install root) |
 | `frontier` | `/sw/frontier/ums/ums047/rootstock` | `/lustre/orion/ums047/world-shared/rootstock-cache` |

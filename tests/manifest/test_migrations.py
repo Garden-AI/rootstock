@@ -23,9 +23,8 @@ from rootstock.manifest import (
 
 
 def _base(version, environments=None) -> dict:
-    return {
+    data = {
         "schema_version": version,
-        "cluster": "test",
         "root": "/tmp/x",
         "maintainer": {"name": "a", "email": "a@b.c"},
         "rootstock_version": "0.5.0",
@@ -33,6 +32,11 @@ def _base(version, environments=None) -> dict:
         "last_updated": "2026-01-01T00:00:00Z",
         "environments": environments or {},
     }
+    if int(version) >= 6:
+        data["clusters"] = ["test"]  # v6+ stores plural cluster identity
+    else:
+        data["cluster"] = "test"  # pre-v6 manifests wrote a single cluster
+    return data
 
 
 def _v2_env(checkpoints=None) -> dict:
@@ -63,6 +67,9 @@ def test_v2_environments_survive_checkpoints_dropped():
     migrated, notes = migrate_manifest_data(data)
 
     assert migrated["schema_version"] == SCHEMA_VERSION
+    # "/tmp/x" is not a registry root, so the sole cluster is the old one
+    assert migrated["clusters"] == ["test"]
+    assert "cluster" not in migrated
     env = migrated["environments"]["mace"]
     assert env["dependencies"] == {"mace-torch": "0.3.6"}
     # v2 checkpoint keys aren't canonical ids; they can't be trusted to join
@@ -76,6 +83,7 @@ def test_v2_without_checkpoints_migrates_quietly():
         "migrated manifest schema v2 -> v3",
         "migrated manifest schema v3 -> v4",
         "migrated manifest schema v4 -> v5",
+        "migrated manifest schema v5 -> v6",
     ]
 
 
@@ -105,6 +113,7 @@ def test_v3_drops_dead_status_fields():
     assert notes == [
         "migrated manifest schema v3 -> v4",
         "migrated manifest schema v4 -> v5",
+        "migrated manifest schema v5 -> v6",
     ]
     assert "mace" in Manifest.from_dict(migrated).environments
 
@@ -122,14 +131,18 @@ def test_v4_bumps_cleanly_with_checkpoints_intact():
     migrated, notes = migrate_manifest_data(data)
 
     assert migrated["schema_version"] == SCHEMA_VERSION
-    assert notes == ["migrated manifest schema v4 -> v5"]
+    assert notes == [
+        "migrated manifest schema v4 -> v5",
+        "migrated manifest schema v5 -> v6",
+    ]
     ckpt = Manifest.from_dict(migrated).environments["mace"].checkpoints["mace-mp-0-medium"]
     assert ckpt.fetched_at == "2026-01-02T00:00:00Z"
     assert ckpt.weight_files is None
     assert ckpt.weights_recorded_at is None
+    assert ckpt.verifications == {}  # never verified pre-migration
 
 
-# --- v1 -> v4 (full chain) --------------------------------------------------
+# --- v1 -> v6 (full chain) --------------------------------------------------
 
 
 def test_v1_chain_migrates_to_current():
@@ -138,9 +151,10 @@ def test_v1_chain_migrates_to_current():
     migrated, notes = migrate_manifest_data(data)
 
     assert migrated["schema_version"] == SCHEMA_VERSION
+    assert migrated["clusters"] == ["test"]
     # v1->v2 mints empty CheckpointInfo dicts; v2->v3 then drops them
     assert migrated["environments"]["mace"]["checkpoints"] == {}
-    assert len(notes) == 4
+    assert len(notes) == 5
     assert Manifest.from_dict(migrated).environments["mace"].source_hash == "sha256:abc"
 
 

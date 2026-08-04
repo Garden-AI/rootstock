@@ -49,7 +49,7 @@ def fake_root(tmp_path: Path) -> Path:
     from rootstock.manifest import create_manifest, save_manifest
 
     cfg = UserConfig(name="t", email="t@t.t")
-    save_manifest(create_manifest(root, "test", cfg), root)
+    save_manifest(create_manifest(root, ["test"], cfg), root)
     return root
 
 
@@ -83,7 +83,7 @@ def test_fetch_records_fetched_at(fake_root, refresh_calls, monkeypatch):
     assert not result.already_fetched
     ckpt = _ckpt(fake_root)
     assert ckpt.fetched_at == result.fetched_at
-    assert ckpt.verified_at is None
+    assert ckpt.verification("test").verified_at is None
     assert ckpt.last_error is None
 
 
@@ -144,7 +144,9 @@ def test_fetch_fails_fast_when_env_not_built(tmp_path, refresh_calls):
     from rootstock.config import UserConfig
     from rootstock.manifest import create_manifest, save_manifest
 
-    save_manifest(create_manifest(tmp_path, "test", UserConfig(name="t", email="t@t.t")), tmp_path)
+    save_manifest(
+        create_manifest(tmp_path, ["test"], UserConfig(name="t", email="t@t.t")), tmp_path
+    )
     env_dir = tmp_path / "envs" / "mace"
     env_dir.mkdir(parents=True)
     (env_dir / "env_source.py").write_text(_MACE_ENV_SOURCE)  # declared but not built
@@ -163,10 +165,10 @@ def test_verify_records_outcome(fake_root, refresh_calls, monkeypatch):
 
     assert result.env_name == "mace"
     assert result.verified_device == "cuda"
-    ckpt = _ckpt(fake_root)
-    assert ckpt.verified_at == result.verified_at
-    assert ckpt.verified_device == "cuda"
-    assert ckpt.last_error is None
+    record = _ckpt(fake_root).verification("test")
+    assert record.verified_at == result.verified_at
+    assert record.verified_device == "cuda"
+    assert record.last_error is None
 
 
 def test_verify_failure_clears_stamps_and_raises(fake_root, refresh_calls, monkeypatch):
@@ -177,11 +179,11 @@ def test_verify_failure_clears_stamps_and_raises(fake_root, refresh_calls, monke
     with pytest.raises(OperationError, match="verify failed"):
         verify_fetched_checkpoint(fake_root, "mace-mp-0-medium")
 
-    ckpt = _ckpt(fake_root)
-    assert ckpt.verified_at is None
-    assert ckpt.verified_device is None
-    assert "CUDA OOM" in ckpt.last_error
-    assert ckpt.last_error.startswith("verify:")
+    record = _ckpt(fake_root).verification("test")
+    assert record.verified_at is None
+    assert record.verified_device is None
+    assert "CUDA OOM" in record.last_error
+    assert record.last_error.startswith("verify:")
 
 
 def test_verify_refresh_knob(fake_root, refresh_calls, monkeypatch):
@@ -210,7 +212,7 @@ def test_verify_forwards_device_and_kwargs(fake_root, refresh_calls, monkeypatch
 
     assert captured["device"] == "cuda:1"
     assert captured["setup_kwargs"] == {"task": "omat"}
-    assert _ckpt(fake_root).verified_device == "cuda:1"
+    assert _ckpt(fake_root).verification("test").verified_device == "cuda:1"
 
 
 def test_verify_forwards_timeout(fake_root, refresh_calls, monkeypatch):

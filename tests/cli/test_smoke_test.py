@@ -30,7 +30,7 @@ def populated_root(tmp_path: Path, monkeypatch) -> Path:
         (root / "envs" / env / "bin" / "python").touch()
 
     cfg = UserConfig(name="t", email="t@t.t")
-    manifest = create_manifest(root, "test", cfg)
+    manifest = create_manifest(root, ["test"], cfg)
 
     manifest.environments["mace"] = EnvironmentInfo(
         built_at="2026-01-01T00:00:00Z",
@@ -75,6 +75,7 @@ def _make_args(root: Path, **overrides):
     args.json = overrides.get("json", False)
     args.root = str(root)
     args.no_push = overrides.get("no_push", True)
+    args.cluster = overrides.get("cluster")
     return args
 
 
@@ -139,10 +140,10 @@ def test_smoke_test_marks_pass_and_fail(populated_root, monkeypatch):
     m = load_manifest(populated_root)
     medium = m.environments["mace"].checkpoints["mace-mp-0-medium"]
     small = m.environments["mace"].checkpoints["mace-mp-0-small"]
-    assert medium.verified_at is None
-    assert "smoke-test:" in medium.last_error
-    assert small.verified_at is not None
-    assert small.last_error is None
+    assert medium.verification("test").verified_at is None
+    assert "smoke-test:" in medium.verification("test").last_error
+    assert small.verification("test").verified_at is not None
+    assert small.verification("test").last_error is None
 
 
 def test_smoke_test_returns_zero_when_all_pass(populated_root, monkeypatch):
@@ -211,10 +212,12 @@ def test_smoke_test_emits_valid_json(populated_root, monkeypatch, capsys):
 
     out = capsys.readouterr().out.strip()
     parsed = json.loads(out)
+    assert parsed["cluster"] == "test"
     assert parsed["passed"] >= 1
     assert parsed["failed"] == 0
     assert isinstance(parsed["results"], list)
     assert all("verified_current" in r for r in parsed["results"])
+    assert all(r["cluster"] == "test" for r in parsed["results"])
 
 
 def test_smoke_test_no_manifest_returns_1(tmp_path, capsys):
@@ -225,7 +228,7 @@ def test_smoke_test_no_manifest_returns_1(tmp_path, capsys):
 def test_smoke_test_empty_selection_returns_0(tmp_path, monkeypatch):
     """Manifest exists but has no fetched checkpoints — clean exit, no failures."""
     cfg = UserConfig(name="t", email="t@t.t")
-    save_manifest(create_manifest(tmp_path, "test", cfg), tmp_path)
+    save_manifest(create_manifest(tmp_path, ["test"], cfg), tmp_path)
     monkeypatch.setattr(
         "rootstock.commands.smoke_test.update_and_push_manifest", lambda *a, **kw: True
     )
@@ -294,7 +297,7 @@ def custom_root(tmp_path: Path, monkeypatch) -> Path:
         path.write_bytes(b"weights")
 
     cfg = UserConfig(name="t", email="t@t.t")
-    manifest = create_manifest(root, "test", cfg)
+    manifest = create_manifest(root, ["test"], cfg)
     manifest.environments["uma"] = EnvironmentInfo(
         built_at="2026-01-01T00:00:00Z",
         source_hash="sha256:abc",
@@ -365,8 +368,10 @@ def test_custom_leg_verifies_and_records(custom_root, monkeypatch):
 
     m = load_manifest(custom_root)
     custom = m.environments["uma"].checkpoints["uma:custom"]
-    assert custom.verified_at is not None
-    assert custom.verified_device == "cuda"
+    record = custom.verification("test")
+    assert record.verified_at is not None
+    assert record.verified_device == "cuda"
+    assert record.last_error is None
     assert custom.last_error is None
     assert custom.fetched_at is None  # never fetched — the user supplies weights
 
@@ -389,8 +394,9 @@ def test_custom_leg_pairs_each_family_with_its_base(custom_root, monkeypatch):
     )
 
     m = load_manifest(custom_root)
-    assert m.environments["mace"].checkpoints["mace:custom"].verified_at is not None
-    assert m.environments["mace"].checkpoints["mace-off:custom"].verified_at is not None
+    ckpts = m.environments["mace"].checkpoints
+    assert ckpts["mace:custom"].verification("test").verified_at is not None
+    assert ckpts["mace-off:custom"].verification("test").verified_at is not None
 
 
 def test_custom_leg_divergence_fails_and_records_error(custom_root, monkeypatch):
@@ -404,11 +410,11 @@ def test_custom_leg_divergence_fails_and_records_error(custom_root, monkeypatch)
     assert cmd_smoke_test(_make_args(custom_root, env="uma")) == 1
 
     custom = load_manifest(custom_root).environments["uma"].checkpoints["uma:custom"]
-    assert custom.verified_at is None
-    assert "diverges" in custom.last_error
+    assert custom.verification("test").verified_at is None
+    assert "diverges" in custom.verification("test").last_error
     # The canonical baseline itself passed.
     base = load_manifest(custom_root).environments["uma"].checkpoints["uma-s-1p1"]
-    assert base.verified_at is not None
+    assert base.verification("test").verified_at is not None
 
 
 def test_custom_leg_skipped_when_baseline_fails(custom_root, monkeypatch, capsys):
@@ -492,7 +498,7 @@ def test_select_never_picks_custom_manifest_entries(custom_root):
     m.environments["uma"].checkpoints["uma:custom"] = CheckpointInfo(
         fetched_at="2026-01-02T00:00:00Z"
     )
-    selected = smoke_module._select(m, None, None)
+    selected = smoke_module._select(custom_root, m, None, None, "test")
     assert all(name != "uma:custom" for _, name, _, _ in selected)
 
 

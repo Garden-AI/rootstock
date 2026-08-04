@@ -56,7 +56,7 @@ def _record() -> EnvironmentInfo:
 def _manifest(root: Path, environments: dict) -> Manifest:
     return Manifest(
         schema_version=SCHEMA_VERSION,
-        cluster="test",
+        clusters=["test"],
         root=str(root),
         maintainer=Maintainer(name="a", email="a@b.c"),
         rootstock_version="0.0.0",

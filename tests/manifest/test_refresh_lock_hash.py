@@ -29,7 +29,7 @@ def _make_built_env(root: Path, name: str, with_lock: bool) -> Path:
 def _empty_manifest(root: Path) -> Manifest:
     return Manifest(
         schema_version=SCHEMA_VERSION,
-        cluster="test",
+        clusters=["test"],
         root=str(root),
         maintainer=Maintainer(name="a", email="a@b.c"),
         rootstock_version="0.0.0",

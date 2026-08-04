@@ -10,6 +10,7 @@ from rootstock.config import UserConfig
 from rootstock.manifest import (
     CheckpointInfo,
     EnvironmentInfo,
+    VerificationRecord,
     compute_source_hash,
     create_manifest,
     save_manifest,
@@ -53,10 +54,14 @@ def test_checkpoint_line_marks_verified():
     env = _env_with_checkpoints("2026-01-01T00:00:00Z")
     ckpt = CheckpointInfo(
         fetched_at="2026-01-02T00:00:00Z",
-        verified_at="2026-01-03T00:00:00Z",
-        verified_device="cuda",
+        verifications={
+            "test": VerificationRecord(
+                verified_at="2026-01-03T00:00:00Z",
+                verified_device="cuda",
+            )
+        },
     )
-    line = _checkpoint_line(env, "medium", ckpt)
+    line = _checkpoint_line(env, "medium", ckpt, ["test"])
     assert "✓" in line
     assert "(cuda)" in line
     assert "stale" not in line
@@ -66,17 +71,21 @@ def test_checkpoint_line_marks_stale_when_env_rebuilt():
     env = _env_with_checkpoints("2026-02-01T00:00:00Z")  # newer than verify
     ckpt = CheckpointInfo(
         fetched_at="2026-01-02T00:00:00Z",
-        verified_at="2026-01-15T00:00:00Z",
-        verified_device="cuda",
+        verifications={
+            "test": VerificationRecord(
+                verified_at="2026-01-15T00:00:00Z",
+                verified_device="cuda",
+            )
+        },
     )
-    line = _checkpoint_line(env, "medium", ckpt)
+    line = _checkpoint_line(env, "medium", ckpt, ["test"])
     assert "stale" in line
 
 
 def test_checkpoint_line_marks_unverified():
     env = _env_with_checkpoints("2026-01-01T00:00:00Z")
     ckpt = CheckpointInfo(fetched_at="2026-01-02T00:00:00Z")
-    line = _checkpoint_line(env, "small", ckpt)
+    line = _checkpoint_line(env, "small", ckpt, ["test"])
     assert "not verified" in line
     assert "⚠" in line
 
@@ -85,9 +94,9 @@ def test_checkpoint_line_includes_last_error():
     env = _env_with_checkpoints("2026-01-01T00:00:00Z")
     ckpt = CheckpointInfo(
         fetched_at="2026-01-02T00:00:00Z",
-        last_error="verify: RuntimeError: bad",
+        verifications={"test": VerificationRecord(last_error="verify: RuntimeError: bad")},
     )
-    line = _checkpoint_line(env, "small", ckpt)
+    line = _checkpoint_line(env, "small", ckpt, ["test"])
     assert "last error" in line
     assert "RuntimeError" in line
 
@@ -96,15 +105,19 @@ def test_status_json_includes_verified_current(tmp_path: Path, capsys):
     """--json should add a computed verified_current bool per checkpoint."""
     env_dir = _make_built_env(tmp_path)
     cfg = UserConfig(name="t", email="t@t.t")
-    manifest = create_manifest(tmp_path, "test", cfg)
+    manifest = create_manifest(tmp_path, ["test"], cfg)
     manifest.environments["mace"] = _env_with_checkpoints(
         "2026-01-01T00:00:00Z",
         source_hash=compute_source_hash(env_dir / "env_source.py"),
         **{
             "mace-mp-0-medium": CheckpointInfo(
                 fetched_at="2026-01-02T00:00:00Z",
-                verified_at="2026-01-03T00:00:00Z",
-                verified_device="cuda",
+                verifications={
+                    "test": VerificationRecord(
+                        verified_at="2026-01-03T00:00:00Z",
+                        verified_device="cuda",
+                    )
+                },
             ),
             "mace-mp-0-small": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
         },
@@ -118,10 +131,12 @@ def test_status_json_includes_verified_current(tmp_path: Path, capsys):
     env = parsed["environments"]["mace"]
     assert env["in_manifest"] is True
     assert env["built_at"] == "2026-01-01T00:00:00Z"
-    assert env["checkpoints"]["mace-mp-0-medium"]["verified_current"] is True
-    assert env["checkpoints"]["mace-mp-0-small"]["verified_current"] is False
+    assert env["clusters"] is None  # unrestricted env serves every cluster
+    assert env["checkpoints"]["mace-mp-0-medium"]["verified_current"] == {"test": True}
+    assert env["checkpoints"]["mace-mp-0-small"]["verified_current"] == {"test": False}
+    assert "verifications" in env["checkpoints"]["mace-mp-0-medium"]
     assert env["declared_checkpoints"] == ["mace-mp-0-medium", "mace-mp-0-small"]
-    assert parsed["cluster"] == "test"
+    assert parsed["clusters"] == ["test"]
 
 
 def test_status_json_no_manifest(tmp_path: Path, capsys):
@@ -132,7 +147,7 @@ def test_status_json_no_manifest(tmp_path: Path, capsys):
     assert rc == 0
 
     parsed = json.loads(capsys.readouterr().out)
-    assert parsed["cluster"] is None
+    assert parsed["clusters"] is None
     env = parsed["environments"]["mace"]
     assert env["in_manifest"] is False
     assert env["built_at"] is None
@@ -144,7 +159,7 @@ def test_status_json_separates_manifest_only_envs(tmp_path: Path, capsys):
     presented as installed."""
     _make_built_env(tmp_path)
     cfg = UserConfig(name="t", email="t@t.t")
-    manifest = create_manifest(tmp_path, "test", cfg)
+    manifest = create_manifest(tmp_path, ["test"], cfg)
     manifest.environments["deleted"] = _env_with_checkpoints("2026-01-01T00:00:00Z")
     save_manifest(manifest, tmp_path)
 
@@ -160,7 +175,7 @@ def test_status_json_separates_manifest_only_envs(tmp_path: Path, capsys):
 def test_status_human_view_flags_drift_and_manifest_only(tmp_path: Path, capsys):
     _make_built_env(tmp_path)
     cfg = UserConfig(name="t", email="t@t.t")
-    manifest = create_manifest(tmp_path, "test", cfg)
+    manifest = create_manifest(tmp_path, ["test"], cfg)
     manifest.environments["mace"] = _env_with_checkpoints(
         "2026-01-01T00:00:00Z", source_hash="sha256:stale"
     )

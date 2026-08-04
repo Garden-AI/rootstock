@@ -122,11 +122,11 @@ def cmd_usage_push(args) -> int:
         return 1
 
     manifest = load_manifest(root)
-    if manifest is None or not manifest.cluster:
+    if manifest is None or not manifest.clusters:
         print(
-            f"No manifest at {root}/manifest.json — the push is filed under "
-            "the manifest's cluster name; run 'rootstock manifest init "
-            "--cluster <name>' first.",
+            f"No manifest at {root}/manifest.json — pushes are filed under "
+            "cluster names; run 'rootstock manifest init --cluster <name>' "
+            "first.",
             file=sys.stderr,
         )
         return 1
@@ -143,19 +143,32 @@ def cmd_usage_push(args) -> int:
         print("No usage recorded yet — nothing to push.")
         return 0
 
+    # Rows carry the cluster their sessions ran on — on a shared install
+    # (sophia/polaris) one spool holds several machines' usage, so each
+    # cluster gets its own push (#208). Rows predating the per-session stamp
+    # (or from root=-only sessions) fall back to the install's home cluster.
+    home = manifest.clusters[0]
+    by_cluster: dict[str, list[dict]] = {}
+    for row in summary.rows:
+        by_cluster.setdefault(row.get("cluster") or home, []).append(row)
+
     if args.dry_run:
-        payload = {"cluster": manifest.cluster, "rows": summary.rows}
-        print(f"Would POST to {url}:")
-        print(json.dumps(payload, indent=2))
+        for cluster, rows in sorted(by_cluster.items()):
+            payload = {"cluster": cluster, "rows": rows}
+            print(f"Would POST to {url}:")
+            print(json.dumps(payload, indent=2))
         return 0
 
     client = RootstockClient(config)
-    success, message = client.push_usage(manifest.cluster, summary.rows)
-    if not success:
-        print(f"Error: {message}", file=sys.stderr)
-        return 1
-    print(message)
-    return 0
+    all_ok = True
+    for cluster, rows in sorted(by_cluster.items()):
+        success, message = client.push_usage(cluster, rows)
+        if success:
+            print(message)
+        else:
+            print(f"Error ({cluster}): {message}", file=sys.stderr)
+            all_ok = False
+    return 0 if all_ok else 1
 
 
 def cmd_usage_compact(args) -> int:

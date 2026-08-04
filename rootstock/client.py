@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .config import UserConfig
-from .manifest import Manifest
+from .manifest import Manifest, manifest_push_payload
 
 
 class RootstockClient:
@@ -26,12 +26,10 @@ class RootstockClient:
         """
         self.config = config
 
-    def push_manifest(self, manifest: Manifest) -> tuple[bool, str]:
+    def push_manifest_payload(self, payload: dict) -> tuple[bool, str]:
         """
-        Push manifest to backend API.
-
-        Args:
-            manifest: Manifest to push
+        Push one cluster's manifest payload (see ``manifest_push_payload``)
+        to the backend API, which files it under ``payload["cluster"]``.
 
         Returns:
             (success, message) tuple
@@ -43,7 +41,24 @@ class RootstockClient:
         if not self.config.api_url:
             return False, "API URL not configured"
 
-        return self._post(self.config.api_url, manifest.to_dict(), "Manifest pushed successfully")
+        return self._post(self.config.api_url, payload, "Manifest pushed successfully")
+
+    def push_manifest(self, manifest: Manifest) -> tuple[bool, str]:
+        """
+        Push a manifest to the backend API: one payload per cluster the
+        install serves (the backend keys each on its single cluster name).
+
+        Returns:
+            (success, message) tuple — success only when every cluster's
+            push succeeded; the message reports each cluster.
+        """
+        ok = True
+        parts = []
+        for cluster in manifest.clusters:
+            success, message = self.push_manifest_payload(manifest_push_payload(manifest, cluster))
+            ok = ok and success
+            parts.append(f"{cluster}: {'ok' if success else message}")
+        return ok, "; ".join(parts)
 
     def push_usage(self, cluster: str, rows: list[dict]) -> tuple[bool, str]:
         """

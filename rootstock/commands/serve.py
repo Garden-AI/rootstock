@@ -40,6 +40,9 @@ def cmd_serve(args) -> int:
     checkpoint = args.checkpoint
     device = args.device
     weights = getattr(args, "weights", None)
+    # Which machine this serve runs on — picks the right env among
+    # cluster-specific variants and attributes the usage record (#208).
+    cluster = getattr(args, "cluster", None)
 
     try:
         cli_kwargs = parse_setup_kwargs(getattr(args, "kwarg", None))
@@ -48,7 +51,7 @@ def cmd_serve(args) -> int:
         return 2
 
     try:
-        resolved = resolve_checkpoint(root, checkpoint)
+        resolved = resolve_checkpoint(root, checkpoint, cluster)
     except CheckpointNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -126,5 +129,6 @@ def cmd_serve(args) -> int:
         started_at=started_at,
         duration_s=time.monotonic() - started,
         n_calculations=None,
+        cluster=cluster,
     )
     return rc

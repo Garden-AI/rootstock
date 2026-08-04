@@ -169,6 +169,32 @@ construction, so a rebuild (`rootstock install --force`) from a source that
 dropped `setup_from_path` fails immediately with a maintainer-facing hint —
 never as an opaque error inside the worker.
 
+### `CLUSTERS` list (optional — cluster-specific variants on shared installs)
+
+Some installs serve more than one machine (sophia and polaris mount the same
+Eagle root). When an env runs on one of them but not the other — different
+node image, different driver stack — declare a **variant**: a second env file
+with the *same* canonical ids, different pins or `setup()`, and a module-level
+
+```python
+CLUSTERS = ["polaris"]
+```
+
+Resolution is cluster-aware: on the clusters a variant lists, it beats the
+unrestricted env for the ids both declare; every other cluster keeps the
+original untouched. Users pass `cluster="polaris"` (which they already do) and
+get the right env; `root=`-only construction resolves unrestricted envs and
+asks for a cluster when only variants declare an id. The two envs share
+downloaded weights automatically — the cache is keyed by checkpoint, not env.
+
+If the original env genuinely *cannot* run on one machine, restrict it too
+(`CLUSTERS = ["sophia"]` on the original): that cluster's smoke-test then
+skips it and its manifest no longer advertises it there.
+
+Absent `CLUSTERS` (the normal case) means the env serves every cluster its
+install does. Like `CHECKPOINTS`, the list is AST-parsed — string literals
+only, and an empty list is an authoring error.
+
 ## Examples
 
 ### MACE (MP-0 and OFF23 in one env)
@@ -263,7 +289,7 @@ The canonical ids in `CHECKPOINTS` are the join key with the Almanac. If the Alm
 
 The same model rarely drops onto every cluster unchanged. Driver and CUDA versions, the available Python, and filesystem behavior all vary, so adapting a sample's dependency pins or `setup()` for a given cluster is routine, not exceptional. A file can also declare a strict subset of the canonical ids the standard sample carries — keys it doesn't list simply won't resolve to it, and `rootstock add` finds the right env for each id.
 
-When an entire hardware class needs a different dependency stack (a non-NVIDIA GPU, say), that belongs in its own sample folder alongside `nvidia_configs/`, rather than as a one-off edit to an existing file.
+When an entire hardware class needs a different dependency stack (a non-NVIDIA GPU, say), that belongs in its own sample folder alongside `nvidia_configs/`, rather than as a one-off edit to an existing file. When two machines *share one install* and only one of them needs the different stack, ship a variant env with a `CLUSTERS` restriction instead — see [`CLUSTERS` list](#clusters-list-optional--cluster-specific-variants-on-shared-installs).
 
 A `setup()`-only fix to an env that is already deployed does not require a rebuild at all — see [Hotfixing `setup()` without a rebuild](cluster-setup.md#hotfixing-setup-without-a-rebuild).
 

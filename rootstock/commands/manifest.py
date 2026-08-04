@@ -27,7 +27,7 @@ def cmd_manifest_show(args) -> int:
     else:
         print(f"Manifest: {root}/manifest.json")
         print(f"  Schema version:    {manifest.schema_version}")
-        print(f"  Cluster:           {manifest.cluster}")
+        print(f"  Clusters:          {', '.join(manifest.clusters)}")
         print(f"  Root:              {manifest.root}")
         print(f"  Rootstock version: {manifest.rootstock_version}")
         print(f"  Python version:    {manifest.python_version}")
@@ -40,6 +40,8 @@ def cmd_manifest_show(args) -> int:
         print(f"  Environments ({len(manifest.environments)}):")
         for name, env in manifest.environments.items():
             print(f"    {name}:")
+            if env.clusters is not None:
+                print(f"      Clusters:     {', '.join(env.clusters)} only")
             print(f"      Built at:     {env.built_at}")
             hash_desc = f"{env.source_hash[:20]}..." if env.source_hash else "none"
             print(f"      Source hash:  {hash_desc}")
@@ -90,9 +92,21 @@ def cmd_manifest_push(args) -> int:
 
 
 def cmd_manifest_init(args) -> int:
-    """Initialize manifest for a cluster."""
+    """Initialize manifest for the cluster(s) an install serves."""
+    from ..clusters import get_clusters_for_root
+
     root = get_root_or_exit(args)
-    cluster = args.cluster
+    # --cluster is repeatable for shared installs. Registry siblings of this
+    # root are appended automatically — forgetting one is exactly the
+    # mislabeled-manifest bug this exists to prevent (#208).
+    clusters = list(args.cluster)
+    siblings = [c for c in get_clusters_for_root(root) if c not in clusters]
+    if siblings:
+        print(
+            f"Note: this root also serves {', '.join(siblings)} per the "
+            f"cluster registry — including them."
+        )
+        clusters.extend(siblings)
     config = load_config()
 
     # Check if manifest already exists
@@ -112,12 +126,12 @@ def cmd_manifest_init(args) -> int:
 
     # Create and save manifest
     with manifest_lock(root):
-        manifest = create_manifest(root, cluster, config)
+        manifest = create_manifest(root, clusters, config)
         manifest = refresh_manifest_environments(manifest, root)
         save_manifest(manifest, root)
 
     print(f"Manifest initialized: {root}/manifest.json")
-    print(f"  Cluster: {cluster}")
+    print(f"  Clusters: {', '.join(clusters)}")
     print(f"  Environments: {len(manifest.environments)}")
 
     # Skip push if explicitly disabled

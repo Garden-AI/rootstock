@@ -43,7 +43,7 @@ def refreshes(monkeypatch) -> list:
 def save(root: Path, environments: dict[str, EnvironmentInfo]) -> None:
     from rootstock.config import UserConfig
 
-    manifest = create_manifest(root, "test", UserConfig(name="t", email="t@t.t"))
+    manifest = create_manifest(root, ["test"], UserConfig(name="t", email="t@t.t"))
     manifest.environments = environments
     save_manifest(manifest, root)
 

@@ -99,6 +99,7 @@ class RootstockServer:
         checkpoint_path: str | None = None,
         usage_client: str | None = "calculator",
         weights_capture_path: str | None = None,
+        cluster: str | None = None,
     ):
         """
         Initialize the server.
@@ -134,6 +135,9 @@ class RootstockServer:
                 path the moment the load completes (see weights_capture.py).
                 Verification uses this to keep per-checkpoint weight records
                 fresh in the manifest (#177).
+            cluster: Cluster name for the usage record. On a shared install
+                (sophia/polaris) the root reverse-maps to no single cluster,
+                so the caller's knowledge is the only honest source (#208).
         """
         if root is None:
             raise ValueError("root is required for pre-built environments")
@@ -154,6 +158,7 @@ class RootstockServer:
         self.setup_kwargs = setup_kwargs or {}
         self.usage_client = usage_client
         self.weights_capture_path = weights_capture_path
+        self.cluster = cluster
 
         self._server_socket: socket.socket | None = None
         self._client_socket: socket.socket | None = None
@@ -485,6 +490,7 @@ class RootstockServer:
             started_at=started_at,
             duration_s=duration_s,
             n_calculations=self._n_calculations,
+            cluster=self.cluster,
         )
 
     def stop(self):

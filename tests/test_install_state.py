@@ -45,7 +45,7 @@ def _env_record(source_hash: str = "sha256:abc") -> EnvironmentInfo:
 def _manifest(root: Path, environments: dict | None = None) -> Manifest:
     return Manifest(
         schema_version=SCHEMA_VERSION,
-        cluster="test",
+        clusters=["test"],
         root=str(root),
         maintainer=Maintainer(name="a", email="a@b.c"),
         rootstock_version="0.0.0",
