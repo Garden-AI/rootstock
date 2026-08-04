@@ -498,7 +498,7 @@ def test_select_never_picks_custom_manifest_entries(custom_root):
     m.environments["uma"].checkpoints["uma:custom"] = CheckpointInfo(
         fetched_at="2026-01-02T00:00:00Z"
     )
-    selected = smoke_module._select(custom_root, m, None, None, "test")
+    selected, _skips = smoke_module._select(custom_root, m, None, None, "test")
     assert all(name != "uma:custom" for _, name, _, _ in selected)
 
 

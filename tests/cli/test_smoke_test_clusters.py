@@ -1,12 +1,15 @@
 """``rootstock smoke-test`` on shared installs (#208).
 
 The command must refuse to guess which machine it is on, record outcomes
-under the named cluster without touching the sibling's records, and skip
-envs restricted to other clusters.
+under the named cluster without touching the sibling's records, and select
+checkpoint-first: each canonical id is tested in the env it resolves to on
+the current cluster, so a cluster-specific variant shadows the universal
+env per id.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -23,43 +26,75 @@ from rootstock.manifest import (
 )
 
 SOPHIA_STAMP = "2026-07-01T00:00:00+00:00"
+FETCH_STAMP = "2026-01-02T00:00:00Z"
+
+MACE_SOURCE = """CHECKPOINTS = {"mace-mp-0-small": "small", "mace-mp-0-medium": "medium"}
+
+def setup(checkpoint, device="cuda"):
+    return None
+"""
+
+MACE_POLARIS_SOURCE = """CLUSTERS = ["polaris"]
+CHECKPOINTS = {"mace-mp-0-medium": "medium"}
+
+def setup(checkpoint, device="cuda"):
+    return None
+"""
+
+SEVENNET_SOURCE = """CLUSTERS = ["sophia"]
+CHECKPOINTS = {"sevennet-0": "0"}
+
+def setup(checkpoint, device="cuda"):
+    return None
+"""
 
 
-@pytest.fixture
-def shared_root(tmp_path: Path, monkeypatch) -> Path:
-    """A sophia/polaris install: one universal env with a checkpoint already
-    verified on sophia, and one sophia-only env."""
-    root = tmp_path
-    for env in ("mace", "sevennet"):
-        (root / "envs" / env / "bin").mkdir(parents=True)
-        (root / "envs" / env / "bin" / "python").touch()
+def _install(root: Path, name: str, source: str) -> None:
+    env_dir = root / "envs" / name
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").touch()
+    (env_dir / "env_source.py").write_text(source)
 
-    manifest = create_manifest(root, ["sophia", "polaris"], UserConfig(name="t", email="t@t.t"))
-    manifest.environments["mace"] = EnvironmentInfo(
+
+def _env_info(clusters: list[str] | None = None, checkpoints=None) -> EnvironmentInfo:
+    return EnvironmentInfo(
         built_at="2026-01-01T00:00:00Z",
         source_hash="sha256:abc",
         source="",
         python_requires=">=3.10",
         dependencies={},
+        clusters=clusters,
+        checkpoints=checkpoints or {},
+    )
+
+
+@pytest.fixture
+def shared_root(tmp_path: Path, monkeypatch) -> Path:
+    """A sophia/polaris install: universal mace (small + medium fetched,
+    medium already verified on sophia), a polaris-only variant overriding
+    medium (built, but with no manifest records yet), and a sophia-only
+    sevennet."""
+    root = tmp_path
+    _install(root, "mace", MACE_SOURCE)
+    _install(root, "mace-polaris", MACE_POLARIS_SOURCE)
+    _install(root, "sevennet", SEVENNET_SOURCE)
+
+    manifest = create_manifest(root, ["sophia", "polaris"], UserConfig(name="t", email="t@t.t"))
+    manifest.environments["mace"] = _env_info(
         checkpoints={
+            "mace-mp-0-small": CheckpointInfo(fetched_at=FETCH_STAMP),
             "mace-mp-0-medium": CheckpointInfo(
-                fetched_at="2026-01-02T00:00:00Z",
+                fetched_at=FETCH_STAMP,
                 verifications={
                     "sophia": VerificationRecord(verified_at=SOPHIA_STAMP, verified_device="cuda")
                 },
             ),
         },
     )
-    manifest.environments["sevennet"] = EnvironmentInfo(
-        built_at="2026-01-01T00:00:00Z",
-        source_hash="sha256:def",
-        source="",
-        python_requires=">=3.10",
-        dependencies={},
+    manifest.environments["mace-polaris"] = _env_info(clusters=["polaris"])
+    manifest.environments["sevennet"] = _env_info(
         clusters=["sophia"],
-        checkpoints={
-            "sevennet-0": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z"),
-        },
+        checkpoints={"sevennet-0": CheckpointInfo(fetched_at=FETCH_STAMP)},
     )
     save_manifest(manifest, root)
 
@@ -117,10 +152,15 @@ def test_polaris_run_records_under_polaris_only(shared_root, monkeypatch):
     rc = cmd_smoke_test(_args(shared_root, cluster="polaris"))
     assert rc == 0
 
-    ckpt = load_manifest(shared_root).environments["mace"].checkpoints["mace-mp-0-medium"]
-    assert ckpt.verification("polaris").verified_at is not None
+    manifest = load_manifest(shared_root)
+    # The overridden id lands on the variant's record (checkpoint-first);
+    # the universal env's record gains no polaris entry.
+    variant = manifest.environments["mace-polaris"].checkpoints["mace-mp-0-medium"]
+    assert variant.verification("polaris").verified_at is not None
+    medium = manifest.environments["mace"].checkpoints["mace-mp-0-medium"]
+    assert medium.verification("polaris").verified_at is None
     # sophia's earlier result must survive the polaris run untouched.
-    assert ckpt.verification("sophia").verified_at == SOPHIA_STAMP
+    assert medium.verification("sophia").verified_at == SOPHIA_STAMP
 
 
 def test_polaris_failure_does_not_unverify_sophia(shared_root, monkeypatch):
@@ -128,10 +168,83 @@ def test_polaris_failure_does_not_unverify_sophia(shared_root, monkeypatch):
     rc = cmd_smoke_test(_args(shared_root, cluster="polaris"))
     assert rc == 1
 
-    ckpt = load_manifest(shared_root).environments["mace"].checkpoints["mace-mp-0-medium"]
-    assert ckpt.verification("polaris").verified_at is None
-    assert ckpt.verification("polaris").last_error == "smoke-test: CUDA OOM"
-    assert ckpt.verification("sophia").verified_at == SOPHIA_STAMP
+    manifest = load_manifest(shared_root)
+    variant = manifest.environments["mace-polaris"].checkpoints["mace-mp-0-medium"]
+    assert variant.verification("polaris").verified_at is None
+    assert variant.verification("polaris").last_error == "smoke-test: CUDA OOM"
+    medium = manifest.environments["mace"].checkpoints["mace-mp-0-medium"]
+    assert medium.verification("sophia").verified_at == SOPHIA_STAMP
+
+
+def test_variant_shadows_universal_per_id(shared_root, monkeypatch):
+    """polaris tests the overridden id via the variant only; the id the
+    variant doesn't declare still runs via the universal env. sophia is
+    untouched by the variant."""
+    calls = _stub_verify(monkeypatch)
+    cmd_smoke_test(_args(shared_root, cluster="polaris"))
+    assert sorted(calls) == [
+        ("mace", "mace-mp-0-small"),
+        ("mace-polaris", "mace-mp-0-medium"),
+    ]
+
+    calls.clear()
+    cmd_smoke_test(_args(shared_root, cluster="sophia"))
+    assert sorted(calls) == [
+        ("mace", "mace-mp-0-medium"),
+        ("mace", "mace-mp-0-small"),
+        ("sevennet", "sevennet-0"),
+    ]
+
+
+def test_variant_inherits_fetched_at_from_universal_record(shared_root, monkeypatch):
+    """The variant had no record of the id at all — the shared cache means
+    'fetched anywhere = fetched', and the new record inherits the donor's
+    fetch stamp instead of reading 'verified but never fetched'."""
+    _stub_verify(monkeypatch)
+    assert cmd_smoke_test(_args(shared_root, cluster="polaris")) == 0
+
+    variant = load_manifest(shared_root).environments["mace-polaris"]
+    record = variant.checkpoints["mace-mp-0-medium"]
+    assert record.fetched_at == FETCH_STAMP
+    assert record.verification("polaris").verified_at is not None
+
+
+def test_env_filter_means_resolves_to_that_env(shared_root, monkeypatch):
+    calls = _stub_verify(monkeypatch)
+    cmd_smoke_test(_args(shared_root, cluster="polaris", env="mace"))
+    # medium resolves to the variant on polaris, so --env mace keeps only small.
+    assert calls == [("mace", "mace-mp-0-small")]
+
+    calls.clear()
+    cmd_smoke_test(_args(shared_root, cluster="polaris", env="mace-polaris"))
+    assert calls == [("mace-polaris", "mace-mp-0-medium")]
+
+
+def test_ambiguous_id_is_skipped_not_fatal(shared_root, monkeypatch, capsys):
+    """Two same-specificity envs declaring one id is an authoring error; the
+    nightly run must report it and keep testing everything else."""
+    dup = 'CHECKPOINTS = {"dup-0": "0"}\n\ndef setup(checkpoint, device="cuda"):\n    return None\n'
+    _install(shared_root, "dup-a", dup)
+    _install(shared_root, "dup-b", dup)
+    manifest = load_manifest(shared_root)
+    manifest.environments["dup-a"] = _env_info(
+        checkpoints={"dup-0": CheckpointInfo(fetched_at=FETCH_STAMP)}
+    )
+    manifest.environments["dup-b"] = _env_info()
+    save_manifest(manifest, shared_root)
+
+    _stub_verify(monkeypatch)
+    rc = cmd_smoke_test(_args(shared_root, cluster="polaris", json=True))
+    assert rc == 0  # skips never affect the exit code
+
+    parsed = json.loads(capsys.readouterr().out.strip())
+    assert {r["checkpoint"] for r in parsed["results"]} == {
+        "mace-mp-0-small",
+        "mace-mp-0-medium",
+    }
+    (skip,) = parsed["skipped"]
+    assert skip["checkpoint"] == "dup-0"
+    assert "several envs" in skip["reason"]
 
 
 def test_cluster_restricted_env_is_skipped_elsewhere(shared_root, monkeypatch):
@@ -150,13 +263,8 @@ def test_single_cluster_install_needs_no_flag(tmp_path, monkeypatch):
     (root / "envs" / "mace" / "bin").mkdir(parents=True)
     (root / "envs" / "mace" / "bin" / "python").touch()
     manifest = create_manifest(root, ["della"], UserConfig(name="t", email="t@t.t"))
-    manifest.environments["mace"] = EnvironmentInfo(
-        built_at="2026-01-01T00:00:00Z",
-        source_hash="sha256:abc",
-        source="",
-        python_requires=">=3.10",
-        dependencies={},
-        checkpoints={"mace-mp-0-medium": CheckpointInfo(fetched_at="2026-01-02T00:00:00Z")},
+    manifest.environments["mace"] = _env_info(
+        checkpoints={"mace-mp-0-medium": CheckpointInfo(fetched_at=FETCH_STAMP)}
     )
     save_manifest(manifest, root)
     monkeypatch.setattr(

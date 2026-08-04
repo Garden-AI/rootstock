@@ -1,5 +1,11 @@
 """``rootstock smoke-test`` — re-verify checkpoints already in the manifest.
 
+Selection is checkpoint-first (#208): each canonical id declared by a built
+env serving this cluster is resolved with the same cluster-aware resolution
+the calculator uses, and tested in the env it resolves to — so a
+cluster-specific variant shadows the universal env per id, exactly as users
+experience it.
+
 Besides re-verifying every fetched canonical checkpoint, each run exercises
 the custom-weights path (#200): for every ``<family>:custom`` entry an env
 declares, the weights file a same-family canonical checkpoint already has on
@@ -19,10 +25,13 @@ from pathlib import Path
 
 from ..environment import (
     CUSTOM_CHECKPOINT_SUFFIX,
+    CheckpointNotFoundError,
+    find_env_for_checkpoint,
     is_custom_checkpoint,
     parse_checkpoints_dict,
     parse_clusters_list,
     parse_custom_checkpoint_ids,
+    resolve_checkpoint,
 )
 from ..manifest import (
     CheckpointInfo,
@@ -62,19 +71,115 @@ def _serves_here(root: Path, env_name: str, env: EnvironmentInfo, cluster: str) 
     return env.serves(cluster)
 
 
+def _declared_ids(root: Path, env_name: str) -> list[str] | None:
+    """Canonical ids the env's built source declares, in declaration order —
+    or ``None`` when there is no source on disk to parse (a pre-source-copy
+    build), telling the caller to fall back to the env's manifest records.
+    A malformed source contributes nothing, matching
+    ``list_declared_checkpoints``."""
+    source = root / "envs" / env_name / "env_source.py"
+    if not source.exists():
+        return None
+    try:
+        return list(parse_checkpoints_dict(source))
+    except ValueError:
+        return []
+
+
+def _fetched_record(manifest: Manifest, ckpt_id: str) -> CheckpointInfo | None:
+    """Any env's record showing ``ckpt_id`` was fetched. The weights cache is
+    shared and keyed by checkpoint, not env — one env's download serves them
+    all — so fetched anywhere is fetched."""
+    for env in manifest.environments.values():
+        record = env.checkpoints.get(ckpt_id)
+        if record is not None and record.fetched_at:
+            return record
+    return None
+
+
+def _resolves_to(root: Path, ckpt_id: str, cluster: str, env_name: str) -> bool:
+    """Whether ``ckpt_id`` resolves to ``env_name`` on ``cluster``."""
+    try:
+        return find_env_for_checkpoint(root, ckpt_id, cluster)[0] == env_name
+    except CheckpointNotFoundError:
+        return False
+
+
 def _select(
     root: Path, manifest, env_filter: str | None, checkpoint_filter: str | None, cluster: str
-) -> list[tuple[str, str, EnvironmentInfo, CheckpointInfo]]:
-    """Pick which (env, checkpoint) pairs to test."""
+) -> tuple[list[tuple[str, str, EnvironmentInfo, CheckpointInfo]], list[tuple[str, str, str]]]:
+    """Pick which (env, checkpoint) pairs to test — checkpoint-first (#208).
+
+    The unit of testing is the canonical id, not the env record: collect the
+    ids declared by built envs serving this cluster, resolve each one exactly
+    like the calculator would (a cluster-specific variant beats the universal
+    env), and test it in the env it resolves to — also the env whose record
+    the outcome lands in. Per-id shadowing falls out: the variant's override
+    is what gets tested on its cluster, while ids the variant doesn't declare
+    keep being tested via the universal env. ``env_filter`` therefore means
+    "ids that resolve to that env on this cluster".
+
+    An id counts as fetched when *any* env's record says so (the cache is
+    shared, keyed by checkpoint); the resolved env's record inherits the
+    donor's ``fetched_at`` so it never reads "verified but never fetched".
+    Ids fetched nowhere are skipped — smoke-test never downloads.
+
+    Envs built before sources were copied into the env dir have nothing to
+    parse; their manifest records are tested in place (the old env-first
+    walk).
+
+    Returns the selection plus ``(env, checkpoint, reason)`` notes for ids
+    that fail to resolve (e.g. declared by two same-specificity envs) — a
+    nightly run reports those and keeps testing everything else.
+    """
     selected: list[tuple[str, str, EnvironmentInfo, CheckpointInfo]] = []
+    skipped: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    sourceless: list[tuple[str, EnvironmentInfo]] = []
+
     for env_name, env in manifest.environments.items():
-        if env_filter is not None and env_name != env_filter:
-            continue
         if not _serves_here(root, env_name, env, cluster):
             # A cluster-restricted variant can only be verified by a machine
             # it serves (#208); its own cluster's chain covers it.
             continue
+        declared = _declared_ids(root, env_name)
+        if declared is None:
+            sourceless.append((env_name, env))
+            continue
+        for ckpt_id in declared:
+            if ckpt_id in seen:
+                continue
+            seen.add(ckpt_id)
+            if checkpoint_filter is not None and ckpt_id != checkpoint_filter:
+                continue
+            try:
+                resolved, _ = find_env_for_checkpoint(root, ckpt_id, cluster)
+            except CheckpointNotFoundError as exc:
+                if env_filter is None or env_name == env_filter:
+                    skipped.append((env_name, ckpt_id, str(exc)))
+                continue
+            if env_filter is not None and resolved != env_filter:
+                continue
+            host = manifest.environments.get(resolved)
+            if host is None:
+                skipped.append((resolved, ckpt_id, "resolved env is not in the manifest"))
+                continue
+            donor = _fetched_record(manifest, ckpt_id)
+            if donor is None:
+                # Smoke-test never downloads. Skip checkpoints that have never
+                # been fetched by any env.
+                continue
+            record = host.checkpoints.setdefault(ckpt_id, CheckpointInfo())
+            if record.fetched_at is None:
+                record.fetched_at = donor.fetched_at
+            selected.append((resolved, ckpt_id, host, record))
+
+    for env_name, env in sourceless:
+        if env_filter is not None and env_name != env_filter:
+            continue
         for ckpt_name, ckpt in env.checkpoints.items():
+            if ckpt_name in seen:
+                continue  # already tested via the env it resolves to
             if checkpoint_filter is not None and ckpt_name != checkpoint_filter:
                 continue
             if is_custom_checkpoint(ckpt_name):
@@ -82,10 +187,10 @@ def _select(
                 # no shipped weights for the canonical loop to verify.
                 continue
             if ckpt.fetched_at is None:
-                # Smoke-test never downloads. Skip checkpoints that have never been fetched.
                 continue
             selected.append((env_name, ckpt_name, env, ckpt))
-    return selected
+
+    return selected, skipped
 
 
 @dataclass(frozen=True)
@@ -120,49 +225,78 @@ def _plan_custom_legs(
     ckpt_filter: str | None,
     cluster: str,
 ) -> tuple[list[CustomLeg], list[tuple[str, str, str]]]:
-    """Plan one weights= leg per ``<family>:custom`` entry declared by a
-    manifest env's built source (#200).
+    """Plan one weights= leg per ``<family>:custom`` id declared by a built
+    source serving this cluster (#200).
 
-    The base is the first canonical id (in CHECKPOINTS declaration order —
-    env authors lead with the family's plainest-loading checkpoint) of the
-    same family that the manifest records as fetched. Returns the legs plus
+    Like the canonical selection, planning is checkpoint-first (#208): each
+    custom id is resolved for this cluster, and the leg runs in — and is
+    recorded on — the env it resolves to. The base is the first canonical id
+    (in the resolved env's CHECKPOINTS declaration order — env authors lead
+    with the family's plainest-loading checkpoint) of the same family that
+    is fetched anywhere and resolves to the same env, so the canonical loop
+    is guaranteed to have produced its baseline. Returns the legs plus
     ``(env, custom_id, reason)`` for entries that can't run this time.
     """
     legs: list[CustomLeg] = []
     skipped: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
     for env_name, env in manifest.environments.items():
-        if env_filter is not None and env_name != env_filter:
-            continue
         if not _serves_here(root, env_name, env, cluster):
             continue
         source = Path(root) / "envs" / env_name / "env_source.py"
         if not source.exists():
             continue
         try:
-            declared = parse_checkpoints_dict(source)
             custom_ids = parse_custom_checkpoint_ids(source)
         except ValueError:
             continue
-        families = [c.removesuffix(CUSTOM_CHECKPOINT_SUFFIX) for c in custom_ids]
-        fetched = [
-            ckpt_id
-            for ckpt_id in declared
-            if (record := env.checkpoints.get(ckpt_id)) and record.fetched_at
-        ]
-        for custom_id, family in zip(custom_ids, families):
+        for custom_id in custom_ids:
+            if custom_id in seen:
+                continue
+            seen.add(custom_id)
             if ckpt_filter is not None and ckpt_filter != custom_id:
                 continue
-            base = next((c for c in fetched if _family_of(c, families) == family), None)
+            try:
+                resolved = resolve_checkpoint(root, custom_id, cluster).env_name
+            except CheckpointNotFoundError as exc:
+                if env_filter is None or env_name == env_filter:
+                    skipped.append((env_name, custom_id, str(exc)))
+                continue
+            if env_filter is not None and resolved != env_filter:
+                continue
+            if resolved not in manifest.environments:
+                skipped.append((resolved, custom_id, "resolved env is not in the manifest"))
+                continue
+            host_source = Path(root) / "envs" / resolved / "env_source.py"
+            try:
+                declared = parse_checkpoints_dict(host_source)
+                families = [
+                    c.removesuffix(CUSTOM_CHECKPOINT_SUFFIX)
+                    for c in parse_custom_checkpoint_ids(host_source)
+                ]
+            except (OSError, ValueError):
+                continue
+            family = custom_id.removesuffix(CUSTOM_CHECKPOINT_SUFFIX)
+            base = next(
+                (
+                    c
+                    for c in declared
+                    if _family_of(c, families) == family
+                    and _fetched_record(manifest, c) is not None
+                    and _resolves_to(root, c, cluster, resolved)
+                ),
+                None,
+            )
             if base is None:
                 skipped.append(
                     (
-                        env_name,
+                        resolved,
                         custom_id,
                         f"no fetched '{family}' checkpoint to borrow weights from",
                     )
                 )
                 continue
-            legs.append(CustomLeg(env_name, custom_id, base))
+            legs.append(CustomLeg(resolved, custom_id, base))
     return legs, skipped
 
 
@@ -212,14 +346,17 @@ def cmd_smoke_test(args) -> int:
 
     custom_legs, custom_skips = _plan_custom_legs(root, manifest, env_filter, ckpt_filter, cluster)
 
-    selected = _select(root, manifest, env_filter, ckpt_filter, cluster)
+    selected, resolve_skips = _select(root, manifest, env_filter, ckpt_filter, cluster)
     if ckpt_filter is not None and is_custom_checkpoint(ckpt_filter):
         # A ':custom' filter matches no canonical row; run just the base
         # checkpoint(s) the leg needs for its comparison.
         needed = {(leg.env_name, leg.base) for leg in custom_legs}
         selected = [
-            t for t in _select(root, manifest, env_filter, None, cluster) if (t[0], t[1]) in needed
+            t
+            for t in _select(root, manifest, env_filter, None, cluster)[0]
+            if (t[0], t[1]) in needed
         ]
+    custom_skips = resolve_skips + custom_skips
 
     if not selected and not custom_legs:
         if json_out:
@@ -253,7 +390,7 @@ def cmd_smoke_test(args) -> int:
     # loaded* manifest in one locked cycle afterwards — mutating the manifest
     # loaded before the loop and saving it at the end would silently revert
     # anything a co-maintainer wrote in between.
-    outcomes: list[tuple[str, str, bool, str | None, list[dict] | None]] = []
+    outcomes: list[tuple[str, str, bool, str | None, list[dict] | None, str | None]] = []
 
     # The custom legs reuse the canonical loop's work: its results are the
     # comparison baseline, and its fresh weight capture names the file on
@@ -284,7 +421,7 @@ def cmd_smoke_test(args) -> int:
             )
             weight_files = read_weights_capture(capture_path)
         elapsed = time.monotonic() - start
-        outcomes.append((env_name, ckpt_name, ok, err, weight_files))
+        outcomes.append((env_name, ckpt_name, ok, err, weight_files, ckpt.fetched_at))
 
         if (env_name, ckpt_name) in base_keys:
             baselines[(env_name, ckpt_name)] = run_results
@@ -411,11 +548,17 @@ def cmd_smoke_test(args) -> int:
     with manifest_lock(root):
         fresh = load_manifest(root)
         if fresh is not None:
-            for env_name, ckpt_name, ok, err, weight_files in outcomes:
+            for env_name, ckpt_name, ok, err, weight_files, fetched_at in outcomes:
                 env_record = fresh.environments.get(env_name)
-                ckpt_record = env_record.checkpoints.get(ckpt_name) if env_record else None
-                if ckpt_record is None:
-                    continue  # env/checkpoint removed while we were testing
+                if env_record is None:
+                    continue  # env removed while we were testing
+                # Created on first pass when the resolved env has no record of
+                # an id it now hosts (a variant tested checkpoint-first for
+                # the first time, #208); the donor's fetch stamp rides along
+                # so the record never reads "verified but never fetched".
+                ckpt_record = env_record.checkpoints.setdefault(ckpt_name, CheckpointInfo())
+                if ckpt_record.fetched_at is None:
+                    ckpt_record.fetched_at = fetched_at
                 if ok:
                     ckpt_record.verifications[cluster] = VerificationRecord(
                         verified_at=now_iso(), verified_device=device

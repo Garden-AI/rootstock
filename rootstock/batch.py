@@ -222,7 +222,10 @@ def plan_sync(
 
     # ---- cluster-restricted envs (#208) --------------------------------------
     # Only a machine an env serves can verify it; builds and downloads are
-    # shared artifacts and proceed regardless.
+    # shared artifacts and proceed regardless. This skip is env-level and
+    # conservative; smoke-test resolves per id (checkpoint-first), which is
+    # the eventual model here too — a universal env's overridden ids would
+    # then verify via the variant instead of being planned twice.
     unservable: set[str] = set()
     if cluster is not None:
         for name in sorted(desired):
