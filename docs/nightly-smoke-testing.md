@@ -56,7 +56,8 @@ Two recipes with placeholders:
 
 3. **Verify a full cycle.** After the first run finishes, confirm:
    - a next run is queued — `squeue --me -n rootstock-nightly` (SLURM) /
-     `qstat -u $USER` (PBS) shows a pending/queued job, and
+     `qstat -u $USER` (PBS) shows a pending job (on PBS a job with a future
+     start time sits in state `W`, waiting — not `Q`), and
    - the manifest landed — `rootstock status` shows fresh `verified_at` times.
 
 ## How the self-scheduling works
@@ -85,9 +86,13 @@ Remove the stop file to allow a fresh kickoff later.
 ### Testing without waiting a week
 
 ```bash
-RESCHEDULE_BEGIN=now+3minutes sbatch scripts/nightly_smoke_test.sbatch   # SLURM
-qsub -a $(date -d "+3 minutes" +%m%d%H%M) scripts/nightly_smoke_test.pbs  # PBS
+RESCHEDULE_BEGIN=now+3minutes sbatch scripts/nightly_smoke_test.sbatch                    # SLURM
+qsub -v RESCHEDULE_AT=$(date -d "+3 minutes" +%m%d%H%M) scripts/nightly_smoke_test.pbs    # PBS
 ```
+
+Both override when generation 1 schedules generation 2, which is the handoff
+worth testing. (On PBS, `qsub -a <time>` would only delay generation 1's own
+start and exercises nothing about the chain.)
 
 ## Knobs
 
