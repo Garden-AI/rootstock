@@ -7,7 +7,10 @@ tree once, but run the compute-node check on both machines.
 ## 0. Setup
 
 ```bash
-# sophia/polaris:
+# sophia/polaris — audit the serving copy users resolve (owned by the
+# catalyst project, not us; findings there go to its owner, not setup-perms):
+#   ROOT=/lus/eagle/projects/catalyst/world-shared/rootstock    GROUP=<catalyst project group>
+# sophia/polaris build root (ours; admin jobs only, not world-readable by design):
 #   ROOT=/eagle/projects/Rootstock/rootstock    GROUP=Rootstock
 # delta:
 #   ROOT=/work/hdd/data/rootstock      GROUP=<delta project group>
