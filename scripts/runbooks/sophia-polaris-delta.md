@@ -7,9 +7,10 @@ tree once, but run the compute-node check on both machines.
 ## 0. Setup
 
 ```bash
-# sophia/polaris — audit the serving copy users resolve (owned by the
-# catalyst project, not us; findings there go to its owner, not setup-perms):
-#   ROOT=/lus/eagle/projects/catalyst/world-shared/rootstock    GROUP=<catalyst project group>
+# sophia/polaris — audit the serving copy users resolve (our mirror under the
+# Garden-Ai project; group-scoped, so users need Garden-Ai membership — fix
+# findings by re-running scripts/mirror_alcf.sh rather than setup-perms):
+#   ROOT=/lus/eagle/projects/Garden-Ai/rootstock    GROUP=<Garden-Ai project group>
 # sophia/polaris build root (ours; admin jobs only, not world-readable by design):
 #   ROOT=/eagle/projects/Rootstock/rootstock    GROUP=Rootstock
 # delta:
