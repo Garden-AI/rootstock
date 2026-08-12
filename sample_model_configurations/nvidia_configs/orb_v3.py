@@ -1,5 +1,7 @@
 # /// script
-# requires-python = ">=3.12"
+# # <3.13: orb-models pins dm-tree==0.1.8, which has no cp313 wheel and whose
+# # sdist doesn't compile against modern GCC (vendored abseil).
+# requires-python = ">=3.12,<3.13"
 # dependencies = [
 #     "orb-models>=0.6.2",
 #     "ase>=3.25",
@@ -18,11 +20,13 @@
 # url = "https://download.pytorch.org/whl/cu128"
 # explicit = true
 # ///
-"""Orb v3 env — Orbital Materials' Orb v3 universal potentials.
+"""Orb v3 env — the primary orb env, Orbital Materials' Orb v3 potentials.
 
-Separate from orb.py because orb-models>=0.5 changed the loader API
-(returns a tuple, requires `atoms_adapter` on ORBCalculator, moved calculator
-import path) and 0.6.x bumped the Python floor to 3.12 and torch to 2.8.
+Separate from orb.py because the v3 loaders need orb-models>=0.6.2, which
+bumped the Python floor to 3.12 and torch to 2.8; the v3 loader API also
+differs (returns a tuple, requires `atoms_adapter` on ORBCalculator, imports
+the calculator from forcefield.inference). orb.py (v2) survives only for
+orb-d3-v2, the dispersion-corrected variant with no v3 equivalent.
 """
 
 import os
@@ -32,15 +36,19 @@ from pathlib import Path
 
 CHECKPOINTS = {
     "orb-v3-conservative-inf-omat": "orb-v3-conservative-inf-omat",
-    "orb-v3-conservative-20-omat":  "orb-v3-conservative-20-omat",
-    "orb-v3-direct-inf-omat":       "orb-v3-direct-inf-omat",
-    "orb-v3-direct-20-omat":        "orb-v3-direct-20-omat",
-    "orb-v3-conservative-inf-mpa":  "orb-v3-conservative-inf-mpa",
-    "orb-v3-conservative-20-mpa":   "orb-v3-conservative-20-mpa",
-    "orb-v3-direct-inf-mpa":        "orb-v3-direct-inf-mpa",
-    "orb-v3-direct-20-mpa":         "orb-v3-direct-20-mpa",
-    "orb-v3-conservative-omol":     "orb-v3-conservative-omol",
-    "orb-v3-direct-omol":           "orb-v3-direct-omol",
+    "orb-v3-conservative-20-omat": "orb-v3-conservative-20-omat",
+    "orb-v3-direct-inf-omat": "orb-v3-direct-inf-omat",
+    "orb-v3-direct-20-omat": "orb-v3-direct-20-omat",
+    "orb-v3-conservative-inf-mpa": "orb-v3-conservative-inf-mpa",
+    "orb-v3-conservative-20-mpa": "orb-v3-conservative-20-mpa",
+    "orb-v3-direct-inf-mpa": "orb-v3-direct-inf-mpa",
+    "orb-v3-direct-20-mpa": "orb-v3-direct-20-mpa",
+    # The omol ids (orb-v3-{conservative,direct}-omol) are dropped from the
+    # catalog 2026-07-30: they had been failing verify on every cluster since
+    # 2026-05. Re-add once the failure is understood.
+    # Your own fine-tuned v3 weights: pair with weights= (loaded via
+    # setup_from_path).
+    "orb-v3:custom": None,
 }
 
 
@@ -75,7 +83,7 @@ def _fetch(url: str, dest: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def setup(checkpoint: str, device: str = "cuda", precision: str = "float32-high"):
+def setup(checkpoint: str, device: str = "cuda", precision: str = "float32-high", **kwargs):
     import torch
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.inference.calculator import ORBCalculator
@@ -97,4 +105,35 @@ def setup(checkpoint: str, device: str = "cuda", precision: str = "float32-high"
     orbff, atoms_adapter = load_fn(
         weights_path=str(weights), device=torch.device(device), precision=precision
     )
-    return ORBCalculator(orbff, atoms_adapter=atoms_adapter, device=torch.device(device))
+    return ORBCalculator(orbff, atoms_adapter=atoms_adapter, device=torch.device(device), **kwargs)
+
+
+def setup_from_path(
+    path: str,
+    device: str = "cuda",
+    arch: str = "orb-v3-conservative-inf-omat",
+    precision: str = "float32-high",
+    **kwargs,
+):
+    # Custom checkpoints (`:custom` ids with user weights). A weights file doesn't say
+    # which orb architecture produced it, so `arch` names the pretrained
+    # loader to instantiate — pass the right one at call time
+    # (setup_kwargs={"arch": ...} / --kwarg arch=...). Handing the loader a
+    # local path also means no network and no cached_path locking (see setup()).
+    import torch
+    from orb_models.forcefield import pretrained
+    from orb_models.forcefield.inference.calculator import ORBCalculator
+
+    fn_name = arch.replace("-", "_")
+    try:
+        load_fn = getattr(pretrained, fn_name)
+    except AttributeError:
+        raise ValueError(
+            f"unknown orb architecture {arch!r}; expected a loader name from "
+            f"orb_models.forcefield.pretrained, e.g. orb-v3-conservative-inf-omat"
+        ) from None
+
+    orbff, atoms_adapter = load_fn(
+        weights_path=path, device=torch.device(device), precision=precision
+    )
+    return ORBCalculator(orbff, atoms_adapter=atoms_adapter, device=torch.device(device), **kwargs)

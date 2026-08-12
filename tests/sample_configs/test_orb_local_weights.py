@@ -147,8 +147,8 @@ def _install_fake_orb_models(monkeypatch, env_name: str, calls: dict):
         return "orbff"
 
     pretrained = types.ModuleType("orb_models.forcefield.pretrained")
-    # One loader per canonical id, orb-models style (orb_v2, orb_v3_..., etc.).
-    for fn_name in ("orb_v2", "orb_v3_conservative_inf_omat"):
+    # One loader per canonical id, orb-models style (orb_d3_v2, orb_v3_..., etc.).
+    for fn_name in ("orb_d3_v2", "orb_v3_conservative_inf_omat"):
         setattr(pretrained, fn_name, load_fn)
 
     class ORBCalculator:
@@ -177,7 +177,7 @@ def _install_fake_orb_models(monkeypatch, env_name: str, calls: dict):
         monkeypatch.setitem(sys.modules, name, module)
 
 
-_FIRST_CHECKPOINT = {"orb": "orb-v2", "orb_v3": "orb-v3-conservative-inf-omat"}
+_FIRST_CHECKPOINT = {"orb": "orb-d3-v2", "orb_v3": "orb-v3-conservative-inf-omat"}
 
 
 @pytest.fixture(params=["orb", "orb_v3"])

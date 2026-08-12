@@ -11,39 +11,45 @@ sample_model_configurations/
 │   ├── probe.py
 │   ├── failure_modes.md
 │   └── README.md
-└── nvidia_configs/     # configs targeting NVIDIA GPUs
-    ├── allegro.py      # Allegro (NequIP family, custom model required)
+└── nvidia_configs/     # configs targeting NVIDIA GPUs (the release catalog)
     ├── allscaip.py     # AllScAIP (FAIRChem scalable-attention, OMol25)
     ├── ani.py          # ANI-2x / ANI-1ccx / ANI-1x (organic molecules)
-    ├── dimenet.py      # DimeNet++ (OC20 catalysis)
+    ├── chgnet.py       # CHGNet (inorganic, charge-informed)
     ├── equiformer.py   # EquiformerV2 (OC20 catalysis)
     ├── escn.py         # eSCN (OC20 catalysis)
     ├── esen.py         # eSEN — FAIRChem single-task (OMol25/OC25/ODAC25)
-    ├── gemnet.py       # GemNet-OC / GemNet-dT (OC20 catalysis)
-    ├── mace.py         # MACE-MP-0/Large + MACE-OFF23 (one mace-torch env)
-    ├── mace_polar.py   # MACE-POLAR-1 (electrostatic MACE, git-main + graph-longrange)
+    ├── grace.py        # GRACE foundation models (TensorFlow, via tensorpotential)
+    ├── mace.py         # MACE foundations: MP-0, OFF23, MPA-0, MATPES, MH-1, OMOL
+    ├── mace_polar.py   # MACE-POLAR-1 (electrostatic MACE + graph-longrange)
     ├── mattersim.py    # MatterSim-v1 (Microsoft universal)
-    ├── nequip.py       # NequIP (system-specific, deployed model required)
-    ├── orb.py          # Orb v2/v3 (Orbital Materials universal)
-    ├── painn.py        # PaiNN (OC20 catalysis)
-    ├── schnet.py       # SchNet (OC20 catalysis)
-    ├── scn.py          # SCN (OC20 catalysis)
-    ├── tensornet.py    # TensorNet (MatPES PBE/r2SCAN via matgl 2.x+HF)
-    ├── uma.py          # UMA — FAIRChem multi-task (OMAT/OC/ODAC)
-    └── chgnet.py       # CHGNet (inorganic, charge-informed)
+    ├── orb.py          # Orb v2 (kept for orb-d3-v2 only; v3 is primary)
+    ├── orb_v3.py       # Orb v3 (Orbital Materials universal)
+    ├── pet.py          # UPET / PET-MAD successor (lab-cosmo)
+    ├── sevennet.py     # SevenNet (incl. multi-fidelity 7net-omni/mf-ompa)
+    ├── tace.py         # TACE/TECE (git-pinned, Matbench Discovery submission)
+    ├── tensornet.py    # TensorNet (MatPES PBE via matgl)
+    └── uma.py          # UMA — FAIRChem multi-task (OMAT/OC/ODAC)
 ```
 
 Other hardware targets (AMD, Apple Silicon, CPU-only) would each get their
 own `*_configs/` subfolder when needed. The `_agent/` tooling is
 hardware-agnostic.
 
+Pruned 2026-07-30 (still on some clusters until their next cleanup): the
+legacy fairchem-core 1.x OC20 baselines beyond escn/equiformer (dimenet,
+gemnet, painn, schnet, scn), the BYO-weights-only envs with no shippable
+checkpoints (allegro, nequip — the `<family>:custom` mechanism is the
+supported path for user weights now), and orb v2's superseded checkpoints
+(orb-v2, orb-mptraj-only-v2).
+
 > **Python floor caveat.** rootstock itself requires Python >=3.11, and the
 > worker inside a built env runs rootstock — so every config's
-> `requires-python` must admit 3.11. The fairchem-core 1.x configs (dimenet,
-> equiformer, escn, gemnet, painn, schnet, scn) pin a single minor
-> (`>=3.11,<3.12`) because their torch-scatter/sparse/cluster wheels come
-> prebuilt per Python minor from the pinned PyG index; bump the pin in
-> lockstep if rootstock's floor moves again.
+> `requires-python` must admit 3.11. The fairchem-core 1.x configs
+> (equiformer, escn) pin a single minor (`>=3.11,<3.12`) because their
+> torch-scatter/sparse/cluster wheels come prebuilt per Python minor from
+> the pinned PyG index; bump the pin in lockstep if rootstock's floor moves
+> again. orb_v3 pins `>=3.12,<3.13` (orb-models needs 3.12; its dm-tree pin
+> has no 3.13 wheel).
 
 ## What `modal_app.py` is for
 

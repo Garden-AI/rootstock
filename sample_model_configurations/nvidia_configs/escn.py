@@ -40,7 +40,7 @@ CHECKPOINTS = {
 }
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     """
     Load an eSCN OC20 calculator.
 
@@ -58,12 +58,12 @@ def setup(checkpoint: str, device: str = "cuda"):
 
     cache_dir = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
     local_path = model_name_to_local_file(CHECKPOINTS[checkpoint], local_cache=cache_dir)
-    return OCPCalculator(checkpoint_path=local_path, cpu=(device == "cpu"))
+    return OCPCalculator(checkpoint_path=local_path, cpu=(device == "cpu"), **kwargs)
 
 
-def setup_from_path(path: str, device: str = "cuda"):
+def setup_from_path(path: str, device: str = "cuda", **kwargs):
     # Custom checkpoints (`:custom` ids with user weights): OCPCalculator loads a
     # checkpoint file natively — this is setup() minus the registry download.
     from fairchem.core import OCPCalculator
 
-    return OCPCalculator(checkpoint_path=path, cpu=(device == "cpu"))
+    return OCPCalculator(checkpoint_path=path, cpu=(device == "cpu"), **kwargs)

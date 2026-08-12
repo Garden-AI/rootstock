@@ -20,7 +20,7 @@ CHECKPOINTS = {
 }
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     import os
 
     os.environ["TF_USE_LEGACY_KERAS"] = "1"
@@ -31,4 +31,4 @@ def setup(checkpoint: str, device: str = "cuda"):
 
     from tensorpotential.calculator import grace_fm
 
-    return grace_fm(CHECKPOINTS[checkpoint])
+    return grace_fm(CHECKPOINTS[checkpoint], **kwargs)

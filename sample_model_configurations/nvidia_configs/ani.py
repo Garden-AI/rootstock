@@ -26,7 +26,7 @@ CHECKPOINTS = {
 }
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     """
     Load an ANI calculator.
 
@@ -46,4 +46,4 @@ def setup(checkpoint: str, device: str = "cuda"):
     }
     model = CHECKPOINTS[checkpoint]
 
-    return model_map[model](periodic_table_index=True).to(device).ase()
+    return model_map[model](periodic_table_index=True, **kwargs).to(device).ase()

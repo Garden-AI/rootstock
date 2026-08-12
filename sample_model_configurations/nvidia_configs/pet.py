@@ -23,7 +23,7 @@ CHECKPOINTS = {
 }
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     from huggingface_hub import hf_hub_download
     from upet.calculator import UPETCalculator
 
@@ -49,4 +49,4 @@ def setup(checkpoint: str, device: str = "cuda"):
         filename=f"{model}-v{version}.ckpt",
         subfolder="models",
     )
-    return UPETCalculator(checkpoint_path=path, device=device)
+    return UPETCalculator(checkpoint_path=path, device=device, **kwargs)

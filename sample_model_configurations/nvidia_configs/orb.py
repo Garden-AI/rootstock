@@ -1,7 +1,12 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "orb-models>=0.4.0",
+#     # >=0.5,<0.6: 0.5.5 is what the verified Delta env resolved — the v2
+#     # loaders keep their single-return API through 0.5.x. 0.4.x is broken
+#     # for us: it imports pynanoflann, which is git-only and undeclared, so
+#     # a fresh build dies at import (Delta, 2026-07-31). 0.6 raises the
+#     # Python floor to 3.12 — that line lives in orb_v3.py.
+#     "orb-models>=0.5,<0.6",
 #     "ase>=3.22",
 #     "torch>=2.0",
 #     # Not imported here — constrains orb-models' transitive dep. setup()'s
@@ -18,7 +23,14 @@
 # url = "https://download.pytorch.org/whl/cu128"
 # explicit = true
 # ///
-"""Orb env — hosts Orbital Materials' Orb universal potentials."""
+"""Orb v2 env — kept only for the built-in-D3 dispersion variant.
+
+Orb v3 (orb_v3.py) is the primary orb env; it supersedes the v2 checkpoints
+except orb-d3-v2, which has no v3 equivalent (v3 ships no dispersion-corrected
+model). Catalog trimmed to that one id 2026-07-30. The two lines can't share
+an env: the v3 loaders need orb-models>=0.6, which raises the Python floor
+to 3.12 and torch to 2.8 (the v2 loaders here are fine through 0.5.x).
+"""
 
 import os
 import shutil
@@ -26,11 +38,10 @@ import urllib.request
 from pathlib import Path
 
 CHECKPOINTS = {
-    "orb-v2": "orb-v2",
     "orb-d3-v2": "orb-d3-v2",
-    "orb-mptraj-only-v2": "orb-mptraj-only-v2",
-    # Your own fine-tuned weights: pair with weights= (loaded via setup_from_path).
-    "orb:custom": None,
+    # Your own fine-tuned v2-architecture weights: pair with weights=
+    # (loaded via setup_from_path). v3 fine-tunes go to orb-v3:custom.
+    "orb-v2:custom": None,
 }
 
 
@@ -65,7 +76,7 @@ def _fetch(url: str, dest: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     import torch
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.calculator import ORBCalculator
@@ -86,10 +97,10 @@ def setup(checkpoint: str, device: str = "cuda"):
         _fetch(url, weights)
 
     orbff = load_fn(weights_path=str(weights), device=torch.device(device))
-    return ORBCalculator(orbff, device=torch.device(device))
+    return ORBCalculator(orbff, device=torch.device(device), **kwargs)
 
 
-def setup_from_path(path: str, device: str = "cuda", arch: str = "orb-v2"):
+def setup_from_path(path: str, device: str = "cuda", arch: str = "orb-v2", **kwargs):
     # Custom checkpoints (`:custom` ids with user weights). A weights file doesn't say
     # which orb architecture produced it, so `arch` names the pretrained
     # loader to instantiate — pass the right one at call time
@@ -105,8 +116,8 @@ def setup_from_path(path: str, device: str = "cuda", arch: str = "orb-v2"):
     except AttributeError:
         raise ValueError(
             f"unknown orb architecture {arch!r}; expected a loader name from "
-            f"orb_models.forcefield.pretrained, e.g. {', '.join(CHECKPOINTS)}"
+            f"orb_models.forcefield.pretrained, e.g. orb-v2, orb-d3-v2"
         ) from None
 
     orbff = load_fn(weights_path=path, device=torch.device(device))
-    return ORBCalculator(orbff, device=torch.device(device))
+    return ORBCalculator(orbff, device=torch.device(device), **kwargs)

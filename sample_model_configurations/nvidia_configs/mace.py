@@ -57,7 +57,7 @@ MH1_HEADS = (
 )
 
 
-def setup(checkpoint: str, device: str = "cuda", head: str | None = None):
+def setup(checkpoint: str, device: str = "cuda", head: str | None = None, **kwargs):
     arg = CHECKPOINTS[checkpoint]
     if arg.startswith("mh:"):
         head = head or "omat_pbe"
@@ -65,27 +65,32 @@ def setup(checkpoint: str, device: str = "cuda", head: str | None = None):
             raise ValueError(f"unknown head {head!r}; expected one of {', '.join(MH1_HEADS)}")
         from mace.calculators import mace_mp
 
-        return mace_mp(model=arg[3:], device=device, default_dtype="float64", head=head)
+        kwargs.setdefault("default_dtype", "float64")
+        return mace_mp(model=arg[3:], device=device, head=head, **kwargs)
     if head is not None:
         raise ValueError(f"'head' selects a head of a multi-head model; {checkpoint} has one head")
     if arg.startswith("off:"):
         from mace.calculators import mace_off
 
-        return mace_off(model=arg[4:], device=device, default_dtype="float32")
+        kwargs.setdefault("default_dtype", "float32")
+        return mace_off(model=arg[4:], device=device, **kwargs)
     if arg.startswith("omol:"):
         from mace.calculators import mace_omol
 
-        return mace_omol(model=arg[5:], device=device, default_dtype="float64")
+        kwargs.setdefault("default_dtype", "float64")
+        return mace_omol(model=arg[5:], device=device, **kwargs)
     from mace.calculators import mace_mp
 
-    return mace_mp(model=arg, device=device, default_dtype="float32")
+    kwargs.setdefault("default_dtype", "float32")
+    return mace_mp(model=arg, device=device, **kwargs)
 
 
-def setup_from_path(path: str, device: str = "cuda", head: str | None = None):
+def setup_from_path(path: str, device: str = "cuda", head: str | None = None, **kwargs):
     # Custom checkpoints (`:custom` ids with user weights): fine-tunes load through
     # MACECalculator directly — the mp/off dispatch in setup() only exists
     # to pick which pretrained file to download. `head` is for fine-tunes that
     # keep multiple heads; single-head weights load without it.
     from mace.calculators import MACECalculator
 
-    return MACECalculator(model_paths=path, device=device, default_dtype="float32", head=head)
+    kwargs.setdefault("default_dtype", "float32")
+    return MACECalculator(model_paths=path, device=device, head=head, **kwargs)

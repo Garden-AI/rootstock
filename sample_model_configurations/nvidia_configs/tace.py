@@ -24,9 +24,10 @@ CHECKPOINTS = {
 }
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     from tace.foundations import tace_foundations
     from tace.interface.ase import TACEAseCalc
 
     model_path = tace_foundations[CHECKPOINTS[checkpoint]]
-    return TACEAseCalc(model_path, device=device, dtype="float32")
+    kwargs.setdefault("dtype", "float32")
+    return TACEAseCalc(model_path, device=device, **kwargs)

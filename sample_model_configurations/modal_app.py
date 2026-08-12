@@ -266,10 +266,10 @@ def probe_ani(checkpoint: str = "ani-2x", system: str = "molecule"):
 
 @probe_image(
     "orb.py",
-    ["orb-models>=0.4.0,<0.5", "ase>=3.22", "torch>=2.0"],
+    ["orb-models>=0.5,<0.6", "ase>=3.22", "torch>=2.0"],
 )
-def probe_orb(checkpoint: str = "orb-v2", system: str = "crystal"):
-    """Probe an Orb v2 checkpoint. Default: orb-v2 on Cu bulk."""
+def probe_orb(checkpoint: str = "orb-d3-v2", system: str = "crystal"):
+    """Probe an Orb v2 checkpoint. Default: orb-d3-v2 on Cu bulk."""
     return _run_probe_subprocess(checkpoint, system)
 
 
@@ -294,53 +294,6 @@ def probe_orb_v3(checkpoint: str = "orb-v3-conservative-inf-omat", system: str =
 )
 def probe_mattersim(checkpoint: str = "mattersim-v1-0-0-5m", system: str = "crystal"):
     """Probe a MatterSim checkpoint. Default: v1 5M on Cu bulk."""
-    return _run_probe_subprocess(checkpoint, system)
-
-
-# -----------------------------------------------------------------------------
-# NequIP — E(3)-equivariant GNN (system-specific, deployed model required)
-# -----------------------------------------------------------------------------
-
-
-@probe_image(
-    "nequip.py",
-    ["nequip>=0.6.0", "ase>=3.22", "torch>=2.0", "torch-geometric"],
-    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
-)
-def probe_nequip(checkpoint: str, system: str = "crystal"):
-    """Probe a NequIP deployed model. Requires path to a deployed .pth file."""
-    return _run_probe_subprocess(checkpoint, system)
-
-
-# -----------------------------------------------------------------------------
-# Allegro — scalable E(3)-equivariant GNN (NequIP family)
-# Note: No public checkpoint; probe_allegro is not included here.
-# allegro.py exists for use in rootstock environments where a deployed
-# Allegro model file is provided. Install with:
-#   uv pip install --no-deps "allegro @ git+https://github.com/mir-group/allegro.git"
-# -----------------------------------------------------------------------------
-
-
-# -----------------------------------------------------------------------------
-# GemNet — OC20 GemNet-OC / GemNet-dT via fairchem-core 1.x
-# -----------------------------------------------------------------------------
-
-
-@probe_image(
-    "gemnet.py",
-    [
-        "torch>=2.4.0",
-        "fairchem-core>=1.0.0,<2.0.0",
-        "ase>=3.22",
-        "torch-geometric",
-        "torch-scatter",
-        "torch-sparse",
-        "torch-cluster",
-    ],
-    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
-)
-def probe_gemnet(checkpoint: str = "gemnet-oc-large-s2ef-oc20-all-md", system: str = "slab_co"):
-    """Probe a GemNet OC20 checkpoint. Default: GemNet-OC on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
 
@@ -370,52 +323,6 @@ def probe_equiformer(
 
 
 # -----------------------------------------------------------------------------
-# DimeNet++ — OC20 DimeNet++ via fairchem-core 1.x
-# -----------------------------------------------------------------------------
-
-
-@probe_image(
-    "dimenet.py",
-    [
-        "torch>=2.4.0",
-        "fairchem-core>=1.0.0,<2.0.0",
-        "ase>=3.22",
-        "torch-geometric",
-        "torch-scatter",
-        "torch-sparse",
-        "torch-cluster",
-    ],
-    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
-)
-def probe_dimenet(checkpoint: str = "dimenet-plus-plus-s2ef-oc20-all", system: str = "slab_co"):
-    """Probe a DimeNet++ OC20 checkpoint on CO/Cu slab."""
-    return _run_probe_subprocess(checkpoint, system)
-
-
-# -----------------------------------------------------------------------------
-# SCN — OC20 SCN via fairchem-core 1.x
-# -----------------------------------------------------------------------------
-
-
-@probe_image(
-    "scn.py",
-    [
-        "torch>=2.4.0",
-        "fairchem-core>=1.0.0,<2.0.0",
-        "ase>=3.22",
-        "torch-geometric",
-        "torch-scatter",
-        "torch-sparse",
-        "torch-cluster",
-    ],
-    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
-)
-def probe_scn(checkpoint: str = "scn-s2ef-oc20-all-md", system: str = "slab_co"):
-    """Probe an SCN OC20 checkpoint on CO/Cu slab."""
-    return _run_probe_subprocess(checkpoint, system)
-
-
-# -----------------------------------------------------------------------------
 # eSCN — OC20 eSCN via fairchem-core 1.x
 # -----------------------------------------------------------------------------
 
@@ -435,52 +342,6 @@ def probe_scn(checkpoint: str = "scn-s2ef-oc20-all-md", system: str = "slab_co")
 )
 def probe_escn(checkpoint: str = "escn-l6-m2-lay12-s2ef-oc20-all-md", system: str = "slab_co"):
     """Probe an eSCN OC20 checkpoint on CO/Cu slab."""
-    return _run_probe_subprocess(checkpoint, system)
-
-
-# -----------------------------------------------------------------------------
-# PaiNN — OC20 PaiNN via fairchem-core 1.x
-# -----------------------------------------------------------------------------
-
-
-@probe_image(
-    "painn.py",
-    [
-        "torch>=2.4.0",
-        "fairchem-core>=1.0.0,<2.0.0",
-        "ase>=3.22",
-        "torch-geometric",
-        "torch-scatter",
-        "torch-sparse",
-        "torch-cluster",
-    ],
-    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
-)
-def probe_painn(checkpoint: str = "painn-s2ef-oc20-all", system: str = "slab_co"):
-    """Probe a PaiNN OC20 checkpoint on CO/Cu slab."""
-    return _run_probe_subprocess(checkpoint, system)
-
-
-# -----------------------------------------------------------------------------
-# SchNet — OC20 SchNet via fairchem-core 1.x
-# -----------------------------------------------------------------------------
-
-
-@probe_image(
-    "schnet.py",
-    [
-        "torch>=2.4.0",
-        "fairchem-core>=1.0.0,<2.0.0",
-        "ase>=3.22",
-        "torch-geometric",
-        "torch-scatter",
-        "torch-sparse",
-        "torch-cluster",
-    ],
-    find_links="https://data.pyg.org/whl/torch-2.4.0+cu121.html",
-)
-def probe_schnet(checkpoint: str = "schnet-s2ef-oc20-all", system: str = "slab_co"):
-    """Probe a SchNet OC20 checkpoint on CO/Cu slab."""
     return _run_probe_subprocess(checkpoint, system)
 
 
