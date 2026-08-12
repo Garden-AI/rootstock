@@ -1,16 +1,16 @@
 # /// script
-# requires-python = ">=3.11,<3.12"
+# requires-python = ">=3.11"
 # dependencies = [
-#     "torch>=2.4.0",
-#     "fairchem-core>=2.0.0",
+#     "fairchem-core>=2.20",
 #     "ase>=3.22",
-#     "torch-geometric",
+#     "torch>=2.4.0",
 # ]
-#
-# [tool.uv]
-# find-links = ["https://data.pyg.org/whl/torch-2.4.0+cu121.html"]
 # ///
 """eSEN env — hosts FAIRChem eSEN single-task checkpoints.
+
+fairchem-core v2 dropped the torch-geometric / pyg-find-links install dance
+(simplified here 2026-07-30 to match uma.py/allscaip.py — the find-links were
+also blocking universal lockfile resolution).
 
 OMol checkpoints expect `charge` and `spin` in `atoms.info`.
 """
@@ -24,10 +24,31 @@ CHECKPOINTS = {
 }
 
 
+def _fairchem_device(device: str) -> str:
+    """Translate an indexed device ("cuda:2") into what fairchem v2 accepts.
+
+    MLIPPredictUnit._setup_device asserts `device in ["cpu", "cuda"]` and then
+    resolves the real GPU itself via get_device_for_local_rank(), which returns
+    f"cuda:{torch.cuda.current_device()}". So an index has to travel through
+    torch's current-device state, not the argument. Verifying several
+    checkpoints at once on a multi-GPU node hands each worker "cuda:N" — that
+    killed all 8 fairchem-v2 checkpoints on the 2026-08-06 Polaris sync
+    (4x A100, VERIFY_JOBS=4), while single-GPU Sophia never hit it.
+    """
+    if device.startswith("cuda:"):
+        import torch
+
+        torch.cuda.set_device(int(device.split(":", 1)[1]))
+        return "cuda"
+    return device
+
+
 def setup(checkpoint: str, device: str = "cuda"):
     from fairchem.core import FAIRChemCalculator, pretrained_mlip
 
-    predictor = pretrained_mlip.get_predict_unit(CHECKPOINTS[checkpoint], device=device)
+    predictor = pretrained_mlip.get_predict_unit(
+        CHECKPOINTS[checkpoint], device=_fairchem_device(device)
+    )
     return FAIRChemCalculator(predictor)
 
 
@@ -37,5 +58,5 @@ def setup_from_path(path: str, device: str = "cuda"):
     from fairchem.core import FAIRChemCalculator
     from fairchem.core.units.mlip_unit import load_predict_unit
 
-    predictor = load_predict_unit(path, device=device)
+    predictor = load_predict_unit(path, device=_fairchem_device(device))
     return FAIRChemCalculator(predictor)
