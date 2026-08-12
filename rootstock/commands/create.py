@@ -23,13 +23,15 @@ CHECKPOINTS = {{
 }}
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     """
     Load a calculator for a canonical checkpoint id.
 
     Args:
         checkpoint: Canonical checkpoint id, must be a key of CHECKPOINTS.
         device: PyTorch device string (e.g., "cuda", "cuda:0", "cpu").
+        **kwargs: Forward to the calculator constructor (user escape hatch,
+            fed by setup_kwargs= / --kwarg).
 
     Returns:
         ASE-compatible calculator.

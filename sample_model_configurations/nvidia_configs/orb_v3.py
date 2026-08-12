@@ -36,13 +36,13 @@ from pathlib import Path
 
 CHECKPOINTS = {
     "orb-v3-conservative-inf-omat": "orb-v3-conservative-inf-omat",
-    "orb-v3-conservative-20-omat":  "orb-v3-conservative-20-omat",
-    "orb-v3-direct-inf-omat":       "orb-v3-direct-inf-omat",
-    "orb-v3-direct-20-omat":        "orb-v3-direct-20-omat",
-    "orb-v3-conservative-inf-mpa":  "orb-v3-conservative-inf-mpa",
-    "orb-v3-conservative-20-mpa":   "orb-v3-conservative-20-mpa",
-    "orb-v3-direct-inf-mpa":        "orb-v3-direct-inf-mpa",
-    "orb-v3-direct-20-mpa":         "orb-v3-direct-20-mpa",
+    "orb-v3-conservative-20-omat": "orb-v3-conservative-20-omat",
+    "orb-v3-direct-inf-omat": "orb-v3-direct-inf-omat",
+    "orb-v3-direct-20-omat": "orb-v3-direct-20-omat",
+    "orb-v3-conservative-inf-mpa": "orb-v3-conservative-inf-mpa",
+    "orb-v3-conservative-20-mpa": "orb-v3-conservative-20-mpa",
+    "orb-v3-direct-inf-mpa": "orb-v3-direct-inf-mpa",
+    "orb-v3-direct-20-mpa": "orb-v3-direct-20-mpa",
     # The omol ids (orb-v3-{conservative,direct}-omol) are dropped from the
     # catalog 2026-07-30: they had been failing verify on every cluster since
     # 2026-05. Re-add once the failure is understood.
@@ -83,7 +83,7 @@ def _fetch(url: str, dest: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def setup(checkpoint: str, device: str = "cuda", precision: str = "float32-high"):
+def setup(checkpoint: str, device: str = "cuda", precision: str = "float32-high", **kwargs):
     import torch
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.inference.calculator import ORBCalculator
@@ -105,7 +105,7 @@ def setup(checkpoint: str, device: str = "cuda", precision: str = "float32-high"
     orbff, atoms_adapter = load_fn(
         weights_path=str(weights), device=torch.device(device), precision=precision
     )
-    return ORBCalculator(orbff, atoms_adapter=atoms_adapter, device=torch.device(device))
+    return ORBCalculator(orbff, atoms_adapter=atoms_adapter, device=torch.device(device), **kwargs)
 
 
 def setup_from_path(
@@ -113,6 +113,7 @@ def setup_from_path(
     device: str = "cuda",
     arch: str = "orb-v3-conservative-inf-omat",
     precision: str = "float32-high",
+    **kwargs,
 ):
     # Custom checkpoints (`:custom` ids with user weights). A weights file doesn't say
     # which orb architecture produced it, so `arch` names the pretrained
@@ -135,4 +136,4 @@ def setup_from_path(
     orbff, atoms_adapter = load_fn(
         weights_path=path, device=torch.device(device), precision=precision
     )
-    return ORBCalculator(orbff, atoms_adapter=atoms_adapter, device=torch.device(device))
+    return ORBCalculator(orbff, atoms_adapter=atoms_adapter, device=torch.device(device), **kwargs)

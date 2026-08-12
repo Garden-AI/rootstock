@@ -43,20 +43,20 @@ def _fairchem_device(device: str) -> str:
     return device
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     from fairchem.core import FAIRChemCalculator, pretrained_mlip
 
     predictor = pretrained_mlip.get_predict_unit(
         CHECKPOINTS[checkpoint], device=_fairchem_device(device)
     )
-    return FAIRChemCalculator(predictor)
+    return FAIRChemCalculator(predictor, **kwargs)
 
 
-def setup_from_path(path: str, device: str = "cuda"):
+def setup_from_path(path: str, device: str = "cuda", **kwargs):
     # Custom checkpoints (`:custom` ids with user weights): a weights *file* loads through
     # load_predict_unit, not the registry-name lookup setup() uses.
     from fairchem.core import FAIRChemCalculator
     from fairchem.core.units.mlip_unit import load_predict_unit
 
     predictor = load_predict_unit(path, device=_fairchem_device(device))
-    return FAIRChemCalculator(predictor)
+    return FAIRChemCalculator(predictor, **kwargs)

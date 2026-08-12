@@ -53,16 +53,17 @@ CHECKPOINTS = {
 }
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     from mace.calculators import mace_mp
-    return mace_mp(model=CHECKPOINTS[checkpoint], device=device, default_dtype="float32")
+    kwargs.setdefault("default_dtype", "float32")
+    return mace_mp(model=CHECKPOINTS[checkpoint], device=device, **kwargs)
 ```
 
 ## How it works
 
 1. **PEP 723 metadata.** Rootstock uses `uv` to build an isolated venv from the listed dependencies.
 2. **`CHECKPOINTS` table.** This is the env's local dispatch table. The keys are canonical ids; the Almanac registers the same ids as its join key. The values are whatever the upstream library wants — a short name, a HuggingFace path, a function name, anything.
-3. **`setup(checkpoint, device)`.** Called once when a worker starts. The returned calculator is reused for all calculations in that session.
+3. **`setup(checkpoint, device, **kwargs)`.** Called once when a worker starts. The returned calculator is reused for all calculations in that session. Forward `**kwargs` to the calculator constructor — it's the user escape hatch (`setup_kwargs=` / `--kwarg`) for constructor knobs the env doesn't name explicitly. For a default the env wants to set itself (like `default_dtype` above), use `kwargs.setdefault(...)` so a user override doesn't collide with the named argument. The same applies to `setup_from_path(path, device, **kwargs)`.
 
 When a user runs `rootstock add mace-mp-0-medium`, Rootstock walks every installed env's `env_source.py`, AST-parses the `CHECKPOINTS` literal, and finds the env that declares the id. A typo errors immediately ("no installed env declares ..."), instead of failing inside `setup()`.
 

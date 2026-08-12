@@ -40,7 +40,7 @@ CHECKPOINTS = {
 }
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     from huggingface_hub import snapshot_download
 
     import matgl
@@ -60,4 +60,4 @@ def setup(checkpoint: str, device: str = "cuda"):
     # params and all buffers coherently, and forward() migrates inputs to the
     # model's device itself.
     pot = matgl.load_model(local_path).to(device)
-    return PESCalculator(potential=pot)
+    return PESCalculator(potential=pot, **kwargs)

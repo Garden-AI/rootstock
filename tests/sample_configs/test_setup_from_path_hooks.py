@@ -37,12 +37,16 @@ _HOOK_DECLARING_CONFIGS = sorted(
 )
 
 
-def _hook_args(config: Path) -> ast.arguments | None:
+def _fn_args(config: Path, fn_name: str) -> ast.arguments | None:
     tree = ast.parse(config.read_text(), filename=str(config))
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == "setup_from_path":
+        if isinstance(node, ast.FunctionDef) and node.name == fn_name:
             return node.args
     return None
+
+
+def _hook_args(config: Path) -> ast.arguments | None:
+    return _fn_args(config, "setup_from_path")
 
 
 # ---------- parity + signature contract --------------------------------------
@@ -93,6 +97,23 @@ _ALL_CONFIGS = sorted(
     (p for vendor in (_NVIDIA, _AMD) for p in vendor.glob("*.py")),
     key=lambda p: (p.parent.name, p.name),
 )
+
+
+@pytest.mark.parametrize(
+    "config", _ALL_CONFIGS, ids=[f"{p.parent.name}/{p.stem}" for p in _ALL_CONFIGS]
+)
+def test_setup_hooks_accept_arbitrary_kwargs(config):
+    """Every setup/setup_from_path takes **kwargs and forwards them to the
+    calculator constructor — the user escape hatch (setup_kwargs= / --kwarg)
+    for constructor knobs the config doesn't name explicitly."""
+    for fn_name in ("setup", "setup_from_path"):
+        args = _fn_args(config, fn_name)
+        if args is None:
+            continue
+        assert args.kwarg is not None, (
+            f"{config.parent.name}/{config.name}: {fn_name} must declare a "
+            f"**kwargs catch-all forwarded to the calculator constructor"
+        )
 
 
 @pytest.mark.parametrize(

@@ -75,7 +75,7 @@ def _fetch(url: str, dest: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     import torch
     from orb_models.forcefield import pretrained
     from orb_models.forcefield.calculator import ORBCalculator
@@ -89,10 +89,10 @@ def setup(checkpoint: str, device: str = "cuda"):
         _fetch(url, weights)
 
     orbff = load_fn(weights_path=str(weights), device=torch.device(device))
-    return ORBCalculator(orbff, device=torch.device(device))
+    return ORBCalculator(orbff, device=torch.device(device), **kwargs)
 
 
-def setup_from_path(path: str, device: str = "cuda", arch: str = "orb-v2"):
+def setup_from_path(path: str, device: str = "cuda", arch: str = "orb-v2", **kwargs):
     # Custom checkpoints (`:custom` ids with user weights). A weights file doesn't say
     # which orb architecture produced it, so `arch` names the pretrained
     # loader to instantiate — pass the right one at call time
@@ -112,4 +112,4 @@ def setup_from_path(path: str, device: str = "cuda", arch: str = "orb-v2"):
         ) from None
 
     orbff = load_fn(weights_path=path, device=torch.device(device))
-    return ORBCalculator(orbff, device=torch.device(device))
+    return ORBCalculator(orbff, device=torch.device(device), **kwargs)

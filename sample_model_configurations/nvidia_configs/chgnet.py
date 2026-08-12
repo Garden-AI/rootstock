@@ -23,7 +23,7 @@ CHECKPOINTS = {
 }
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     """
     Load a CHGNet calculator.
 
@@ -38,13 +38,13 @@ def setup(checkpoint: str, device: str = "cuda"):
 
     model_name = CHECKPOINTS[checkpoint]
     model = CHGNet.load() if model_name == "chgnet-default" else CHGNet.load(model_name)
-    return CHGNetCalculator(model=model, use_device=device)
+    return CHGNetCalculator(model=model, use_device=device, **kwargs)
 
 
-def setup_from_path(path: str, device: str = "cuda"):
+def setup_from_path(path: str, device: str = "cuda", **kwargs):
     # Custom checkpoints (`:custom` ids with user weights): a weights *file* loads through
     # CHGNet.from_file, not the named-model CHGNet.load() setup() uses.
     from chgnet.model import CHGNet, CHGNetCalculator
 
     model = CHGNet.from_file(path)
-    return CHGNetCalculator(model=model, use_device=device)
+    return CHGNetCalculator(model=model, use_device=device, **kwargs)

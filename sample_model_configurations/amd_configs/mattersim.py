@@ -39,15 +39,15 @@ CHECKPOINTS = {
 }
 
 
-def setup(checkpoint: str, device: str = "cuda"):
+def setup(checkpoint: str, device: str = "cuda", **kwargs):
     from mattersim.forcefield import MatterSimCalculator
 
-    return MatterSimCalculator(load_path=CHECKPOINTS[checkpoint], device=device)
+    return MatterSimCalculator(load_path=CHECKPOINTS[checkpoint], device=device, **kwargs)
 
 
-def setup_from_path(path: str, device: str = "cuda"):
+def setup_from_path(path: str, device: str = "cuda", **kwargs):
     # Custom checkpoints (`:custom` ids with user weights): load_path accepts a filesystem
     # path as well as a model name, so this is setup() minus the name mapping.
     from mattersim.forcefield import MatterSimCalculator
 
-    return MatterSimCalculator(load_path=path, device=device)
+    return MatterSimCalculator(load_path=path, device=device, **kwargs)
