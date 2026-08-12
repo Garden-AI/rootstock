@@ -16,6 +16,7 @@ envs benefit without a rebuild).
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 import sys
@@ -23,7 +24,12 @@ from pathlib import Path
 
 import pytest
 
-from rootstock.prewarm import iter_prewarm_files, prewarm_files, prewarm_from_spec
+from rootstock.prewarm import (
+    _cgroup_memory_limit,
+    iter_prewarm_files,
+    prewarm_files,
+    prewarm_from_spec,
+)
 from rootstock.spawn import DOWNLOAD_WRAPPER, WORKER_WRAPPER, spawn_in_env
 
 
@@ -144,6 +150,159 @@ def test_wrapper_runs_prewarm_end_to_end(tmp_path: Path):
     # Whole tree: libfake.so + env_source.py + bin/python (the symlinked
     # interpreter binary — warming it is a feature, not an accident).
     assert "Prewarmed page cache: 3 files" in result.stderr
+
+
+def test_summary_tags_weights_tier(fake_env, tmp_path: Path):
+    """The tier tag is the field data for retiring the heuristic (#178)."""
+    weights = tmp_path / "recorded.bin"
+    weights.write_bytes(b"w" * 2_000_000)
+    del fake_env["checkpoint_path"]
+    fake_env["prewarm_paths"] = [str(weights)]
+    fake_env["prewarm_weights_tier"] = "manifest"
+    log = io.StringIO()
+    prewarm_from_spec(fake_env, log=log)
+    assert "; weights: 2 MB (manifest)" in log.getvalue()
+
+
+def test_summary_reports_none_recorded(fake_env):
+    del fake_env["checkpoint_path"]
+    fake_env["prewarm_paths"] = []
+    fake_env["prewarm_weights_tier"] = "none"
+    log = io.StringIO()
+    prewarm_from_spec(fake_env, log=log)
+    assert "; weights: none recorded" in log.getvalue()
+
+
+def test_summary_tags_custom_weights(fake_env):
+    # fake_env carries a :custom checkpoint_path and no tier annotation.
+    log = io.StringIO()
+    prewarm_from_spec(fake_env, log=log)
+    assert "; weights: 0 MB (custom)" in log.getvalue()
+
+
+def test_summary_has_no_weights_note_without_any(fake_env):
+    del fake_env["checkpoint_path"]
+    log = io.StringIO()
+    prewarm_from_spec(fake_env, log=log)
+    assert "weights" not in log.getvalue()
+
+
+def test_working_set_warning_when_cgroup_limit_too_small(fake_env, monkeypatch: pytest.MonkeyPatch):
+    """Warming more than the job's memory cgroup holds evicts the warmed
+    pages before the worker reads them (Delta, 2026-07-29) — one line names
+    the footgun up front, before the reads start."""
+    monkeypatch.setattr("rootstock.prewarm._cgroup_memory_limit", lambda: 100)
+    log = io.StringIO()
+    prewarm_from_spec(fake_env, log=log)
+    message = log.getvalue()
+    assert "exceeds this job's memory limit" in message
+    # The warning precedes the summary so it survives a stalled warm-up.
+    assert message.index("Warning") < message.index("Prewarmed")
+
+
+def test_no_working_set_warning_within_limit(fake_env, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("rootstock.prewarm._cgroup_memory_limit", lambda: 1 << 40)
+    log = io.StringIO()
+    prewarm_from_spec(fake_env, log=log)
+    assert "Warning" not in log.getvalue()
+
+
+def _cgroup_fixture(tmp_path: Path, proc_line: str) -> tuple[str, str]:
+    proc = tmp_path / "proc_cgroup"
+    proc.write_text(proc_line + "\n")
+    sys_root = tmp_path / "sys_cgroup"
+    sys_root.mkdir()
+    return str(proc), str(sys_root)
+
+
+def test_cgroup_v2_limit_found_on_ancestor(tmp_path: Path):
+    """Schedulers set the limit on the job slice, not the leaf — the walk up
+    must find it, and the leaf's 'max' placeholder must not mask it."""
+    proc, sys_root = _cgroup_fixture(tmp_path, "0::/slurm/job_7/step_0")
+    leaf = Path(sys_root) / "slurm" / "job_7" / "step_0"
+    leaf.mkdir(parents=True)
+    (leaf / "memory.max").write_text("max\n")
+    (leaf.parent / "memory.max").write_text(str(32 * 1024**3) + "\n")
+    assert _cgroup_memory_limit(proc, sys_root) == 32 * 1024**3
+
+
+def test_cgroup_v1_limit(tmp_path: Path):
+    proc, sys_root = _cgroup_fixture(tmp_path, "4:memory:/slurm/job_9")
+    leaf = Path(sys_root) / "memory" / "slurm" / "job_9"
+    leaf.mkdir(parents=True)
+    (leaf / "memory.limit_in_bytes").write_text(str(16 * 1024**3) + "\n")
+    assert _cgroup_memory_limit(proc, sys_root) == 16 * 1024**3
+
+
+def test_cgroup_v1_no_limit_sentinel_ignored(tmp_path: Path):
+    proc, sys_root = _cgroup_fixture(tmp_path, "4:memory:/user")
+    leaf = Path(sys_root) / "memory" / "user"
+    leaf.mkdir(parents=True)
+    (leaf / "memory.limit_in_bytes").write_text("9223372036854771712\n")
+    assert _cgroup_memory_limit(proc, sys_root) is None
+
+
+def test_cgroup_absent_means_no_limit(tmp_path: Path):
+    assert _cgroup_memory_limit(str(tmp_path / "nope"), str(tmp_path)) is None
+
+
+@pytest.fixture
+def built_root(tmp_path: Path) -> Path:
+    """A minimal built env so spawn_in_env accepts the spawn."""
+    env_dir = tmp_path / "envs" / "fake"
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").touch()
+    return tmp_path
+
+
+def _sidecar(spec) -> dict:
+    return json.loads(Path(spec.cmd[2]).read_text())
+
+
+def test_spawn_fills_prewarm_paths_from_manifest(built_root: Path):
+    (built_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 6,
+                "environments": {
+                    "fake": {
+                        "checkpoints": {
+                            "fake-ckpt": {"weight_files": [{"path": "cache/w.pt", "size": 1}]}
+                        }
+                    }
+                },
+            }
+        )
+    )
+    with spawn_in_env(built_root, "fake", WORKER_WRAPPER, {"checkpoint": "fake-ckpt"}) as spec:
+        sidecar = _sidecar(spec)
+    assert sidecar["prewarm_paths"] == [str(built_root / "cache" / "w.pt")]
+    assert sidecar["prewarm_weights_tier"] == "manifest"
+
+
+def test_spawn_reports_none_tier_without_record(built_root: Path):
+    with spawn_in_env(built_root, "fake", WORKER_WRAPPER, {"checkpoint": "fake-ckpt"}) as spec:
+        sidecar = _sidecar(spec)
+    assert sidecar["prewarm_paths"] == []
+    assert sidecar["prewarm_weights_tier"] == "none"
+
+
+def test_spawn_keeps_caller_supplied_prewarm_paths(built_root: Path):
+    payload = {"checkpoint": "fake-ckpt", "prewarm_paths": ["/explicit"]}
+    with spawn_in_env(built_root, "fake", WORKER_WRAPPER, payload) as spec:
+        sidecar = _sidecar(spec)
+    assert sidecar["prewarm_paths"] == ["/explicit"]
+    assert "prewarm_weights_tier" not in sidecar
+
+
+def test_spawn_lookup_failure_is_not_fatal(built_root: Path, monkeypatch: pytest.MonkeyPatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("lookup exploded")
+
+    monkeypatch.setattr("rootstock.spawn.get_checkpoint_prewarm_paths", boom)
+    with spawn_in_env(built_root, "fake", WORKER_WRAPPER, {"checkpoint": "fake-ckpt"}) as spec:
+        sidecar = _sidecar(spec)
+    assert "prewarm_paths" not in sidecar
 
 
 def test_spawn_stages_prewarm_module_next_to_wrapper(tmp_path: Path):

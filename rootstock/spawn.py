@@ -22,6 +22,7 @@ node-local and auto-cleaned rather than shared.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -30,7 +31,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from .environment import get_env_python, get_model_cache_env
+from .environment import get_checkpoint_prewarm_paths, get_env_python, get_model_cache_env
+
+logger = logging.getLogger(__name__)
 
 WORKER_WRAPPER = """\
 import json, os, sys
@@ -154,11 +157,15 @@ def spawn_in_env(
         env_name: Name of the pre-built environment.
         wrapper_source: One of the static wrapper sources in this module.
         payload: JSON-serializable values the wrapper reads from the sidecar.
-            ``env_dir`` is filled in here; everything else is the caller's.
-            A ``weights_capture`` entry of ``{"result_path", "cache_root"}``
-            makes the wrapper record which weight files setup() touches
-            (see weights_capture.py); the caller reads ``result_path`` after
-            the process exits.
+            ``env_dir`` is filled in here, and when the payload names a
+            ``checkpoint``, so are ``prewarm_paths``/``prewarm_weights_tier``
+            (the checkpoint's weight files from the manifest record, or a
+            heuristic cache scan — see get_checkpoint_prewarm_paths, #178);
+            a caller-supplied ``prewarm_paths`` is left alone. Everything
+            else is the caller's. A ``weights_capture`` entry of
+            ``{"result_path", "cache_root"}`` makes the wrapper record which
+            weight files setup() touches (see weights_capture.py); the
+            caller reads ``result_path`` after the process exits.
         cache_root: Optional split cache root (see get_model_cache_env).
         offline: Forbid HuggingFace Hub network access (HF_HUB_OFFLINE=1).
             Workers serve weights pre-fetched by ``rootstock add`` and often
@@ -172,6 +179,21 @@ def spawn_in_env(
     root = Path(root)
     env_python = get_env_python(root, env_name)
     env_dir = root / "envs" / env_name
+
+    # Fill the weight-prewarm hint here rather than in each caller: every
+    # spawn (calculator, verify, serve, add) benefits, and this is the same
+    # choke point that already owns env_dir and the cache env vars.
+    # Best-effort by contract — a failed lookup must never fail the spawn.
+    if payload.get("checkpoint") and "prewarm_paths" not in payload:
+        try:
+            paths, tier = get_checkpoint_prewarm_paths(
+                root, env_name, payload["checkpoint"], cache_root
+            )
+        except Exception:
+            logger.debug("prewarm path lookup failed; spawning without", exc_info=True)
+        else:
+            if tier is not None:
+                payload = {**payload, "prewarm_paths": paths, "prewarm_weights_tier": tier}
 
     env = os.environ.copy()
     env.update(get_model_cache_env(root, cache_root))
