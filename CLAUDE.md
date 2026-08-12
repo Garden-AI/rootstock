@@ -124,7 +124,7 @@ predate the declaration. Most clusters use the same path for both.
 | `delta` | `/work/hdd/data/rootstock` | (same as install root) |
 | `frontier` | `/sw/frontier/ums/ums047/rootstock` | `/lustre/orion/ums047/world-shared/rootstock-cache` |
 
-The sophia/polaris registry path is a *serving copy* under the Garden-Ai project, mirrored from the `/eagle/projects/Rootstock/rootstock` build root (not world-readable); serving is group-scoped (Garden-Ai project membership), and admin sync/smoke-test jobs target the build root via explicit `--root`/`ROOTSTOCK_ROOT`.
+The sophia/polaris registry path is the single shared ALCF install under the Garden-Ai project — building, syncing, and serving all happen in the same root. Access is group-scoped (Garden-Ai project membership).
 
 sophia/polaris share one install and one manifest (`clusters: ["sophia", "polaris"]`), but verification records and pushed manifests are per-cluster; verify-recording commands there need `--cluster`. An env source may declare `CLUSTERS = ["polaris"]` to ship a cluster-specific variant (see `docs/environments.md`); smoke-test selection and the pushed payloads are checkpoint-first — each id is tested and reported via the env it resolves to on that cluster.
 

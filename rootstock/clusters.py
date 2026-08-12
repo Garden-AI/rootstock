@@ -37,12 +37,11 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
     "della": Cluster(
         root=Path("/scratch/gpfs/ROSENGROUP/common/rootstock"),
     ),
-    # sophia/polaris resolve the serving copy under the Garden-Ai project,
-    # mirrored from the /eagle/projects/Rootstock build root (which is not
-    # world-readable; admin jobs target it via explicit --root/ROOTSTOCK_ROOT).
-    # Serving is group-scoped: users need Garden-Ai project membership.
-    # Polaris mounts the same Eagle filesystem as Sophia, so both ALCF
-    # machines share one install.
+    # sophia/polaris resolve the shared ALCF install under the Garden-Ai
+    # project — the single root where building, syncing, and serving all
+    # happen. Access is group-scoped: users need Garden-Ai project
+    # membership. Polaris mounts the same Eagle filesystem as Sophia, so
+    # both ALCF machines share one install.
     "sophia": Cluster(
         root=Path("/lus/eagle/projects/Garden-Ai/rootstock"),
     ),

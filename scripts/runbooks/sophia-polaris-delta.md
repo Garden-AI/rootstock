@@ -7,12 +7,10 @@ tree once, but run the compute-node check on both machines.
 ## 0. Setup
 
 ```bash
-# sophia/polaris — audit the serving copy users resolve (our mirror under the
-# Garden-Ai project; group-scoped, so users need Garden-Ai membership — fix
-# findings by re-running scripts/mirror_alcf.sh rather than setup-perms):
+# sophia/polaris — the single shared install under the Garden-Ai project
+# (group-scoped: users need Garden-Ai membership, so expect exactly one
+# ancestor-not-world-traversable finding, on the project dir itself):
 #   ROOT=/lus/eagle/projects/Garden-Ai/rootstock    GROUP=<Garden-Ai project group>
-# sophia/polaris build root (ours; admin jobs only, not world-readable by design):
-#   ROOT=/eagle/projects/Rootstock/rootstock    GROUP=Rootstock
 # delta:
 #   ROOT=/work/hdd/data/rootstock      GROUP=<delta project group>
 ROOT=changeme
