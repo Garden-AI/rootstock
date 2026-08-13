@@ -16,7 +16,7 @@ from ..batch import PHASES, execute_sync, plan_sync, render_plan, render_summary
 from ..environment import CheckpointNotFoundError
 from ..layout import ensure_layout_compatible, write_layout_marker
 from ..operations import OperationError, resolve_current_cluster
-from .common import resolve_cache_root, resolve_root, warn_on_permissions
+from .common import resolve_cache_root, resolve_root, resolve_source_arg, warn_on_permissions
 
 
 def _parse_phases(spec: str) -> tuple[str, ...]:
@@ -55,9 +55,10 @@ def cmd_sync(args) -> int:
 
     source_dir: Path | None = None
     if args.source_dir:
-        source_dir = Path(args.source_dir)
-        if not source_dir.is_dir():
-            print(f"Error: {source_dir} is not a directory", file=sys.stderr)
+        try:
+            source_dir = resolve_source_arg(args.source_dir)
+        except OperationError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
             return 2
 
     root = resolve_root(args)

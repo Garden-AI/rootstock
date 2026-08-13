@@ -39,6 +39,26 @@ def warn_on_permissions(root: Path, cache_root: Path) -> None:
     )
 
 
+def resolve_source_arg(spec: str) -> Path:
+    """The sync/prune source positional: a local directory of env sources, or
+    a ``git+URL[@REF][#subdirectory=DIR]`` spec (see :mod:`rootstock.gitsource`)
+    shallow-fetched to a temp checkout that lives until process exit.
+
+    Raises OperationError for anything unusable (missing dir, malformed spec,
+    failed fetch) — callers treat that as a usage error.
+    """
+    from ..gitsource import is_git_source, materialize_git_source
+
+    if is_git_source(spec):
+        return materialize_git_source(spec)
+    source_dir = Path(spec)
+    if not source_dir.is_dir():
+        from ..operations import OperationError
+
+        raise OperationError(f"{source_dir} is not a directory")
+    return source_dir
+
+
 def resolve_root(args) -> Path:
     """``--root`` (or env/config fallback), with ``--cluster`` as a registry
     bootstrap for admins driving a known cluster by name."""
