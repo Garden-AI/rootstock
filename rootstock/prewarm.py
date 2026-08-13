@@ -176,20 +176,19 @@ def _cgroup_memory_limit(
             continue
         _, controllers, cgroup_path = parts
         if controllers == "":  # v2 unified hierarchy
-            base = Path(cgroup_root)
+            base, filename = Path(cgroup_root), "memory.max"
         elif "memory" in controllers.split(","):
-            base = Path(cgroup_root) / "memory"
+            base, filename = Path(cgroup_root) / "memory", "memory.limit_in_bytes"
         else:
             continue
         node = base / cgroup_path.lstrip("/")
         for current in (node, *node.parents):
-            for filename in ("memory.max", "memory.limit_in_bytes"):
-                try:
-                    raw = (current / filename).read_text().strip()
-                except OSError:
-                    continue
-                if raw.isdigit() and int(raw) < _CGROUP_NO_LIMIT:
-                    limits.append(int(raw))
+            try:
+                raw = (current / filename).read_text().strip()
+            except OSError:
+                raw = ""
+            if raw.isdigit() and int(raw) < _CGROUP_NO_LIMIT:
+                limits.append(int(raw))
             if current == base:
                 break
     return min(limits) if limits else None
@@ -241,13 +240,20 @@ def prewarm_from_spec(spec: dict, log=None) -> None:
 
         summary = (
             f"[Worker] Prewarmed page cache: {n_files} files, "
-            f"{n_bytes / 1e6:.0f} MB in {elapsed:.1f}s"
+            f"{_fmt_bytes(n_bytes)} in {elapsed:.1f}s"
         )
         tier = spec.get("prewarm_weights_tier")
         if tier == "none":
             summary += "; weights: none recorded"
         elif tier or weight_sized:
-            summary += f"; weights: {_fmt_bytes(weight_bytes)} ({tier or 'custom'})"
+            # No tier annotation means spawn_in_env didn't fill the paths:
+            # either the caller supplied its own prewarm_paths, or only a
+            # :custom checkpoint_path contributed. Label accordingly — this
+            # line is the field data for retiring the heuristic, so tags
+            # must not lie about provenance.
+            if not tier:
+                tier = "custom" if not spec.get("prewarm_paths") else "caller"
+            summary += f"; weights: {_fmt_bytes(weight_bytes)} ({tier})"
         print(summary, file=log, flush=True)
     except Exception as exc:  # noqa: BLE001 - never take the worker down
         try:

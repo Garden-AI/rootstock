@@ -180,6 +180,19 @@ def test_summary_tags_custom_weights(fake_env):
     assert "; weights: 0 MB (custom)" in log.getvalue()
 
 
+def test_summary_tags_caller_supplied_paths(fake_env, tmp_path: Path):
+    """Caller-supplied prewarm_paths (spawn_in_env leaves them alone, so no
+    tier key) must not masquerade as ':custom' weights — this line is the
+    telemetry for retiring the heuristic, so tags can't lie about provenance."""
+    extra = tmp_path / "caller.bin"
+    extra.write_bytes(b"c" * 512)
+    del fake_env["checkpoint_path"]
+    fake_env["prewarm_paths"] = [str(extra)]
+    log = io.StringIO()
+    prewarm_from_spec(fake_env, log=log)
+    assert "; weights: 0 MB (caller)" in log.getvalue()
+
+
 def test_summary_has_no_weights_note_without_any(fake_env):
     del fake_env["checkpoint_path"]
     log = io.StringIO()
@@ -259,11 +272,15 @@ def _sidecar(spec) -> dict:
     return json.loads(Path(spec.cmd[2]).read_text())
 
 
-def test_spawn_fills_prewarm_paths_from_manifest(built_root: Path):
-    (built_root / "manifest.json").write_text(
+def _write_record(root: Path) -> None:
+    from rootstock.manifest import SCHEMA_VERSION
+
+    (root / "cache").mkdir(exist_ok=True)
+    (root / "cache" / "w.pt").touch()
+    (root / "manifest.json").write_text(
         json.dumps(
             {
-                "schema_version": 6,
+                "schema_version": SCHEMA_VERSION,
                 "environments": {
                     "fake": {
                         "checkpoints": {
@@ -274,6 +291,10 @@ def test_spawn_fills_prewarm_paths_from_manifest(built_root: Path):
             }
         )
     )
+
+
+def test_spawn_fills_prewarm_paths_from_manifest(built_root: Path):
+    _write_record(built_root)
     with spawn_in_env(built_root, "fake", WORKER_WRAPPER, {"checkpoint": "fake-ckpt"}) as spec:
         sidecar = _sidecar(spec)
     assert sidecar["prewarm_paths"] == [str(built_root / "cache" / "w.pt")]
@@ -285,6 +306,30 @@ def test_spawn_reports_none_tier_without_record(built_root: Path):
         sidecar = _sidecar(spec)
     assert sidecar["prewarm_paths"] == []
     assert sidecar["prewarm_weights_tier"] == "none"
+
+
+def test_download_spawn_never_gets_heuristic_paths(built_root: Path):
+    """A first-time add must not cold-read whole family cache dirs (often on
+    a login node) for weights the download is about to write — its record
+    only exists after the download completes."""
+    site = built_root / "envs" / "fake" / "lib" / "python3.11" / "site-packages"
+    site.mkdir(parents=True)
+    (site / "fake").mkdir()
+    (built_root / "cache" / "fake").mkdir(parents=True)
+
+    with spawn_in_env(built_root, "fake", DOWNLOAD_WRAPPER, {"checkpoint": "fake-ckpt"}) as spec:
+        sidecar = _sidecar(spec)
+    assert "prewarm_paths" not in sidecar
+    assert "prewarm_weights_tier" not in sidecar
+
+
+def test_download_spawn_keeps_manifest_tier(built_root: Path):
+    """Idempotent re-adds of a fetched checkpoint still warm the exact record."""
+    _write_record(built_root)
+    with spawn_in_env(built_root, "fake", DOWNLOAD_WRAPPER, {"checkpoint": "fake-ckpt"}) as spec:
+        sidecar = _sidecar(spec)
+    assert sidecar["prewarm_paths"] == [str(built_root / "cache" / "w.pt")]
+    assert sidecar["prewarm_weights_tier"] == "manifest"
 
 
 def test_spawn_keeps_caller_supplied_prewarm_paths(built_root: Path):

@@ -183,10 +183,11 @@ def _matches_env(dir_name: str, packages: set[str], env_name: str) -> bool:
 
     Matching is exact or ``_``-boundary prefix in either direction
     (``cache/orb`` <-> ``orb_models``), after stripping the hidden-dir dot
-    (``home/.dgl`` <-> ``dgl``). Loose on purpose — over-matching one env's
-    own cache dir is harmless; the shared hub trees are excluded upstream.
+    (``home/.dgl`` <-> ``dgl``) and normalizing ``-`` to ``_``. Loose on
+    purpose — over-matching one env's own cache dir is harmless; the shared
+    hub trees are excluded upstream.
     """
-    name = dir_name.lstrip(".").lower()
+    name = dir_name.lstrip(".").lower().replace("-", "_")
     if not name:
         return False
     if name == env_name.lower() or name in packages:
@@ -199,6 +200,7 @@ def get_checkpoint_prewarm_paths(
     env_name: str,
     checkpoint_id: str,
     cache_root: Path | None = None,
+    allow_heuristic: bool = True,
 ) -> tuple[list[str], str | None]:
     """
     Resolve which model-weight paths a spawn should prewarm for a checkpoint,
@@ -206,12 +208,25 @@ def get_checkpoint_prewarm_paths(
     exists, else a best-effort scan of the shared cache for directories that
     look like this env's, else nothing.
 
+    The heuristic tier emits whole per-family cache dirs (``cache/mace``
+    holds every mace checkpoint's weights), so one unrecorded checkpoint
+    over-warms its cached siblings — a transitional cost, bounded by the
+    family and gone once the checkpoint has a record (one add/verify/
+    smoke-test pass). The tier tag in the prewarm summary is the telemetry
+    for retiring it.
+
     Args:
         root: Rootstock install root.
         env_name: The checkpoint's hosting env.
         checkpoint_id: Canonical (or ``:custom``) checkpoint id.
         cache_root: Optional split cache root (see get_model_cache_env);
             recorded paths are relative to it.
+        allow_heuristic: When False, resolve from the manifest record only.
+            Download spawns pass False: the record is written *after* a
+            download, so a first-time ``rootstock add`` would always fall
+            through to the heuristic and cold-read the whole family dir —
+            typically on a login node — for weights it may be about to
+            (re)write.
 
     Returns:
         ``(paths, tier)`` — absolute path strings (files for the manifest
@@ -230,28 +245,35 @@ def get_checkpoint_prewarm_paths(
         paths = [
             str(base / entry["path"])
             for entry in recorded
-            if isinstance(entry, dict) and entry.get("path")
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str) and entry["path"]
         ]
-        if paths:
+        # An intact record whose files were all purged (scratch sweeps on
+        # Frontier/Perlmutter) must not win the tier: the worker would log
+        # "weights: 0 MB (manifest)" while cold-faulting — misattributing
+        # exactly the stall this telemetry exists to catch. One stat usually
+        # settles it (the first path exists); records self-heal on the next
+        # add/verify/smoke-test pass.
+        if any(os.path.exists(p) for p in paths):
             return paths, "manifest"
 
-    if is_custom_checkpoint(checkpoint_id):
+    if is_custom_checkpoint(checkpoint_id) or not allow_heuristic:
         return [], None
 
     packages = _env_top_level_packages(root, env_name)
     matched: list[str] = []
     home = base / "home"
-    for scan in (base / "cache", home / ".cache", home):
+    dot_cache = home / ".cache"
+    for scan in (base / "cache", dot_cache, home):
         try:
             children = sorted(scan.iterdir())
         except OSError:
             continue
         for child in children:
-            if not child.is_dir() or child == home / ".cache":
+            # Pure-string filters first: each is_dir() is a stat — an RPC
+            # per entry on cold network filesystems — so it goes last.
+            if child.name.lstrip(".").lower() in _SHARED_HUB_TREES or child == dot_cache:
                 continue
-            if child.name.lstrip(".").lower() in _SHARED_HUB_TREES:
-                continue
-            if _matches_env(child.name, packages, env_name):
+            if _matches_env(child.name, packages, env_name) and child.is_dir():
                 matched.append(str(child))
     return (matched, "heuristic") if matched else ([], "none")
 

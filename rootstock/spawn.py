@@ -184,10 +184,18 @@ def spawn_in_env(
     # spawn (calculator, verify, serve, add) benefits, and this is the same
     # choke point that already owns env_dir and the cache env vars.
     # Best-effort by contract — a failed lookup must never fail the spawn.
+    # Download spawns get the record tier only: their weight record is
+    # written after the download, so the heuristic would cold-read whole
+    # family cache dirs (typically on a login node) for weights the
+    # download may be about to (re)write.
     if payload.get("checkpoint") and "prewarm_paths" not in payload:
         try:
             paths, tier = get_checkpoint_prewarm_paths(
-                root, env_name, payload["checkpoint"], cache_root
+                root,
+                env_name,
+                payload["checkpoint"],
+                cache_root,
+                allow_heuristic=wrapper_source != DOWNLOAD_WRAPPER,
             )
         except Exception:
             logger.debug("prewarm path lookup failed; spawning without", exc_info=True)
