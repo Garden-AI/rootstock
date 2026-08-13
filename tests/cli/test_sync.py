@@ -140,6 +140,42 @@ def test_missing_source_dir_is_a_usage_error(tmp_path, stubbed):
     assert stubbed["plan_calls"] == []
 
 
+def test_git_source_spec_is_materialized_before_planning(tmp_path, stubbed, monkeypatch):
+    """A git+ positional resolves to a checkout dir, which is what the
+    planner sees as source_dir (fetch mechanics have their own tests in
+    tests/test_gitsource.py)."""
+    checkout = tmp_path / "checkout" / "environments"
+    checkout.mkdir(parents=True)
+    spec = "git+https://example.com/envs.git@main#subdirectory=environments"
+
+    def fake_resolve(arg):
+        assert arg == spec
+        return checkout
+
+    monkeypatch.setattr("rootstock.commands.sync.resolve_source_arg", fake_resolve)
+
+    rc = cmd_sync(_make_args(tmp_path, source_dir=spec, dry_run=True))
+
+    assert rc == 0
+    ((_, kwargs),) = stubbed["plan_calls"]
+    assert kwargs["source_dir"] == checkout
+
+
+def test_failed_git_fetch_is_a_usage_error(tmp_path, stubbed, monkeypatch, capsys):
+    from rootstock.operations import OperationError
+
+    def exploding_resolve(arg):
+        raise OperationError("git fetch failed: repository not found")
+
+    monkeypatch.setattr("rootstock.commands.sync.resolve_source_arg", exploding_resolve)
+
+    rc = cmd_sync(_make_args(tmp_path, source_dir="git+https://example.com/nope.git"))
+
+    assert rc == 2
+    assert stubbed["plan_calls"] == []
+    assert "git fetch failed" in capsys.readouterr().err
+
+
 def test_json_dry_run_emits_the_plan_on_stdout(tmp_path, stubbed, capsys):
     stubbed["plan"] = ONE_BUILD
 

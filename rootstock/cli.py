@@ -27,16 +27,19 @@ Commands:
     rootstock add --list [--root <path>]
         List every canonical checkpoint id that add accepts, grouped by env.
 
-    rootstock sync [<source-dir>] [--root <path> | --cluster <name>] [--dry-run]
+    rootstock sync [<source>] [--root <path> | --cluster <name>] [--dry-run]
         Converge the install to its declared state: build missing/changed
         envs, download and verify missing/stale checkpoints, in parallel
-        phases. Idempotent — re-run to retry whatever failed.
+        phases. Idempotent — re-run to retry whatever failed. <source> is a
+        local staging directory of env files, or a git spec
+        git+URL[@REF][#subdirectory=DIR] fetched to a temp checkout.
             rootstock sync --cluster delta --dry-run
             rootstock sync ./environments/ --jobs 8
+            rootstock sync 'git+https://github.com/org/envs.git@main#subdirectory=delta'
             rootstock sync --rebuild                 # after a CLI version bump
             rootstock sync --phases build,download   # login node (no GPU)
 
-    rootstock prune [<source-dir>] [--root <path> | --cluster <name>] [--dry-run] [--yes]
+    rootstock prune [<source>] [--root <path> | --cluster <name>] [--dry-run] [--yes]
         The subtractive half of sync: remove built envs with no registered
         source, checkpoint records (and their unshared weight files) no
         source declares, and internal garbage (.build/.trash leftovers,
@@ -318,9 +321,12 @@ def main():
     sync_parser.add_argument(
         "source_dir",
         nargs="?",
+        metavar="SOURCE",
         help=(
-            "Optional directory of env source files (*.py) to register/update "
-            "before converging; defaults to the root's registered environments"
+            "Optional source of env definitions (*.py) to register/update "
+            "before converging: a local staging directory, or a git spec "
+            "'git+URL[@REF][#subdirectory=DIR]' shallow-fetched to a temp "
+            "checkout. Defaults to the root's registered environments"
         ),
     )
     sync_parser.add_argument(
@@ -434,13 +440,16 @@ def main():
     prune_parser.add_argument(
         "source_dir",
         nargs="?",
+        metavar="SOURCE",
         help=(
-            "Optional directory declaring the *complete* desired set of env "
-            "sources (*.py): anything registered, built, or fetched beyond it "
-            "is pruned — including registered source files. An empty directory "
-            "declares zero environments. Defaults to the root's registered "
-            "environments (if that dir doesn't exist, nothing is declared and "
-            "only internal garbage is collected)."
+            "Optional source declaring the *complete* desired set of env "
+            "sources (*.py) — a local directory or a git spec "
+            "'git+URL[@REF][#subdirectory=DIR]': anything registered, built, "
+            "or fetched beyond it is pruned — including registered source "
+            "files. An empty directory declares zero environments. Defaults "
+            "to the root's registered environments (if that dir doesn't "
+            "exist, nothing is declared and only internal garbage is "
+            "collected)."
         ),
     )
     prune_parser.add_argument(

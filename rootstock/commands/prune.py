@@ -26,7 +26,7 @@ from ..batch import (
 from ..layout import ensure_layout_compatible, write_layout_marker
 from ..manifest import ManifestError
 from ..operations import OperationError
-from .common import resolve_cache_root, resolve_root, warn_on_permissions
+from .common import resolve_cache_root, resolve_root, resolve_source_arg, warn_on_permissions
 
 
 def cmd_prune(args) -> int:
@@ -44,9 +44,10 @@ def cmd_prune(args) -> int:
 
     source_dir: Path | None = None
     if args.source_dir:
-        source_dir = Path(args.source_dir)
-        if not source_dir.is_dir():
-            print(f"Error: {source_dir} is not a directory", file=sys.stderr)
+        try:
+            source_dir = resolve_source_arg(args.source_dir)
+        except OperationError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
             return 2
 
     if args.min_age < 0:
