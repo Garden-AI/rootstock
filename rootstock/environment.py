@@ -12,6 +12,7 @@ Running code inside an env lives in rootstock.spawn.
 from __future__ import annotations
 
 import ast
+import json
 import os
 import shutil
 from dataclasses import dataclass
@@ -128,6 +129,153 @@ def get_model_cache_env(root: Path, cache_root: Path | None = None) -> dict[str,
             env[auth_var] = os.environ[auth_var]
 
     return env
+
+
+# Cache subtrees the heuristic tier must never emit: hub caches keyed by
+# *library* name (huggingface_hub's blobs, torch.hub) hold every model
+# family's weights side by side, so any env that ships the library would
+# "match" the whole shared tree — multiplying the cold-read volume and, under
+# a job's memory cgroup, evicting the pages the worker actually needs. Files
+# inside these trees are reachable only via the manifest tier's exact records.
+_SHARED_HUB_TREES = frozenset({"huggingface", "torch"})
+
+
+def _recorded_weight_files(root: Path, env_name: str, checkpoint_id: str) -> list[dict] | None:
+    """The checkpoint's ``weight_files`` manifest record (#177), or None.
+
+    Deliberately a raw ``manifest.json`` read rather than ``load_manifest``:
+    this runs on the calculator's spawn path as an optimization hint, so it
+    must never print migration notes, take locks, or refuse a manifest
+    written by a newer rootstock — any manifest we can't make sense of just
+    means "no record" and the caller falls back a tier.
+    """
+    try:
+        with open(root / "manifest.json") as f:
+            data = json.load(f)
+        env = data.get("environments", {}).get(env_name) or {}
+        record = (env.get("checkpoints") or {}).get(checkpoint_id) or {}
+        weight_files = record.get("weight_files")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return weight_files if isinstance(weight_files, list) else None
+
+
+def _env_top_level_packages(root: Path, env_name: str) -> set[str]:
+    """Lowercased top-level names the built env ships in site-packages."""
+    names: set[str] = set()
+    for site in (root / "envs" / env_name / "lib").glob("python*/site-packages"):
+        try:
+            children = list(site.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            name = child.name
+            if name == "__pycache__" or name.endswith((".dist-info", ".egg-info", ".pth")):
+                continue
+            # foo.py / foo.cpython-311-x86_64.so -> foo
+            names.add(name.split(".", 1)[0].lower())
+    names.discard("")
+    return names
+
+
+def _matches_env(dir_name: str, packages: set[str], env_name: str) -> bool:
+    """True when a cache dir name plausibly belongs to this env.
+
+    Matching is exact or ``_``-boundary prefix in either direction
+    (``cache/orb`` <-> ``orb_models``), after stripping the hidden-dir dot
+    (``home/.dgl`` <-> ``dgl``) and normalizing ``-`` to ``_``. Loose on
+    purpose — over-matching one env's own cache dir is harmless; the shared
+    hub trees are excluded upstream.
+    """
+    name = dir_name.lstrip(".").lower().replace("-", "_")
+    if not name:
+        return False
+    if name == env_name.lower() or name in packages:
+        return True
+    return any(pkg.startswith(name + "_") or name.startswith(pkg + "_") for pkg in packages)
+
+
+def get_checkpoint_prewarm_paths(
+    root: Path | str,
+    env_name: str,
+    checkpoint_id: str,
+    cache_root: Path | None = None,
+    allow_heuristic: bool = True,
+) -> tuple[list[str], str | None]:
+    """
+    Resolve which model-weight paths a spawn should prewarm for a checkpoint,
+    tiered (#178): the manifest's exact ``weight_files`` record when one
+    exists, else a best-effort scan of the shared cache for directories that
+    look like this env's, else nothing.
+
+    The heuristic tier emits whole per-family cache dirs (``cache/mace``
+    holds every mace checkpoint's weights), so one unrecorded checkpoint
+    over-warms its cached siblings — a transitional cost, bounded by the
+    family and gone once the checkpoint has a record (one add/verify/
+    smoke-test pass). The tier tag in the prewarm summary is the telemetry
+    for retiring it.
+
+    Args:
+        root: Rootstock install root.
+        env_name: The checkpoint's hosting env.
+        checkpoint_id: Canonical (or ``:custom``) checkpoint id.
+        cache_root: Optional split cache root (see get_model_cache_env);
+            recorded paths are relative to it.
+        allow_heuristic: When False, resolve from the manifest record only.
+            Download spawns pass False: the record is written *after* a
+            download, so a first-time ``rootstock add`` would always fall
+            through to the heuristic and cold-read the whole family dir —
+            typically on a login node — for weights it may be about to
+            (re)write.
+
+    Returns:
+        ``(paths, tier)`` — absolute path strings (files for the manifest
+        tier, directories for the heuristic tier) and the tier that produced
+        them: ``"manifest"``, ``"heuristic"``, or ``"none"`` (a canonical
+        checkpoint with no record and no heuristic match — worth surfacing in
+        the prewarm summary). ``:custom`` checkpoints with no record return
+        ``([], None)``: the user's weights file already rides
+        ``checkpoint_path`` into the prewarm, so there is nothing to report.
+    """
+    root = Path(root)
+    base = Path(cache_root) if cache_root is not None else root
+
+    recorded = _recorded_weight_files(root, env_name, checkpoint_id)
+    if recorded:
+        paths = [
+            str(base / entry["path"])
+            for entry in recorded
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str) and entry["path"]
+        ]
+        # An intact record whose files were all purged (scratch sweeps on
+        # Frontier/Perlmutter) must not win the tier: the worker would log
+        # "weights: 0 MB (manifest)" while cold-faulting — misattributing
+        # exactly the stall this telemetry exists to catch. One stat usually
+        # settles it (the first path exists); records self-heal on the next
+        # add/verify/smoke-test pass.
+        if any(os.path.exists(p) for p in paths):
+            return paths, "manifest"
+
+    if is_custom_checkpoint(checkpoint_id) or not allow_heuristic:
+        return [], None
+
+    packages = _env_top_level_packages(root, env_name)
+    matched: list[str] = []
+    home = base / "home"
+    dot_cache = home / ".cache"
+    for scan in (base / "cache", dot_cache, home):
+        try:
+            children = sorted(scan.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            # Pure-string filters first: each is_dir() is a stat — an RPC
+            # per entry on cold network filesystems — so it goes last.
+            if child.name.lstrip(".").lower() in _SHARED_HUB_TREES or child == dot_cache:
+                continue
+            if _matches_env(child.name, packages, env_name) and child.is_dir():
+                matched.append(str(child))
+    return (matched, "heuristic") if matched else ([], "none")
 
 
 def get_env_python(root: Path | str, env_name: str) -> Path:
