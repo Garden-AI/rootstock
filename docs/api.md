@@ -32,7 +32,7 @@ with RootstockCalculator(
 | `root` | `str` | Yes* | Custom install-root path instead of a known cluster |
 | `cache_root` | `str` | No | Override path for the model-weight cache and redirected `HOME`. When omitted, the install's own declaration (`{root}/layout.json`) decides, falling back to the cluster registry for legacy roots, then to `root` |
 | `device` | `str` | No | `"cuda"` (default) or `"cpu"` |
-| `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Cannot contain `checkpoint` or `device`. For a `:custom` checkpoint they go to `setup_from_path()` instead and cannot contain `path` |
+| `setup_kwargs` | `dict` | No | Extra keyword arguments forwarded to the env's `setup()` function (e.g., `{"task": "omol"}`). Multi-head models (UMA's `task`, MACE-MH-1's `head`) require a head selection here and error without one — there is no default head. Cannot contain `checkpoint` or `device`. For a `:custom` checkpoint they go to `setup_from_path()` instead and cannot contain `path` |
 | `timeout` | `float` | No | Socket timeout in seconds for worker operations (default 600, matching checkpoint verification — so the first real force call, which may pay for `torch.compile` or large neighbor lists, runs under the envelope verification exercised) |
 | `weights` | `str \| Path` | With `:custom` | Path to your own weights file (e.g. a fine-tune of one of the family's shipped checkpoints). Required with — and only valid with — a `<family>:custom` checkpoint id. Must be visible from the compute nodes; loaded through the env's `setup_from_path()` hook. No shipped weights are involved |
 

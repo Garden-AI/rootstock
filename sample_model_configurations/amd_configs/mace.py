@@ -34,7 +34,8 @@ prefix marks a multi-head model (float64, per the MACE-MH-1 model card).
 
 Multi-head checkpoints select a head via the `head` kwarg on setup()
 (setup_kwargs={"head": ...} / --kwarg head=...), named by upstream's training
-corpus — see MH1_HEADS; omat_pbe is the default.
+corpus — see MH1_HEADS. Selection is required: the multi-head checkpoint
+has no default head, and setup() errors when none is given.
 
 The OMOL checkpoint expects `charge` and `spin` in `atoms.info`.
 """
@@ -72,11 +73,23 @@ MH1_HEADS = (
     "matpes_r2scan",
 )
 
+# Verification-only head selection for the multi-head checkpoint:
+# smoke-test and a bare `rootstock add` verify with this
+# (setup() itself has no default head).
+VERIFY_KWARGS = {
+    "mace-mh-1": {"head": "omat_pbe"},
+}
+
 
 def setup(checkpoint: str, device: str = "cuda", head: str | None = None, **kwargs):
     arg = CHECKPOINTS[checkpoint]
     if arg.startswith("mh:"):
-        head = head or "omat_pbe"
+        if head is None:
+            raise ValueError(
+                f"{checkpoint} is multi-head and has no default — select one "
+                f"with setup_kwargs={{'head': ...}} (or --kwarg head=...): "
+                f"one of {', '.join(MH1_HEADS)}"
+            )
         if head not in MH1_HEADS:
             raise ValueError(f"unknown head {head!r}; expected one of {', '.join(MH1_HEADS)}")
         from mace.calculators import mace_mp

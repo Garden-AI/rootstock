@@ -124,8 +124,10 @@ Override via env at submit time (SLURM: inline `VAR=val sbatch …`; PBS:
 > `date -d` in the recipes is GNU date (present on Linux HPC login/compute
 > nodes). The recipes are not meant to run on macOS.
 
-> **Smoke-test always uses default kwargs.** `smoke-test` calls each env's
-> `setup()` with no extra kwargs, so a checkpoint that only works with
-> non-default kwargs (e.g. a UMA checkpoint needing `task=omol`) will appear
-> failing even though `add` succeeded. The remedy is to make the preferred
-> kwargs the env's default in the env file.
+> **Smoke-test passes no kwargs of its own.** `smoke-test` calls each env's
+> `setup()` with no extra kwargs; when a checkpoint needs one (e.g. UMA's
+> required `task`), verification falls back to the env's `VERIFY_KWARGS`
+> entry for that checkpoint (see `docs/environments.md`). A checkpoint whose
+> env requires a kwarg but declares no `VERIFY_KWARGS` entry will appear
+> failing even though `add --kwarg ...` succeeded — the remedy is to declare
+> the entry, never to give `setup()` a silent default.

@@ -85,7 +85,9 @@ def verify_checkpoint(
         env_name: Name of pre-built environment (e.g., "mace").
         checkpoint: Canonical checkpoint id passed to setup().
         device: PyTorch device (e.g., "cuda", "cpu").
-        setup_kwargs: Extra keyword arguments forwarded to setup().
+        setup_kwargs: Extra keyword arguments forwarded to setup(). When
+                    empty, the env's declared ``VERIFY_KWARGS`` for this
+                    checkpoint (if any) are used instead.
         cache_root: Optional separate root for the model-weight cache and
                     redirected HOME. Defaults to ``root``.
         checkpoint_path: Path to a local (user-registered) weights file; the
@@ -103,9 +105,15 @@ def verify_checkpoint(
         On failure, success is False and error_message is a short string
         describing what went wrong.
     """
+    from .environment import verify_kwargs_for
     from .server import RootstockServer
 
-    setup_kwargs = setup_kwargs or {}
+    # No explicit kwargs → fall back to the env's declared VERIFY_KWARGS for
+    # this checkpoint. This is how an env whose setup() *requires* a kwarg
+    # (e.g. UMA's task, MACE-MH-1's head — no default, explicit selection
+    # only) still verifies under smoke-test and a bare `rootstock add`.
+    # Explicit kwargs always win, and the calculator path never reads this.
+    setup_kwargs = setup_kwargs or verify_kwargs_for(root, env_name, checkpoint)
     atoms = _smoke_test_atoms()
     socket_name = f"rootstock_verify_{uuid.uuid4().hex[:8]}"
 

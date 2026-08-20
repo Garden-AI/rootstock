@@ -149,6 +149,12 @@ Signature: `setup(checkpoint: str, device: str = "cuda", **extra)`.
 - `device`: PyTorch device.
 - Optional extra kwargs are forwarded from `RootstockCalculator(setup_kwargs=...)` and `rootstock add --kwarg KEY=VAL`.
 
+A kwarg that selects among a model's task heads (UMA's `task`, MACE-MH-1's
+`head`) should be **required, not defaulted**: give it a `None` default and
+raise a `ValueError` naming the valid choices when it's missing. A silent
+default head means users unknowingly compute with the wrong physics.
+Declare `VERIFY_KWARGS` (below) so verification still runs without user input.
+
 Return: an ASE-compatible calculator.
 
 ### `setup_from_path()` function (optional — enables custom checkpoints)
@@ -170,15 +176,16 @@ Signature: `setup_from_path(path: str, device: str = "cuda", **extra)`.
   usually a *different* upstream call than loading a registry name — e.g.
   FAIRChem's `load_predict_unit(path)` vs `get_predict_unit(name)` — which is
   why this is a separate function rather than a path-shaped `checkpoint`.
-- `device`, extra kwargs: as for `setup()`. Give extras defaults where
-  possible; a fine-tune needing a required kwarg still works (users pass it
-  via `setup_kwargs=` / `--kwarg`), but defaults make the common case
-  friendlier.
+- `device`, extra kwargs: as for `setup()`. Give extras defaults where a
+  default is *correct* for any weights file; a head-selection kwarg should
+  default to `None` and be forwarded — the upstream library errors when the
+  fine-tune actually needs one, and users pass it via `setup_kwargs=` /
+  `--kwarg` (it forwards to `setup_from_path()` for `:custom` checkpoints).
 
 Return: an ASE-compatible calculator.
 
 ```python
-def setup_from_path(path: str, device: str = "cuda", task: str = "omat"):
+def setup_from_path(path: str, device: str = "cuda", task: str | None = None):
     from fairchem.core import FAIRChemCalculator
     from fairchem.core.units.mlip_unit import load_predict_unit
 
@@ -222,6 +229,31 @@ Absent `CLUSTERS` (the normal case) means the env serves every cluster its
 install does. Like `CHECKPOINTS`, the list is AST-parsed — string literals
 only, and an empty list is an authoring error.
 
+### `VERIFY_KWARGS` dict (optional — verification kwargs for required-selection envs)
+
+When `setup()` *requires* a kwarg (a task-head selection with no default),
+verification needs a way to pick one: `rootstock smoke-test` and a bare
+`rootstock add` call `setup()` with no extra kwargs, and would otherwise fail
+on exactly the error the requirement exists to raise. Declare a module-level
+
+```python
+VERIFY_KWARGS = {
+    "uma-s-1p1": {"task": "omat"},
+    "uma:custom": {"task": "omat"},   # the weights= smoke-test leg needs one too
+}
+```
+
+keyed by canonical checkpoint id (`:custom` entries included — the nightly
+weights= leg re-loads a shipped checkpoint's weights through
+`setup_from_path()` and compares against that checkpoint's baseline, so give
+both the same selection). Values are literal dicts of setup kwargs, AST-parsed
+like `CHECKPOINTS` — no names or calls.
+
+Verification-only: explicit kwargs (`rootstock add --kwarg ...`) always win,
+and `RootstockCalculator` never reads it — users still select explicitly.
+Checkpoints without an entry verify with no extra kwargs, so most envs never
+declare this.
+
 ## Examples
 
 ### MACE (MP-0 and OFF23 in one env)
@@ -256,17 +288,31 @@ def setup(checkpoint: str, device: str = "cuda"):
 
 ### UMA (FAIRChem)
 
-`setup()` accepts an extra `task` kwarg. Users pass `setup_kwargs={"task": "omol"}` to `RootstockCalculator`, or `--kwarg task=omol` to `rootstock add`.
+UMA is multi-task: `setup()` requires an explicit `task` and errors without
+one. Users pass `setup_kwargs={"task": "omol"}` to `RootstockCalculator`, or
+`--kwarg task=omol` to `rootstock add`; `VERIFY_KWARGS` picks the head for
+verification.
 
 ```python
 CHECKPOINTS = {
     "uma-s-1p1": "uma-s-1p1",
 }
 
+UMA_TASKS = ("omat", "omol", "oc20", "odac", "omc")
 
-def setup(checkpoint: str, device: str = "cuda", task: str = "omat"):
+VERIFY_KWARGS = {
+    "uma-s-1p1": {"task": "omat"},
+}
+
+
+def setup(checkpoint: str, device: str = "cuda", task: str | None = None):
     from fairchem.core import FAIRChemCalculator, pretrained_mlip
 
+    if task is None:
+        raise ValueError(
+            f"{checkpoint} is multi-task and has no default head - select one "
+            f'with setup_kwargs={{"task": ...}}: one of {", ".join(UMA_TASKS)}'
+        )
     predictor = pretrained_mlip.get_predict_unit(CHECKPOINTS[checkpoint], device=device)
     return FAIRChemCalculator(predictor, task_name=task)
 ```

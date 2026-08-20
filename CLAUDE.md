@@ -141,7 +141,9 @@ with RootstockCalculator(
     energy = atoms.get_potential_energy()
 
 # Forward extra kwargs to the env's setup() function. Cannot contain
-# "checkpoint" or "device" — those are passed at the top level.
+# "checkpoint" or "device" — those are passed at the top level. Multi-head
+# models (UMA `task`, MACE-MH-1 `head`) REQUIRE a head selection here — no
+# default head; the env's VERIFY_KWARGS covers smoke-test/add instead.
 with RootstockCalculator(
     cluster="delta",
     checkpoint="uma-s-1p1",
@@ -177,7 +179,7 @@ with RootstockCalculator(
 | `esen` | `esen-md-direct-all-omol`, `esen-sm-conserving-all-omol`, `esen-sm-direct-all-omol` |
 | `orb` | `orb-v2` |
 | `tensornet` | `tensornet-matpes-pbe-2025-2` |
-| `uma` | `uma-s-1p1` |
+| `uma` | `uma-s-1p1`, `uma-s-1p2p1`, `uma-m-1p1` |
 
 ## Build Process
 

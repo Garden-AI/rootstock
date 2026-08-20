@@ -88,19 +88,33 @@ def main() -> int:
     )
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
+        "--kwarg",
+        action="append",
+        default=[],
+        metavar="KEY=VAL",
+        help="Extra setup() kwarg (repeatable), e.g. --kwarg task=omat for "
+        "models that require an explicit head selection.",
+    )
+    parser.add_argument(
         "--system",
         default="molecule",
         choices=["molecule", "crystal", "slab_co"],
         help="Probe system to compute one forward pass on.",
     )
     args = parser.parse_args()
+    setup_kwargs = {}
+    for spec in args.kwarg:
+        key, sep, value = spec.partition("=")
+        if not sep or not key:
+            parser.error(f"--kwarg expects key=value, got {spec!r}")
+        setup_kwargs[key] = value
 
     config_path = Path(args.config).resolve()
     overall_t0 = time.time()
     t0 = overall_t0
     print(
         f"PROBE: config={config_path} checkpoint={args.checkpoint!r} "
-        f"device={args.device} system={args.system}",
+        f"device={args.device} system={args.system} kwargs={setup_kwargs}",
         flush=True,
     )
 
@@ -111,7 +125,11 @@ def main() -> int:
         atoms = build_system(args.system)
         t0 = stage(f"build_system:{args.system}:{len(atoms)}atoms", t0)
 
-        calc = setup(args.checkpoint, args.device) if args.checkpoint else setup(device=args.device)
+        calc = (
+            setup(args.checkpoint, args.device, **setup_kwargs)
+            if args.checkpoint
+            else setup(device=args.device, **setup_kwargs)
+        )
         t0 = stage("setup_calculator", t0)
 
         atoms.calc = calc

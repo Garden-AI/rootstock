@@ -92,7 +92,9 @@ def probe_image(
     )
 
 
-def _run_probe_subprocess(checkpoint: str, system: str, device: str = "cuda") -> int:
+def _run_probe_subprocess(
+    checkpoint: str, system: str, device: str = "cuda", kwargs: list[str] | None = None
+) -> int:
     """
     Run probe.py as a subprocess so its STAGE markers stream to stdout in
     realtime. Called from inside an @app.function whose image has the right
@@ -123,6 +125,8 @@ def _run_probe_subprocess(checkpoint: str, system: str, device: str = "cuda") ->
     ]
     if checkpoint:
         cmd += ["--checkpoint", checkpoint]
+    for spec in kwargs or []:
+        cmd += ["--kwarg", spec]
     print(f"PROBE_CMD: {' '.join(cmd)}", flush=True)
     result = subprocess.run(cmd, env=sub_env)
     if result.returncode != 0:
@@ -352,29 +356,29 @@ def probe_escn(checkpoint: str = "escn-l6-m2-lay12-s2ef-oc20-all-md", system: st
 
 @probe_image(
     "uma.py",
-    ["fairchem-core>=2.20", "ase>=3.22", "torch>=2.4.0"],
+    ["fairchem-core>=2.22", "ase>=3.22", "torch>=2.4.0"],
     python_version="3.11",
 )
 def probe_uma_small(checkpoint: str = "uma-s-1p1", system: str = "crystal"):
     """Probe UMA Small on OMAT-style bulk materials."""
-    return _run_probe_subprocess(checkpoint, system)
+    return _run_probe_subprocess(checkpoint, system, kwargs=["task=omat"])
 
 
 @probe_image(
     "uma.py",
-    ["fairchem-core>=2.20", "ase>=3.22", "torch>=2.4.0"],
+    ["fairchem-core>=2.22", "ase>=3.22", "torch>=2.4.0"],
     python_version="3.11",
 )
-def probe_uma_1p2(checkpoint: str = "uma-s-1p2", system: str = "crystal"):
-    """Probe UMA Small v1.2 (latest, fixes the uma-s-1 extensivity bug)."""
-    return _run_probe_subprocess(checkpoint, system)
+def probe_uma_1p2p1(checkpoint: str = "uma-s-1p2p1", system: str = "crystal"):
+    """Probe UMA Small v1.2.1 (latest; fixes uma-s-1p2's known bug)."""
+    return _run_probe_subprocess(checkpoint, system, kwargs=["task=omat"])
 
 
 @probe_image(
     "uma.py",
-    ["fairchem-core>=2.20", "ase>=3.22", "torch>=2.4.0"],
+    ["fairchem-core>=2.22", "ase>=3.22", "torch>=2.4.0"],
     python_version="3.11",
 )
 def probe_uma_medium(checkpoint: str = "uma-m-1p1", system: str = "crystal"):
     """Probe UMA Medium on OMAT-style bulk materials."""
-    return _run_probe_subprocess(checkpoint, system)
+    return _run_probe_subprocess(checkpoint, system, kwargs=["task=omat"])
