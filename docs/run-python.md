@@ -83,6 +83,26 @@ with RootstockCalculator(
 
 `setup_kwargs` will not override the top-level `checkpoint` or `device` args. The authoritative list of what an env accepts is its `setup()` signature. You can see what extra arguments a model can take by looking it up in the [Matter Model Almanac](https://garden-ai.github.io/almanac).
 
+## Intel GPUs (ALCF Aurora)
+
+On Aurora, pass `device="xpu"` and run on a compute node. Each node has 6 Intel Data Center GPU Max cards (12 tiles); pin the worker to a single tile with `ZE_AFFINITY_MASK` in your job **before** creating the calculator (the worker inherits the environment):
+
+```bash
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0   # one PVC tile
+```
+
+```python
+with RootstockCalculator(cluster="aurora", checkpoint="mace-mp-0-small", device="xpu") as calc:
+    atoms.calc = calc
+    print(atoms.get_potential_energy())
+```
+
+Two Aurora-specific notes:
+
+- **First load is slow.** The Intel GPU runtime compiles kernels on the first forward pass — MACE takes a minute or two, and larger models like UMA can take several minutes to finish `setup()`. The worker must finish loading before it connects, so raise the timeout for big models: `RootstockCalculator(..., timeout=3000)`. Subsequent calls in the same `with` block reuse the warm model.
+- **FP64.** The Aurora env configs default to double precision, which is what has been verified on PVC.
+
 ## Next steps
 
 - Full constructor parameters, examples, and the CLI: [API Reference](api.md)

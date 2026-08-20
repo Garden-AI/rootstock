@@ -224,6 +224,8 @@ If a node has both network access and a GPU, run without `--no-verify` to do eve
 
 `rootstock add` is idempotent — re-running it after a successful download will skip the download phase and just re-verify.
 
+**Non-CUDA accelerators.** `--device` defaults to `cuda`; pass the right one for the cluster (e.g. `--device xpu` on Intel/Aurora). On Aurora, verify on a compute node with one PVC tile pinned (`export ZE_AFFINITY_MASK=0`), and give large models extra time — the Intel GPU runtime compiles kernels on the first load, so UMA needs a raised `smoke-test --verify-timeout` (e.g. `1800`). Install the envs from `aurora_configs/` (they pin the XPU torch wheel index).
+
 `rootstock smoke-test` re-verifies every fetched checkpoint. To keep a cluster's
 manifest current automatically, set it up on a schedule — see
 [Nightly Automated Smoke-Testing](nightly-smoke-testing.md) for the recommended

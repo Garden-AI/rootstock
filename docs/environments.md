@@ -2,7 +2,7 @@
 
 A model family is made available to Rootstock through an **environment file**: a small Python file that pins the model's dependencies in an isolated virtual environment and exposes a `setup()` that returns an ASE calculator. One file covers a whole family — every checkpoint it lists.
 
-These files are written once per family and kept as working **samples** in the Rootstock repo, under [`sample_model_configurations/`](https://github.com/Garden-AI/rootstock/tree/main/sample_model_configurations/). Samples are grouped by hardware target (currently, NVIDIA and AMD).
+These files are written once per family and kept as working **samples** in the Rootstock repo, under [`sample_model_configurations/`](https://github.com/Garden-AI/rootstock/tree/main/sample_model_configurations/). Samples are grouped by hardware target (currently `nvidia_configs`, `amd_configs`, and `aurora_configs` for Intel GPUs).
 
 ![Define a model family as a Python file, build its isolated env, then verify and re-verify it on a GPU node](assets/rootstock_model_installation.png)
 
@@ -100,6 +100,27 @@ Rebuilds (`rootstock install <name> --force`) install exactly the locked version
 
 - `requires-python`: Minimum Python version.
 - `dependencies`: Pip-installable packages with version constraints.
+
+**Non-CUDA GPUs** need their PyTorch wheel from a hardware-specific index, pinned in the same PEP 723 block via `[tool.uv.sources]` + `[[tool.uv.index]]` (honored because `install` uses `uv sync --script`). AMD uses the ROCm index; Intel/Aurora uses the XPU index:
+
+```python
+# dependencies = [
+#     "mace-torch>=0.3.15", "ase>=3.22",
+#     "torch>=2.13",   # older XPU wheels have much slower FP64 kernels
+#     "triton-xpu",    # torch's XPU dep; direct so the explicit index routes it
+# ]
+#
+# [tool.uv.sources]
+# torch = { index = "pytorch-xpu" }
+# triton-xpu = { index = "pytorch-xpu" }
+#
+# [[tool.uv.index]]
+# name = "pytorch-xpu"
+# url = "https://download.pytorch.org/whl/xpu"
+# explicit = true
+```
+
+Then `setup()` takes `device="xpu"`. See `aurora_configs/{mace,uma}.py` for complete examples (UMA also monkeypatches FairChem to accept `xpu` and forces FP64). PyTorch's XPU build ships its Intel runtime under the env's `lib/`, which the worker adds to `LD_LIBRARY_PATH` automatically.
 
 ### `CHECKPOINTS` table
 
