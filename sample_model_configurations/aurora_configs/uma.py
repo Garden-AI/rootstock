@@ -3,14 +3,19 @@
 # dependencies = [
 #     "fairchem-core>=2.20",
 #     "ase>=3.22",
-#     # Intel XPU (Aurora PVC) torch build; pytorch-triton-xpu is its runtime dep.
-#     "torch>=2.6",
-#     "pytorch-triton-xpu",
+#     # Intel XPU (Aurora PVC) torch build. >=2.13: older XPU wheels (e.g. 2.8)
+#     # have far slower FP64 kernels -- UMA's first forward took >40 min on
+#     # 2.8.0+xpu vs ~2 min on 2.13.0+xpu (PVC tile).
+#     "torch>=2.13",
+#     # torch's XPU wheels depend on this; it lives only on the XPU index, so it
+#     # must be a direct dep for [tool.uv.sources] to route it (the index is
+#     # explicit, so transitive-only deps aren't fetched from it).
+#     "triton-xpu",
 # ]
 #
 # [tool.uv.sources]
 # torch = { index = "pytorch-xpu" }
-# pytorch-triton-xpu = { index = "pytorch-xpu" }
+# triton-xpu = { index = "pytorch-xpu" }
 #
 # [[tool.uv.index]]
 # name = "pytorch-xpu"

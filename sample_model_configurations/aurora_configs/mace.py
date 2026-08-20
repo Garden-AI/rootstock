@@ -5,14 +5,17 @@
 #     # omol needs 0.3.14, mpa-0 needs 0.3.10).
 #     "mace-torch>=0.3.15",
 #     "ase>=3.22",
-#     # Intel XPU (Aurora PVC) torch build; pytorch-triton-xpu is its runtime dep.
-#     "torch>=2.6",
-#     "pytorch-triton-xpu",
+#     # Intel XPU (Aurora PVC) torch build. >=2.13: older XPU wheels have much
+#     # slower FP64 kernels on PVC.
+#     "torch>=2.13",
+#     # torch's XPU wheels depend on this; it lives only on the XPU index, so it
+#     # must be a direct dep for [tool.uv.sources] to route it.
+#     "triton-xpu",
 # ]
 #
 # [tool.uv.sources]
 # torch = { index = "pytorch-xpu" }
-# pytorch-triton-xpu = { index = "pytorch-xpu" }
+# triton-xpu = { index = "pytorch-xpu" }
 #
 # [[tool.uv.index]]
 # name = "pytorch-xpu"

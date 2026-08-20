@@ -384,13 +384,16 @@ def _vendor_rootstock_wheel(root: Path) -> Path | None:
 
     from rootstock import __version__
 
-    if "dev" in __version__:
-        return None
-
+    # A wheel pre-placed in {root}/wheels/ wins even for dev builds — it lets an
+    # unpublished build (e.g. a feature branch under review) install its own
+    # rootstock into the worker env instead of a git sha that may not be pushed.
     wheels_dir = root / "wheels"
     existing = sorted(wheels_dir.glob(f"rootstock-{__version__}-*.whl"))
     if existing:
         return existing[0]
+
+    if "dev" in __version__:
+        return None
 
     try:
         url = f"https://pypi.org/pypi/rootstock/{__version__}/json"
