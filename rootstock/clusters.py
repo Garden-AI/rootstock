@@ -62,6 +62,13 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
         root=Path("/sw/frontier/ums/ums047/rootstock"),
         cache_root=Path("/lustre/orion/ums047/world-shared/rootstock-cache"),
     ),
+    # ALCF Aurora (Intel Data Center GPU Max / Ponte Vecchio). Workers run on
+    # one PVC tile via device="xpu"; pin the tile with ZE_AFFINITY_MASK in the
+    # job (the worker inherits the environment). Install + weight cache both
+    # live on the /lus/flare project filesystem.
+    "aurora": Cluster(
+        root=Path("/lus/flare/projects/MatSciAI/rootstock"),
+    ),
 }
 
 
