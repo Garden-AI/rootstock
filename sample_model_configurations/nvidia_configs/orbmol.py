@@ -81,7 +81,7 @@ def _fetch(url: str, dest: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _make_calculator(orbff, atoms_adapter, device, **kwargs):
+def _make_calculator(orbff, atoms_adapter, device, edge_method=None, **kwargs):
     from ase.calculators.calculator import all_changes
     from orb_models.forcefield.inference.calculator import ORBCalculator
 
@@ -94,6 +94,12 @@ def _make_calculator(orbff, atoms_adapter, device, **kwargs):
                 atoms.info.setdefault("spin", 1)
             super().calculate(atoms, properties, system_changes)
 
+    # None = vendor default: on CUDA that's the library's own edge_method
+    # (knn_alchemi, Warp kernels); the ROCm variant resolves None to its
+    # knn_scipy pin instead. Named in the setup hooks (not just **kwargs)
+    # so the signature can't drift between vendor copies.
+    if edge_method is not None:
+        kwargs["edge_method"] = edge_method
     return OrbMolCalculator(orbff, atoms_adapter, device=device, **kwargs)
 
 
@@ -102,6 +108,7 @@ def setup(
     device: str = "cuda",
     precision: str = "float32-high",
     compile: bool | None = None,
+    edge_method: str | None = None,
     **kwargs,
 ):
     # Extra **kwargs go to ORBCalculator (e.g. max_num_neighbors=,
@@ -129,7 +136,7 @@ def setup(
         precision=precision,
         compile=compile,
     )
-    return _make_calculator(orbff, atoms_adapter, torch.device(device), **kwargs)
+    return _make_calculator(orbff, atoms_adapter, torch.device(device), edge_method, **kwargs)
 
 
 def setup_from_path(
@@ -138,6 +145,7 @@ def setup_from_path(
     arch: str = "orbmol-v2",
     precision: str = "float32-high",
     compile: bool | None = None,
+    edge_method: str | None = None,
     **kwargs,
 ):
     # Custom checkpoints (`:custom` ids with user weights). A weights file
@@ -163,4 +171,4 @@ def setup_from_path(
         precision=precision,
         compile=compile,
     )
-    return _make_calculator(orbff, atoms_adapter, torch.device(device), **kwargs)
+    return _make_calculator(orbff, atoms_adapter, torch.device(device), edge_method, **kwargs)

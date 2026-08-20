@@ -89,7 +89,7 @@ def _fetch(url: str, dest: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _make_calculator(orbff, atoms_adapter, device, edge_method, **kwargs):
+def _make_calculator(orbff, atoms_adapter, device, edge_method=None, **kwargs):
     from ase.calculators.calculator import all_changes
     from orb_models.forcefield.inference.calculator import ORBCalculator
 
@@ -102,9 +102,14 @@ def _make_calculator(orbff, atoms_adapter, device, edge_method, **kwargs):
                 atoms.info.setdefault("spin", 1)
             super().calculate(atoms, properties, system_changes)
 
-    return OrbMolCalculator(
-        orbff, atoms_adapter, device=device, edge_method=edge_method, **kwargs
-    )
+    # None = vendor default: here that's the knn_scipy pin (the library
+    # default knn_alchemi launches Warp/CUDA kernels — see module docstring);
+    # the CUDA variant resolves None to the library default instead. Named in
+    # the setup hooks (not just **kwargs) so the signature can't drift
+    # between vendor copies.
+    if edge_method is None:
+        edge_method = "knn_scipy"
+    return OrbMolCalculator(orbff, atoms_adapter, device=device, edge_method=edge_method, **kwargs)
 
 
 def setup(
@@ -112,7 +117,7 @@ def setup(
     device: str = "cuda",
     precision: str = "float32-high",
     compile: bool | None = None,
-    edge_method: str = "knn_scipy",
+    edge_method: str | None = None,
     **kwargs,
 ):
     # Extra **kwargs go to ORBCalculator (e.g. max_num_neighbors=,
@@ -140,9 +145,7 @@ def setup(
         precision=precision,
         compile=compile,
     )
-    return _make_calculator(
-        orbff, atoms_adapter, torch.device(device), edge_method, **kwargs
-    )
+    return _make_calculator(orbff, atoms_adapter, torch.device(device), edge_method, **kwargs)
 
 
 def setup_from_path(
@@ -151,7 +154,7 @@ def setup_from_path(
     arch: str = "orbmol-v2",
     precision: str = "float32-high",
     compile: bool | None = None,
-    edge_method: str = "knn_scipy",
+    edge_method: str | None = None,
     **kwargs,
 ):
     # Custom checkpoints (`:custom` ids with user weights). A weights file
@@ -177,6 +180,4 @@ def setup_from_path(
         precision=precision,
         compile=compile,
     )
-    return _make_calculator(
-        orbff, atoms_adapter, torch.device(device), edge_method, **kwargs
-    )
+    return _make_calculator(orbff, atoms_adapter, torch.device(device), edge_method, **kwargs)
