@@ -208,6 +208,16 @@ def spawn_in_env(
     if offline:
         env["HF_HUB_OFFLINE"] = "1"
 
+    # Prepend the env's own lib/ to LD_LIBRARY_PATH. Some GPU wheels ship native
+    # runtime libraries there and load them at import via the dynamic linker --
+    # e.g. PyTorch's Intel XPU build (Aurora) bundles its oneAPI/SYCL runtime in
+    # <venv>/lib and `import torch` fails without it on the path. Harmless for
+    # envs that don't need it (a venv lib/ dir with no such libraries).
+    env_lib = env_dir / "lib"
+    if env_lib.is_dir():
+        prev = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = f"{env_lib}{os.pathsep}{prev}" if prev else str(env_lib)
+
     tmp_dir = tempfile.mkdtemp(prefix="rootstock_spawn_")
     try:
         wrapper = Path(tmp_dir) / "wrapper.py"

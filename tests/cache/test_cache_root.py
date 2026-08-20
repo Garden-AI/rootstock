@@ -253,6 +253,25 @@ def test_spawn_in_env_online_by_default(tmp_path: Path, monkeypatch):
         assert "HF_HUB_OFFLINE" not in spec.env
 
 
+def test_spawn_in_env_prepends_env_lib_to_ld_library_path(tmp_path: Path, monkeypatch):
+    """GPU wheels (e.g. PyTorch Intel XPU on Aurora) ship native runtime libs in
+    <venv>/lib and load them at import; that dir must be on LD_LIBRARY_PATH."""
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/preexisting")
+    _make_fake_env(tmp_path)
+    (tmp_path / "envs" / "fake_env" / "lib").mkdir(parents=True)
+    with spawn_in_env(tmp_path, "fake_env", WORKER_WRAPPER, {}) as spec:
+        env_lib = str(tmp_path / "envs" / "fake_env" / "lib")
+        assert spec.env["LD_LIBRARY_PATH"] == f"{env_lib}:/preexisting"
+
+
+def test_spawn_in_env_no_lib_dir_leaves_ld_library_path(tmp_path: Path, monkeypatch):
+    """Envs without a lib/ dir must not get a bogus LD_LIBRARY_PATH entry."""
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+    _make_fake_env(tmp_path)
+    with spawn_in_env(tmp_path, "fake_env", WORKER_WRAPPER, {}) as spec:
+        assert "LD_LIBRARY_PATH" not in spec.env
+
+
 # ---------- RootstockCalculator wiring ------------------------------------
 
 
