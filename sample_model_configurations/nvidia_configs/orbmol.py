@@ -1,43 +1,35 @@
 # /// script
+# # <3.13: orb-models pins dm-tree==0.1.8, which has no cp313 wheel and whose
+# # sdist doesn't compile against modern GCC (vendored abseil).
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
 #     # 0.7.0 (2026-05-26) introduces orbmol_v2 and the orbmol-v1-* aliases
-#     # (orbmol-v1-conservative == orb-v3-conservative-omol). Upstream still
-#     # pins dm-tree==0.1.8 (no cp313 wheel), hence the <3.13 cap.
+#     # (orbmol-v1-conservative == orb-v3-conservative-omol).
 #     "orb-models>=0.7,<0.8",
 #     "ase>=3.25",
-#     "torch>=2.8,<3.0",
+#     "torch>=2.8",
+#     # Not imported here — constrains orb-models' transitive dep. setup()'s
+#     # no-lock serve path relies on cached_path returning local files without
+#     # locking or writing, verified against exactly this version (#67).
 #     "cached_path==1.8.10",
-#     # torch's ROCm wheels depend on this; it lives only on the ROCm
-#     # index, so it must be a direct dep for [tool.uv.sources] to route it.
-#     "pytorch-triton-rocm",
 # ]
 #
 # [tool.uv.sources]
-# torch = { index = "pytorch-rocm" }
-# pytorch-triton-rocm = { index = "pytorch-rocm" }
+# torch = { index = "pytorch-cu128" }
 #
 # [[tool.uv.index]]
-# name = "pytorch-rocm"
-# url = "https://download.pytorch.org/whl/rocm6.4"
+# name = "pytorch-cu128"
+# url = "https://download.pytorch.org/whl/cu128"
 # explicit = true
 # ///
-"""OrbMol env (ROCm) — Orbital Materials' molecular potentials (OMol25/OPoly26).
+"""OrbMol env (CUDA) — Orbital Materials' molecular potentials (OMol25/OPoly26).
 
 orbmol-v1-conservative is upstream's alias for orb-v3-conservative-omol;
 orbmol-v2 (2026-05) adds learnable long-range electrostatics (CoulombModule).
 
-ROCm caveats (orb-models 0.7 hard-depends on nvalchemi-toolkit-ops, NVIDIA
-Warp/CUDA kernels — pure-python wheel, so it *installs* fine here):
-
-- Neighbor lists: the 0.7 default edge_method is knn_alchemi (Warp/CUDA);
-  torch ROCm reports device.type == "cuda", so the default would try to
-  launch CUDA kernels on an MI250X. We pin edge_method="knn_scipy" (CPU
-  KDTree, pure scipy/torch after that) — override via setup kwarg if a
-  ROCm-capable path appears.
-- orbmol-v2 electrostatics: non-periodic systems use a pure-torch direct
-  Coulomb sum (fine on ROCm). Periodic systems go through nvalchemiops
-  Particle Mesh Ewald — expect failure on Frontier. Molecules only.
+CUDA counterpart of amd_configs/orbmol.py, minus the ROCm workarounds: the
+nvalchemiops Warp kernels run natively here, so the default edge_method and
+the Particle Mesh Ewald path (orbmol-v2, periodic cells) both work.
 
 Charge/spin: these are OMol-style conditioned models — ORBCalculator raises if
 atoms.info lacks "charge"/"spin" (spin = multiplicity). Set them per structure
@@ -102,14 +94,13 @@ def _make_calculator(orbff, atoms_adapter, device, edge_method=None, **kwargs):
                 atoms.info.setdefault("spin", 1)
             super().calculate(atoms, properties, system_changes)
 
-    # None = vendor default: here that's the knn_scipy pin (the library
-    # default knn_alchemi launches Warp/CUDA kernels — see module docstring);
-    # the CUDA variant resolves None to the library default instead. Named in
-    # the setup hooks (not just **kwargs) so the signature can't drift
-    # between vendor copies.
-    if edge_method is None:
-        edge_method = "knn_scipy"
-    return OrbMolCalculator(orbff, atoms_adapter, device=device, edge_method=edge_method, **kwargs)
+    # None = vendor default: on CUDA that's the library's own edge_method
+    # (knn_alchemi, Warp kernels); the ROCm variant resolves None to its
+    # knn_scipy pin instead. Named in the setup hooks (not just **kwargs)
+    # so the signature can't drift between vendor copies.
+    if edge_method is not None:
+        kwargs["edge_method"] = edge_method
+    return OrbMolCalculator(orbff, atoms_adapter, device=device, **kwargs)
 
 
 def setup(
@@ -130,10 +121,10 @@ def setup(
 
     # orb-models resolves its default weights URL through `cached_path`, which
     # write-locks its cache dir even on warm hits — EACCES for anyone who can't
-    # write the shared install. Handed a *local* path instead, cached_path
-    # returns it without locking. So the weights are pre-fetched into the
-    # shared model cache at `rootstock add` time (maintainer, cache writable)
-    # and every later serve loads that file.
+    # write the shared install (Garden-AI/rootstock#67). Handed a *local* path
+    # instead, cached_path returns it without locking. So the weights are
+    # pre-fetched into the shared model cache at `rootstock add` time
+    # (maintainer, cache writable) and every later serve loads that file.
     url = _default_weights_url(load_fn)
     weights = _local_weights_path(url)
     if not weights.exists():

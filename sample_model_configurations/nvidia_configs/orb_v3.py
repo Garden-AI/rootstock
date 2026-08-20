@@ -43,9 +43,6 @@ CHECKPOINTS = {
     "orb-v3-conservative-20-mpa": "orb-v3-conservative-20-mpa",
     "orb-v3-direct-inf-mpa": "orb-v3-direct-inf-mpa",
     "orb-v3-direct-20-mpa": "orb-v3-direct-20-mpa",
-    # The omol ids (orb-v3-{conservative,direct}-omol) are dropped from the
-    # catalog 2026-07-30: they had been failing verify on every cluster since
-    # 2026-05. Re-add once the failure is understood.
     # Your own fine-tuned v3 weights: pair with weights= (loaded via
     # setup_from_path).
     "orb-v3:custom": None,
