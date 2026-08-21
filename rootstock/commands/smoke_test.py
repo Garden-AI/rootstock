@@ -413,7 +413,7 @@ def cmd_smoke_test(args) -> int:
                 env_name=env_name,
                 checkpoint=ckpt_name,
                 device=device,
-                setup_kwargs={},  # smoke-test always uses env defaults; see design §7.2
+                setup_kwargs={},  # empty → verify falls back to the env's VERIFY_KWARGS
                 cache_root=cache_root,
                 weights_capture_path=str(capture_path),
                 results=run_results,
@@ -493,7 +493,7 @@ def cmd_smoke_test(args) -> int:
             env_name=leg.env_name,
             checkpoint=leg.custom_id,
             device=device,
-            setup_kwargs={},
+            setup_kwargs={},  # empty → VERIFY_KWARGS fallback (keyed by the :custom id)
             cache_root=cache_root,
             checkpoint_path=str(weights_path),
             results=run_results,

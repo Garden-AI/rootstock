@@ -465,6 +465,69 @@ def parse_clusters_list(env_source_path: Path) -> list[str] | None:
     return None
 
 
+def parse_verify_kwargs(env_source_path: Path) -> dict[str, dict]:
+    """AST-extract the optional module-level ``VERIFY_KWARGS`` dict literal.
+
+    ``VERIFY_KWARGS = {"uma-s-1p1": {"task": "omat"}}`` names the setup
+    kwargs verification uses for a checkpoint when the caller supplies none —
+    the escape hatch for envs whose ``setup()`` *requires* a kwarg (e.g. a
+    multi-head model that errors without an explicit head selection).
+    Verification-only: ``RootstockCalculator`` never reads it, so users still
+    have to select explicitly. Keys are canonical checkpoint ids (including
+    ``:custom`` entries, for the weights= smoke-test leg); values are literal
+    dicts of JSON-safe scalars, same shape as ``setup_kwargs``.
+
+    Raises ValueError on a non-literal or wrongly-shaped declaration,
+    matching ``parse_checkpoints_dict``. Absent means ``{}``.
+    """
+    tree = ast.parse(env_source_path.read_text(), filename=str(env_source_path))
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if not (
+            len(targets) == 1
+            and isinstance(targets[0], ast.Name)
+            and targets[0].id == "VERIFY_KWARGS"
+        ):
+            continue
+        try:
+            parsed = ast.literal_eval(value)
+        except ValueError:
+            raise ValueError(
+                f"{env_source_path}: VERIFY_KWARGS must be a dict literal "
+                f"(no names, calls, or comprehensions)."
+            ) from None
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{env_source_path}: VERIFY_KWARGS must be a dict literal.")
+        for ckpt_id, kwargs in parsed.items():
+            if not isinstance(ckpt_id, str):
+                raise ValueError(
+                    f"{env_source_path}: VERIFY_KWARGS keys must be checkpoint-id strings."
+                )
+            if not isinstance(kwargs, dict) or not all(isinstance(k, str) for k in kwargs):
+                raise ValueError(
+                    f"{env_source_path}: VERIFY_KWARGS['{ckpt_id}'] must be a "
+                    f"dict of setup kwargs (string keys)."
+                )
+        return parsed
+    return {}
+
+
+def verify_kwargs_for(root: Path | str, env_name: str, checkpoint: str) -> dict:
+    """The built env's ``VERIFY_KWARGS`` entry for one checkpoint, ``{}`` when
+    the source is missing or declares none. Malformed declarations raise —
+    an authoring error should surface at verification, not degrade into a
+    cryptic model-load failure."""
+    env_source = Path(root) / "envs" / env_name / "env_source.py"
+    if not env_source.exists():
+        return {}
+    return parse_verify_kwargs(env_source).get(checkpoint, {})
+
+
 def declares_setup_from_path(env_source_path: Path) -> bool:
     """
     Return True when the env source declares a module-level ``setup_from_path``.
