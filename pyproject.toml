@@ -92,9 +92,11 @@ include = ["rootstock"]
 
 # The optional integrations import their extras (atomate2, mlipx, zntrack)
 # which aren't installed in the dev environment, and mix into third-party
-# base classes ty can't see — silence just those two rules there.
+# base classes ty can't see — silence just those two rules there. The
+# batched package is in the same position: torch/nvalchemi exist only in
+# the serving environments (engine side and worker envs), never here.
 [[tool.ty.overrides]]
-include = ["rootstock/integrations/**"]
+include = ["rootstock/integrations/**", "rootstock/batched/**"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
