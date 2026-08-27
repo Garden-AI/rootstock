@@ -77,12 +77,11 @@ def run_baseline(args, systems_npz, workdir, *, forward_iters=0, nve_steps=0, nv
 
 
 def make_model(args):
-    from rootstock.batched.model import RootstockModel
+    from rootstock.batched.model import AlchemiModel
 
-    return RootstockModel(
+    return AlchemiModel(
         args.checkpoint,
         root=args.root,
-        env=args.env,
         device=args.device,
         setup_kwargs=json.loads(args.setup_kwargs),
         neighbor_mode=args.neighbor_mode,

@@ -3,7 +3,7 @@ Modal harness for the batched (nvalchemi) IPC prototype.
 
 Each family gets one image holding the production two-venv topology in a
 single container: the *main* interpreter runs the nvalchemi engine plus
-the rootstock client (``RootstockModel``), and a hand-built venv at
+the rootstock client (``AlchemiModel``), and a hand-built venv at
 ``/rs-root/envs/<family>`` plays the pre-built Rootstock environment
 (nvalchemi + the family's model stack + the rootstock wheel, so the
 spawned batched worker imports match production). The probe measures
@@ -130,7 +130,7 @@ mace_image = ipc_image(
 def probe_mace(
     mode: str = "all",
     neighbor_mode: str = "worker",
-    checkpoint: str = "mace-medium-0b2-batched",
+    checkpoint: str = "mace-mp-medium-0b2",
     grid: str | None = None,
     dtype: str | None = None,
     transport: str = "socket",
@@ -160,7 +160,7 @@ def probe_mace(
 def probe_mace_cpu(
     mode: str = "correctness",
     neighbor_mode: str = "worker",
-    checkpoint: str = "mace-medium-0b2-batched",
+    checkpoint: str = "mace-mp-medium-0b2",
 ):
     assert (
         _run_probe(
@@ -190,7 +190,7 @@ uma_image = ipc_image("uma", ["nvalchemi-toolkit[uma]"])
 def probe_uma(
     mode: str = "all",
     task: str = "omol",
-    checkpoint: str = "uma-s-1p1-batched",
+    checkpoint: str = "uma-s-1p1",
     grid: str | None = None,
 ):
     assert (
@@ -254,7 +254,7 @@ aimnet2_image = ipc_image(
 def probe_aimnet2(
     mode: str = "all",
     neighbor_mode: str = "worker",
-    checkpoint: str = "aimnet2-batched",
+    checkpoint: str = "aimnet2",
     grid: str | None = None,
     transport: str = "socket",
 ):

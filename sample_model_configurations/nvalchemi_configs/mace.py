@@ -13,7 +13,7 @@ NeighborConfig) unless the client ships them.
 """
 
 CHECKPOINTS = {
-    "mace-medium-0b2-batched": "medium-0b2",
+    "mace-mp-medium-0b2": "medium-0b2",
 }
 
 

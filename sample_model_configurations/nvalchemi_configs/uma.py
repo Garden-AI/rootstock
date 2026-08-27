@@ -17,7 +17,7 @@ worker skips neighbor-list construction (``compute_neighbors: False``).
 """
 
 CHECKPOINTS = {
-    "uma-s-1p1-batched": "uma-s-1p1",
+    "uma-s-1p1": "uma-s-1p1",
 }
 
 

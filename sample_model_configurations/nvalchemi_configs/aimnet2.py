@@ -13,7 +13,7 @@ per-system total charge (use 0 for neutral systems).
 """
 
 CHECKPOINTS = {
-    "aimnet2-batched": "aimnet2",
+    "aimnet2": "aimnet2",
 }
 
 

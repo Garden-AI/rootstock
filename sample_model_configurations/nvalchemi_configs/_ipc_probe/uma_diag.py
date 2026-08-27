@@ -56,7 +56,7 @@ def main():
     from env_source import setup_batched
 
     device = torch.device(device_str)
-    result = setup_batched("uma-s-1p1-batched", device_str, task="omol")
+    result = setup_batched("uma-s-1p1", device_str, task="omol")
     wrapper, _ = result if isinstance(result, tuple) else (result, {})
     print(
         "inference_settings:",

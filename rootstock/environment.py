@@ -544,6 +544,71 @@ def declares_setup_from_path(env_source_path: Path) -> bool:
     )
 
 
+def declares_setup_batched(env_source_path: Path) -> bool:
+    """
+    Return True when the env source declares a module-level ``setup_batched``.
+
+    ``setup_batched(checkpoint, device="cuda", **kwargs)`` is the opt-in hook
+    that serves a checkpoint as a batched (nvalchemi) model wrapper instead of
+    an ASE calculator. Presence is all that's checked, mirroring
+    :func:`declares_setup_from_path`.
+    """
+    tree = ast.parse(env_source_path.read_text(), filename=str(env_source_path))
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "setup_batched"
+        for node in tree.body
+    )
+
+
+def find_batched_env_for_checkpoint(
+    root: Path | str, checkpoint_id: str, cluster: str | None = None
+) -> str:
+    """
+    Return the installed env that both declares ``checkpoint_id`` and offers
+    ``setup_batched`` — the batched twin of :func:`find_env_for_checkpoint`.
+
+    A checkpoint id names the same weights on both serving paths, so the same
+    id may be declared by an ASE-only env and a batched-capable env; filtering
+    on the capability first keeps that overlap from reading as ambiguity.
+    CLUSTERS restrictions are honored the same way as the ASE path.
+    """
+    root = Path(root)
+    declared = list_declared_checkpoints(root)
+    batched: dict[str, dict[str, str]] = {}
+    for env_name, ckpts in declared.items():
+        source = root / "envs" / env_name / "env_source.py"
+        try:
+            if declares_setup_batched(source):
+                batched[env_name] = ckpts
+        except (OSError, SyntaxError):
+            continue
+
+    candidates = [env_name for env_name, ckpts in batched.items() if checkpoint_id in ckpts]
+    if candidates:
+        return _pick_hosting_env(root, candidates, checkpoint_id, cluster)
+
+    if batched:
+        listing = "\n".join(
+            f"  {env}: {', '.join(ids) or '(none)'}" for env, ids in batched.items()
+        )
+        msg = (
+            f"No installed env serves checkpoint '{checkpoint_id}' in batched "
+            f"mode.\nBatched-capable envs and their checkpoint ids:\n{listing}"
+        )
+    elif declared:
+        msg = (
+            f"No installed env at {root} declares setup_batched — the batched "
+            f"(nvalchemi) serving path needs an env source that defines it. "
+            f"Installed envs serve the ASE path only."
+        )
+    else:
+        msg = (
+            f"No envs are installed at {root}. "
+            f"Run `rootstock install <env-file> --root {root}` first."
+        )
+    raise CheckpointNotFoundError(msg)
+
+
 def _suggest_custom_entry(root: Path | str, env_name: str, checkpoint: str) -> str:
     """Error text for ``weights`` arriving with a non-custom id: silently
     ignoring the file would run the shipped weights — plausible results,

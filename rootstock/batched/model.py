@@ -1,5 +1,5 @@
 """
-``RootstockModel``: an nvalchemi ``BaseModelMixin`` proxy whose real model
+``AlchemiModel``: an nvalchemi ``BaseModelMixin`` proxy whose real model
 runs in a Rootstock worker subprocess.
 
 The proxy advertises the worker wrapper's ``ModelConfig`` with one
@@ -31,7 +31,11 @@ from nvalchemi.models.base import BaseModelMixin, ModelConfig
 from torch import nn
 
 from rootstock.batched.wire import arrays_to_tensors, recv_msg, send_msg, tensors_to_arrays
+from rootstock.clusters import get_cluster
+from rootstock.config import resolve_default_root
+from rootstock.environment import find_batched_env_for_checkpoint
 from rootstock.exceptions import RootstockError
+from rootstock.layout import ensure_layout_compatible, resolve_cache_root
 from rootstock.spawn import spawn_in_env
 
 logger = logging.getLogger("rootstock.batched.model")
@@ -70,18 +74,34 @@ class BatchedWorkerError(RootstockError, RuntimeError):
     """The batched worker died or reported a compute error."""
 
 
+class _CudaTransportError(BatchedWorkerError):
+    """CUDA IPC setup failed with the socket stream still aligned.
+
+    Raised only at points where no request is in flight (client-side export
+    failure, or a worker error reply that was fully consumed), so the auto
+    transport can retry the same batch over the socket transport.
+    """
+
+
 def _tail(text: str, limit: int = 8192) -> str:
     return text[-limit:] if len(text) > limit else text
 
 
-class RootstockModel(nn.Module, BaseModelMixin):
+class AlchemiModel(nn.Module, BaseModelMixin):
     """Batched nvalchemi model served from an isolated Rootstock environment.
 
+    The checkpoint id is the same canonical id the ASE path uses — same
+    weights, same resolution: the hosting env is found by walking the
+    installed envs for one that declares the id *and* offers
+    ``setup_batched``.
+
     Args:
-        checkpoint: Checkpoint id understood by the env source's
-            ``setup_batched`` (a key of its ``CHECKPOINTS`` table).
-        root: Rootstock install root.
-        env: Hosting environment name.
+        checkpoint: Canonical checkpoint id (e.g. ``"uma-s-1p1"``).
+        cluster: Known cluster name; mutually exclusive with ``root``.
+        root: Rootstock install root. When neither is given, ROOTSTOCK_ROOT
+            and then the configured default apply, as for the calculator.
+        cache_root: Optional cache override; the install's own declaration
+            decides otherwise.
         device: Worker-side compute device (``"cuda"`` / ``"cpu"``).
         setup_kwargs: Extra kwargs for ``setup_batched`` (e.g. UMA ``task``).
         neighbor_mode: ``"worker"`` (default) — the worker builds neighbor
@@ -89,11 +109,11 @@ class RootstockModel(nn.Module, BaseModelMixin):
             ``neighbor_config``; ``"engine"`` — the proxy keeps the real
             ``neighbor_config`` so the engine's NeighborListHook builds the
             list, which then ships over the wire each step.
-        transport: ``"socket"`` (default) — tensors travel as raw bytes;
-            ``"cuda"`` — CUDA IPC: shared GPU buffers registered per batch
-            shape, per-step traffic is a device-side copy plus a control
-            message. Requires engine and worker on the same CUDA device,
-            and torch versions with a compatible share/rebuild ABI.
+        transport: ``"auto"`` (default) picks per install: CUDA IPC when the
+            worker computes on CUDA (shared GPU buffers, ~100-byte control
+            messages), falling back to the raw-bytes socket transport if
+            registration fails; explicit ``"socket"`` / ``"cuda"`` pin one,
+            mainly for benchmarking.
         accept_timeout: Seconds to wait for the worker to load the model
             and connect.
         collect_stats: Record per-call timing/bytes in ``self.stats``.
@@ -103,45 +123,84 @@ class RootstockModel(nn.Module, BaseModelMixin):
         self,
         checkpoint: str,
         *,
-        root: str | Path,
-        env: str,
+        cluster: str | None = None,
+        root: str | Path | None = None,
+        cache_root: str | Path | None = None,
         device: str = "cuda",
         setup_kwargs: dict | None = None,
         neighbor_mode: str = "worker",
-        transport: str = "socket",
+        transport: str = "auto",
         accept_timeout: float = 1800.0,
         collect_stats: bool = True,
     ) -> None:
         super().__init__()
         if neighbor_mode not in ("worker", "engine"):
             raise ValueError(f"neighbor_mode must be 'worker' or 'engine', got {neighbor_mode!r}")
-        if transport not in ("socket", "cuda"):
-            raise ValueError(f"transport must be 'socket' or 'cuda', got {transport!r}")
+        if transport not in ("auto", "socket", "cuda"):
+            raise ValueError(f"transport must be 'auto', 'socket' or 'cuda', got {transport!r}")
         if transport == "cuda" and device == "cpu":
             raise ValueError("transport='cuda' requires a CUDA worker device")
+        if cluster is not None and root is not None:
+            raise ValueError("Cannot specify both 'cluster' and 'root'")
+        if cluster is not None:
+            root = get_cluster(cluster).root
+        elif root is not None:
+            root = Path(root)
+        else:
+            root = resolve_default_root()
+            if root is None:
+                raise ValueError(
+                    "Must specify 'cluster' or 'root' (or set the ROOTSTOCK_ROOT "
+                    "environment variable, or configure root in "
+                    "~/.config/rootstock/config.toml)"
+                )
+        ensure_layout_compatible(root)
+
         self.checkpoint = checkpoint
         self.worker_device = device
         self.neighbor_mode = neighbor_mode
-        self.transport = transport
+        self._transport = "cuda" if transport == "auto" and device != "cpu" else transport
+        if self._transport == "auto":
+            self._transport = "socket"
+        self._transport_pinned = transport != "auto"
         self.collect_stats = collect_stats
         self.stats: list[dict] = []
         self._ipc_sig: tuple | None = None
         self._ipc_bufs: dict[str, torch.Tensor] = {}
         self._ipc_outs: dict[str, torch.Tensor] = {}
 
+        env = find_batched_env_for_checkpoint(root, checkpoint, cluster)
         self._exit_stack = contextlib.ExitStack()
         try:
-            self._start_worker(Path(root), env, setup_kwargs or {}, accept_timeout)
+            self._start_worker(
+                root,
+                env,
+                setup_kwargs or {},
+                accept_timeout,
+                cache_root=resolve_cache_root(root, explicit=cache_root),
+            )
             self._handshake(accept_timeout)
         except BaseException:
             self._exit_stack.close()
             raise
 
+    @property
+    def transport(self) -> str:
+        """The transport in effect (``"cuda"`` or ``"socket"``)."""
+        return self._transport
+
     # ------------------------------------------------------------------
     # Worker lifecycle
     # ------------------------------------------------------------------
 
-    def _start_worker(self, root: Path, env: str, setup_kwargs: dict, accept_timeout: float):
+    def _start_worker(
+        self,
+        root: Path,
+        env: str,
+        setup_kwargs: dict,
+        accept_timeout: float,
+        cache_root: Path | None = None,
+    ):
         import subprocess
 
         self._socket_dir = tempfile.mkdtemp(prefix="rootstock_batched_")
@@ -161,7 +220,7 @@ class RootstockModel(nn.Module, BaseModelMixin):
             "setup_kwargs": setup_kwargs,
         }
         spec = self._exit_stack.enter_context(
-            spawn_in_env(root, env, BATCHED_WORKER_WRAPPER, payload)
+            spawn_in_env(root, env, BATCHED_WORKER_WRAPPER, payload, cache_root=cache_root)
         )
         # Files, not pipes: a noisy model load can exceed the OS pipe buffer
         # and deadlock before the worker ever connects.
@@ -333,8 +392,11 @@ class RootstockModel(nn.Module, BaseModelMixin):
             tuple(active),
         )
         if sig != self._ipc_sig:
-            self._ipc_bufs = {k: t.detach().contiguous().clone() for k, t in tensors.items()}
-            descs = {k: export_cuda_tensor(t) for k, t in self._ipc_bufs.items()}
+            try:
+                self._ipc_bufs = {k: t.detach().contiguous().clone() for k, t in tensors.items()}
+                descs = {k: export_cuda_tensor(t) for k, t in self._ipc_bufs.items()}
+            except Exception as exc:
+                raise _CudaTransportError(f"CUDA IPC export failed: {exc}") from exc
             torch.cuda.synchronize(device)
             send_msg(
                 self._sock,
@@ -343,12 +405,15 @@ class RootstockModel(nn.Module, BaseModelMixin):
             )
             reply, _, _ = recv_msg(self._sock)
             if reply.get("type") == "error":
-                raise BatchedWorkerError(
+                raise _CudaTransportError(
                     f"worker registration failed:\n{reply.get('traceback', '')}"
                 )
             if reply.get("type") != "registered":
                 raise self._fail(f"expected registered, got {reply.get('type')!r}")
-            self._ipc_outs = {k: import_cuda_tensor(d) for k, d in reply["descriptors"].items()}
+            try:
+                self._ipc_outs = {k: import_cuda_tensor(d) for k, d in reply["descriptors"].items()}
+            except Exception as exc:
+                raise _CudaTransportError(f"CUDA IPC import failed: {exc}") from exc
             self._ipc_sig = sig
         else:
             for key, t in tensors.items():
@@ -388,8 +453,20 @@ class RootstockModel(nn.Module, BaseModelMixin):
         return output
 
     def forward(self, data, **kwargs) -> OrderedDict:
-        if self.transport == "cuda":
-            return self._forward_cuda(data)
+        if self._transport == "cuda":
+            try:
+                return self._forward_cuda(data)
+            except _CudaTransportError:
+                if self._transport_pinned:
+                    raise
+                logger.warning(
+                    "CUDA IPC transport unavailable; falling back to the socket transport",
+                    exc_info=True,
+                )
+                self._transport = "socket"
+        return self._forward_socket(data)
+
+    def _forward_socket(self, data) -> OrderedDict:
         device = data.positions.device
         stat: dict[str, Any] = {}
 
