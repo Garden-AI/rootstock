@@ -120,7 +120,7 @@ Rebuilds (`rootstock install <name> --force`) install exactly the locked version
 # explicit = true
 ```
 
-Then `setup()` takes `device="xpu"`. See `aurora_configs/{mace,uma}.py` for complete examples (UMA also monkeypatches FairChem to accept `xpu` and forces FP64). PyTorch's XPU build ships its Intel runtime under the env's `lib/`, which the worker adds to `LD_LIBRARY_PATH` automatically.
+Then `setup()` takes `device="xpu"`. See `aurora_configs/{mace,uma,esen,allscaip}.py` for complete examples (the FairChem envs install fairchem-core from a fork with native XPU support — PyPI releases accept only `cpu`/`cuda` — and force FP64 inference). PyTorch's XPU build ships its Intel runtime under the env's `lib/`, which the worker adds to `LD_LIBRARY_PATH` automatically.
 
 ### `CHECKPOINTS` table
 
