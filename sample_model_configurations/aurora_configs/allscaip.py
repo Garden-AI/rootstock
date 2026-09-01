@@ -30,11 +30,21 @@
 """AllScAIP env (Intel XPU / Aurora) - FAIRChem scalable attention MLIP.
 
 Same as nvidia_configs/allscaip.py except (1) torch resolves from the Intel
-XPU wheel index, (2) fairchem-core installs from a fork with native XPU
-support, (3) InferenceSettings defaults to float32, so we set
-base_precision_dtype=float64 to match the FP64 reference, and (4) FP64
-inference needs a dtype patch in AllScAIP's radius graph (see
-_patch_image_id_dtype).
+XPU wheel index and (2) fairchem-core installs from a fork with native XPU
+support.
+
+Unlike uma.py/esen.py, this env does NOT force
+InferenceSettings(base_precision_dtype=float64): AllScAIP does not support
+FP64 inference. Its radius-graph construction creates tensors at the torch
+default dtype that crash against a double batch (torch.mm and index_put
+dtype mismatches), and even past those, the backbone hard-casts its node
+representations to float32 before the output heads
+(fairchem models/allscaip/AllScAIP.py), which then mismatches the doubled
+head weights. So this env runs the fairchem default float32 -- the same
+precision the NVIDIA deployments verify at. If XPU float32 kernels prove
+numerically inadequate here (the reason uma.py forces FP64), that will
+surface as a verification failure, and FP64 support has to land in
+fairchem first.
 
 Pin one PVC tile with ZE_AFFINITY_MASK in the job (the worker inherits it).
 OMol checkpoints expect `charge` and `spin` in `atoms.info`.
@@ -65,50 +75,12 @@ def _fairchem_device(device: str) -> str:
     return device
 
 
-def _fp64_settings():
-    import torch
-    from fairchem.core.units.mlip_unit.api.inference import InferenceSettings
-
-    return InferenceSettings(base_precision_dtype=torch.float64, tf32=False)
-
-
-def _patch_image_id_dtype():
-    """Work around a dtype mismatch in AllScAIP's radius graph under FP64.
-
-    biknn_radius_graph builds the PBC image-offset tensors (image_id) with
-    torch.get_default_dtype() -- float32 -- while base_precision_dtype=float64
-    casts the batch, including cell, to double, so build_radius_graph's
-    `torch.mm(image_id, cell)` raises "expected mat1 and mat2 to have the
-    same dtype, but got: float != double" (fairchem
-    models/allscaip/utils/allscaip_radius_graph.py). Not device-specific:
-    any FP64 run hits it. Cast each image_id to its cell's dtype on the way
-    into batched_radius_graph; drop this once fairchem builds image_id with
-    the cell dtype.
-    """
-    from fairchem.core.models.allscaip.utils import allscaip_radius_graph as graph_mod
-
-    if getattr(graph_mod.batched_radius_graph, "_image_id_dtype_patched", False):
-        return
-    original = graph_mod.batched_radius_graph
-
-    def patched(pos_list, cell_list, image_id_list, *args, **kwargs):
-        image_id_list = [
-            image_id.to(cell.dtype) for image_id, cell in zip(image_id_list, cell_list)
-        ]
-        return original(pos_list, cell_list, image_id_list, *args, **kwargs)
-
-    patched._image_id_dtype_patched = True
-    graph_mod.batched_radius_graph = patched
-
-
 def setup(checkpoint: str, device: str = "xpu", **kwargs):
     from fairchem.core import FAIRChemCalculator, pretrained_mlip
 
-    _patch_image_id_dtype()
     predictor = pretrained_mlip.get_predict_unit(
         CHECKPOINTS[checkpoint],
         device=_fairchem_device(device),
-        inference_settings=_fp64_settings(),
     )
     return FAIRChemCalculator(predictor, **kwargs)
 
@@ -119,8 +91,5 @@ def setup_from_path(path: str, device: str = "xpu", **kwargs):
     from fairchem.core import FAIRChemCalculator
     from fairchem.core.units.mlip_unit import load_predict_unit
 
-    _patch_image_id_dtype()
-    predictor = load_predict_unit(
-        path, device=_fairchem_device(device), inference_settings=_fp64_settings()
-    )
+    predictor = load_predict_unit(path, device=_fairchem_device(device))
     return FAIRChemCalculator(predictor, **kwargs)
