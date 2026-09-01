@@ -180,9 +180,10 @@ def pack_environment(root: Path | str, env_name: str, progress=None) -> dict:
     for stale in images_dir.glob(f"{env_name}-*.{IMAGE_FORMAT}"):
         if stale.name != image_name:
             stale.unlink(missing_ok=True)
+    # Our own partial was renamed into place above, so every remaining
+    # .packing.* entry is a crashed pack's leftover.
     for stale in images_dir.glob(f".{env_name}.packing.*"):
-        if stale != partial:
-            stale.unlink(missing_ok=True)
+        stale.unlink(missing_ok=True)
 
     if progress is not None:
         progress(

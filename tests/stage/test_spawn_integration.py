@@ -29,7 +29,7 @@ def staged(tmp_path: Path) -> StagedSpawn:
     (staged_env / "bin" / "python").write_text("#!/bin/sh\n")
     mirror = tmp_path / "local" / "cache-mirror"
     mirror.mkdir(parents=True)
-    return StagedSpawn(env_dir=staged_env, cache_base=mirror, weights_staged_bytes=0)
+    return StagedSpawn(env_dir=staged_env, cache_base=mirror)
 
 
 def _sidecar(spec) -> dict:

@@ -187,29 +187,6 @@ def spawn_in_env(
     env_python = get_env_python(root, env_name)
     env_dir = root / "envs" / env_name
 
-    # Fill the weight-prewarm hint here rather than in each caller: every
-    # spawn (calculator, verify, serve, add) benefits, and this is the same
-    # choke point that already owns env_dir and the cache env vars.
-    # Best-effort by contract — a failed lookup must never fail the spawn.
-    # Download spawns get the record tier only: their weight record is
-    # written after the download, so the heuristic would cold-read whole
-    # family cache dirs (typically on a login node) for weights the
-    # download may be about to (re)write.
-    if payload.get("checkpoint") and "prewarm_paths" not in payload:
-        try:
-            paths, tier = get_checkpoint_prewarm_paths(
-                root,
-                env_name,
-                payload["checkpoint"],
-                cache_root,
-                allow_heuristic=wrapper_source != DOWNLOAD_WRAPPER,
-            )
-        except Exception:
-            logger.debug("prewarm path lookup failed; spawning without", exc_info=True)
-        else:
-            if tier is not None:
-                payload = {**payload, "prewarm_paths": paths, "prewarm_weights_tier": tier}
-
     # Node-local staging (#180): extract the env's packed image (and overlay
     # the checkpoint's recorded weights) to local disk, and run the worker
     # from the copy. Best-effort — None means every piece below behaves
@@ -224,13 +201,43 @@ def spawn_in_env(
         env_dir = staged.env_dir
         env_python = env_dir / "bin" / "python"
 
+    # Everything is node-local and the worker's prewarm will be disabled —
+    # except when a user-supplied (:custom) weights file still lives on the
+    # shared filesystem and needs the warm.
+    fully_local = (
+        staged is not None and staged.cache_base is not None and not payload.get("checkpoint_path")
+    )
+
+    # Fill the weight-prewarm hint here rather than in each caller: every
+    # spawn (calculator, verify, serve, add) benefits, and this is the same
+    # choke point that already owns env_dir and the cache env vars.
+    # Best-effort by contract — a failed lookup must never fail the spawn.
+    # Skipped when fully staged (the worker won't prewarm at all). Download
+    # spawns get the record tier only: their weight record is written after
+    # the download, so the heuristic would cold-read whole family cache dirs
+    # (typically on a login node) for weights the download may be about to
+    # (re)write.
+    if payload.get("checkpoint") and "prewarm_paths" not in payload and not fully_local:
+        try:
+            paths, tier = get_checkpoint_prewarm_paths(
+                root,
+                env_name,
+                payload["checkpoint"],
+                cache_root,
+                allow_heuristic=wrapper_source != DOWNLOAD_WRAPPER,
+            )
+        except Exception:
+            logger.debug("prewarm path lookup failed; spawning without", exc_info=True)
+        else:
+            if tier is not None:
+                payload = {**payload, "prewarm_paths": paths, "prewarm_weights_tier": tier}
+
     env = os.environ.copy()
     if staged is not None and staged.cache_base is not None:
         env.update(get_model_cache_env(root, staged.cache_base))
         # With env and weights both node-local, the page-cache prewarm is
-        # pure overhead — except a user-supplied (:custom) weights file,
-        # which still lives on the shared filesystem and needs the warm.
-        if not payload.get("checkpoint_path"):
+        # pure overhead (see fully_local above for the :custom exception).
+        if fully_local:
             env["ROOTSTOCK_NO_PREWARM"] = "1"
     else:
         # Staged env without staged weights keeps the prewarm: the env-tree

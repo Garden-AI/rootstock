@@ -77,7 +77,7 @@ Enable it by declaring where staged copies may live, in `{root}/layout.json`:
 rootstock init --stage-dir '/tmp'              # or e.g. '$SLURM_TMPDIR'
 ```
 
-(or add `"stage_dir": "/tmp"` to an existing `layout.json` by hand — like `cache_root`, only `init` writes it). The value may contain environment variables, which expand on the node at spawn time; a value that doesn't expand (e.g. `$SLURM_TMPDIR` on a login node), doesn't exist, isn't writable, or is on the *same* filesystem as the install simply disables staging on that node. Users can override per run with `ROOTSTOCK_STAGE_DIR=...` or disable with `ROOTSTOCK_NO_STAGE=1`.
+(or add `"stage_dir": "/tmp"` to an existing `layout.json` by hand — like `cache_root`, `init` is the only command with a flag to *set* it; `install`/`sync`/`prune` rewrite the marker but always preserve an existing declaration). The value may contain environment variables, which expand on the node at spawn time; a value that doesn't expand (e.g. `$SLURM_TMPDIR` on a login node), doesn't exist, isn't writable, or is on the *same* filesystem as the install simply disables staging on that node. Users can override per run with `ROOTSTOCK_STAGE_DIR=...` or disable with `ROOTSTOCK_NO_STAGE=1`.
 
 Packing and extraction shell out to `tar` and `zstd`, so both must be on `PATH` (compute nodes usually have them; `module load zstd` otherwise). After enabling, backfill images for already-built envs — in a batch allocation if the login nodes cap CPU time:
 

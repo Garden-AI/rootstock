@@ -48,6 +48,7 @@ are repointed at the mirror only when the overlay succeeds.
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import os
 import shutil
@@ -56,6 +57,9 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+
+from .pack import IMAGE_FORMAT, pack_tools_missing
+from .prewarm import _fmt_bytes
 
 STAGE_DIR_ENV = "ROOTSTOCK_STAGE_DIR"
 NO_STAGE_ENV = "ROOTSTOCK_NO_STAGE"
@@ -81,7 +85,6 @@ class StagedSpawn:
 
     env_dir: Path  # staged replacement for {root}/envs/<name>
     cache_base: Path | None  # weight-mirror base to point caches at, if staged
-    weights_staged_bytes: int  # copied this pass (0 = all already current)
 
 
 def _log(message: str) -> None:
@@ -90,10 +93,6 @@ def _log(message: str) -> None:
     is still being spawned, and bracket lines before/after each phase keep a
     stall distinguishable from a hang."""
     print(f"[Rootstock] {message}", file=sys.stderr, flush=True)
-
-
-def _fmt_bytes(n: int | float) -> str:
-    return f"{n / 1e9:.1f} GB" if n >= 1e9 else f"{n / 1e6:.0f} MB"
 
 
 def _same_filesystem(a: Path, b: Path) -> bool:
@@ -158,15 +157,14 @@ def _read_manifest_env(root: Path, env_name: str) -> dict | None:
     return env if isinstance(env, dict) else None
 
 
-def _current_image_record(root: Path, env_name: str) -> dict | None:
-    """The env's image record, iff it describes the current build and the
-    archive file is present. Mirrors :func:`rootstock.manifest.image_is_current`
-    on the raw dict."""
-    env = _read_manifest_env(root, env_name)
-    if env is None:
+def _current_image_record(root: Path, env_record: dict | None) -> dict | None:
+    """The env record's image entry, iff it describes the current build and
+    the archive file is present. Mirrors
+    :func:`rootstock.manifest.image_is_current` on the raw dict."""
+    if env_record is None:
         return None
-    image = env.get("image")
-    built_at = env.get("built_at")
+    image = env_record.get("image")
+    built_at = env_record.get("built_at")
     if not (isinstance(image, dict) and isinstance(built_at, str)):
         return None
     packed_at = image.get("packed_at")
@@ -175,13 +173,24 @@ def _current_image_record(root: Path, env_name: str) -> dict | None:
     if not (
         isinstance(image.get("path"), str)
         and isinstance(image.get("sha256"), str)
-        and image.get("format") == "tar.zst"
+        and image.get("format") == IMAGE_FORMAT
         and isinstance(image.get("uncompressed_bytes"), int)
     ):
         return None
     if not (Path(root) / image["path"]).is_file():
         return None
     return image
+
+
+def _recorded_weight_entries(env_record: dict | None, checkpoint: str) -> list | None:
+    """The checkpoint's ``weight_files`` list from a pre-read raw env record
+    (same semantics as ``environment._recorded_weight_files``, which reads
+    the manifest itself for the prewarm path)."""
+    if not isinstance(env_record, dict):
+        return None
+    record = (env_record.get("checkpoints") or {}).get(checkpoint) or {}
+    weight_files = record.get("weight_files")
+    return weight_files if isinstance(weight_files, list) else None
 
 
 def _user_stage_root(base: Path) -> Path:
@@ -339,19 +348,23 @@ def _fixup_staged_env(tree: Path, final_root: Path, root: Path, env_name: str) -
         raise RuntimeError("staged bin/python does not resolve after fixup")
 
 
-def stage_env(root: Path, env_name: str, base: Path) -> Path | None:
+def stage_env(root: Path, env_name: str, base: Path, env_record: dict | None = None) -> Path | None:
     """Materialize the env's packed image under ``base``; return the staged
     root (containing ``envs/<name>`` and ``.python/``) or None to fall back.
 
     Content-addressed by archive sha256: a warm dir is reused with zero
     reads, and a rebuilt env (new archive, new sha) lands beside the old one,
-    which ages out via LRU eviction.
+    which ages out via LRU eviction. ``env_record`` is the pre-read raw
+    manifest env record, for callers that already have it.
     """
-    image = _current_image_record(root, env_name)
+    if env_record is None:
+        env_record = _read_manifest_env(root, env_name)
+    image = _current_image_record(root, env_record)
     if image is None:
         return None
-    if shutil.which("tar") is None or shutil.which("zstd") is None:
-        _log(f"Stage skipped ({env_name}): tar/zstd not on PATH; falling back to prewarm")
+    missing_tools = pack_tools_missing()
+    if missing_tools:
+        _log(f"Stage skipped ({env_name}): {missing_tools} not on PATH; falling back to prewarm")
         return None
 
     envs_root = _user_stage_root(base) / "envs-by-hash"
@@ -458,14 +471,39 @@ def _hub_sibling_dirs(needed: list[PurePosixPath]) -> set[PurePosixPath]:
     return extras
 
 
-def _copy_file_atomic(src: Path, dest: Path) -> None:
+def _copy_file_atomic(src: Path, dest: Path, src_stat: os.stat_result | None = None) -> None:
+    """Copy via tmp + rename. When ``src_stat`` is given, the source's mtime
+    is preserved on the copy — that is the mirror's staleness signal: weight
+    captures record only {path, size}, so a same-size in-place overwrite on
+    the shared cache (a retrained ``:custom``-adjacent file, a torch-hub
+    refresh) would otherwise serve stale bytes from a warm mirror forever."""
     tmp = dest.with_name(dest.name + f".copying.{os.getpid()}")
     try:
         shutil.copyfile(src, tmp)
+        if src_stat is not None:
+            os.utime(tmp, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
         tmp.rename(dest)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def _mirror_current(mirror: Path, rel: str, src_stat: os.stat_result) -> bool:
+    """Whether the mirror's copy of ``rel`` matches the shared source (size
+    and preserved mtime). Local stats only."""
+    try:
+        st = os.stat(mirror / rel)
+    except OSError:
+        return False
+    return st.st_size == src_stat.st_size and st.st_mtime_ns == src_stat.st_mtime_ns
+
+
+def _weights_digest(sources: list[tuple[str, os.stat_result]]) -> str:
+    """Identity of one checkpoint's overlay: the recorded paths plus each
+    shared source's (size, mtime). Any source change — or a different
+    record — produces a new digest and forces a re-overlay."""
+    entries = sorted((rel, st.st_size, st.st_mtime_ns) for rel, st in sources)
+    return hashlib.sha256(json.dumps(entries).encode()).hexdigest()
 
 
 def _overlay_tree(shared: Path, mirror: Path, rel_dir: PurePosixPath) -> None:
@@ -495,7 +533,9 @@ def _overlay_tree(shared: Path, mirror: Path, rel_dir: PurePosixPath) -> None:
                 _copy_file_atomic(entry, dest)
 
 
-def _overlay_recorded(shared_base: Path, mirror: Path, rel_paths: list[str]) -> int:
+def _overlay_recorded(
+    shared_base: Path, mirror: Path, sources: list[tuple[str, os.stat_result]]
+) -> int:
     """Build/refresh the weight overlay; returns bytes copied this pass.
 
     Ancestor directories of recorded files are materialized as real dirs;
@@ -504,13 +544,12 @@ def _overlay_recorded(shared_base: Path, mirror: Path, rel_paths: list[str]) -> 
     existing real dir/file in the mirror is never downgraded to a symlink —
     it may be another checkpoint's materialized copy.
     """
-    needed = [PurePosixPath(rel) for rel in rel_paths]
-    needed_set = set(needed)
+    needed = {PurePosixPath(rel): st for rel, st in sources}
 
     materialize: set[PurePosixPath] = {PurePosixPath("cache"), PurePosixPath("home")}
     for rel in needed:
         materialize.update(p for p in rel.parents if p.parts)
-    hub_siblings = _hub_sibling_dirs(needed)
+    hub_siblings = _hub_sibling_dirs(list(needed))
 
     copied = 0
     for rel_dir in sorted(materialize, key=lambda p: len(p.parts)):
@@ -528,11 +567,12 @@ def _overlay_recorded(shared_base: Path, mirror: Path, rel_paths: list[str]) -> 
             dest = mirror / rel_child
             if rel_child in materialize or rel_child in hub_siblings:
                 continue  # handled by its own pass
-            if rel_child in needed_set:
+            if rel_child in needed:
+                src_stat = needed[rel_child]
                 try:
-                    if not (dest.is_file() and dest.stat().st_size == entry.stat().st_size):
-                        _copy_file_atomic(entry, dest)
-                        copied += entry.stat().st_size
+                    if not _mirror_current(mirror, str(rel_child), src_stat):
+                        _copy_file_atomic(entry, dest, src_stat)
+                        copied += src_stat.st_size
                 except OSError:
                     raise RuntimeError(f"could not copy recorded weight file {rel_child}")
             elif not (dest.is_symlink() or dest.exists()):
@@ -549,40 +589,60 @@ def stage_weights(
     env_name: str,
     checkpoint: str,
     base: Path,
-) -> tuple[Path, int] | None:
+    env_record: dict | None = None,
+) -> Path | None:
     """Overlay the checkpoint's recorded weight files into the node-local
-    cache mirror; return ``(mirror base, bytes copied)`` or None to leave the
-    worker's caches on the shared filesystem.
+    cache mirror; return the mirror base or None to leave the worker's
+    caches on the shared filesystem.
 
     Only the manifest record tier is trusted here (unlike the prewarm's
     heuristic tier): redirecting a worker's caches at a mirror is only safe
     when we know exactly which files it will mmap. Every recorded file must
     exist in the shared cache — a purged file means the record is stale and
     the whole overlay is skipped, self-healing on the next add/verify pass.
-    """
-    from .environment import _recorded_weight_files
 
-    recorded = _recorded_weight_files(Path(root), env_name, checkpoint)
+    A per-checkpoint completion marker records the digest of the last
+    finished overlay (recorded paths + shared sizes/mtimes). Matching it is
+    the lock-free warm path: concurrent same-checkpoint spawns on one node —
+    the committee-demo case — read the marker and return without ever
+    touching the mirror lock or re-walking the shared cache.
+    """
+    if env_record is None:
+        env_record = _read_manifest_env(root, env_name)
+    recorded = _recorded_weight_entries(env_record, checkpoint)
     if not recorded:
         return None
     rels: list[str] = []
-    total = 0
     for entry in recorded:
         if not (isinstance(entry, dict) and isinstance(entry.get("path"), str) and entry["path"]):
             return None
         rels.append(entry["path"])
-        size = entry.get("size")
-        total += size if isinstance(size, int) else 0
 
     shared_base = Path(cache_root) if cache_root is not None else Path(root)
-    if not all((shared_base / rel).is_file() for rel in rels):
-        return None
+    sources: list[tuple[str, os.stat_result]] = []
+    for rel in rels:
+        try:
+            st = os.stat(shared_base / rel)
+        except OSError:
+            return None  # purged / stale record — self-heals on the next verify
+        sources.append((rel, st))
 
     user_root = _user_stage_root(base)
     mirror = user_root / "cache-mirror"
-    mirror.mkdir(parents=True, exist_ok=True)
-    if shutil.disk_usage(mirror).free < total * 1.1:
-        _log(f"Weights not staged ({checkpoint}): needs {_fmt_bytes(total * 1.1)} free at {mirror}")
+    marker = user_root / f"cache-mirror.{checkpoint}.ok"
+    digest = _weights_digest(sources)
+
+    try:
+        if marker.read_text().strip() == digest:
+            return mirror  # completed overlay, sources unchanged since
+    except OSError:
+        pass
+
+    missing = sum(st.st_size for rel, st in sources if not _mirror_current(mirror, rel, st))
+    if missing and shutil.disk_usage(user_root).free < missing * 1.1:
+        _log(
+            f"Weights not staged ({checkpoint}): needs {_fmt_bytes(missing * 1.1)} free at {mirror}"
+        )
         return None
 
     # One overlay mutator per node: concurrent spawns touching one family's
@@ -594,8 +654,15 @@ def stage_weights(
             return None
         time.sleep(_WAIT_POLL_SECONDS)
     try:
+        mirror.mkdir(parents=True, exist_ok=True)
         began = time.monotonic()
-        copied = _overlay_recorded(shared_base, mirror, rels)
+        copied = _overlay_recorded(shared_base, mirror, sources)
+        # Marker only after the whole overlay (copies, fallthrough symlinks,
+        # hub siblings) finished — a crash mid-overlay leaves no marker, so
+        # the next spawn takes the lock and completes it.
+        marker_tmp = marker.with_name(marker.name + f".{os.getpid()}")
+        marker_tmp.write_text(digest)
+        marker_tmp.rename(marker)
         if copied:
             _log(
                 f"Staged weights for {checkpoint}: {_fmt_bytes(copied)} "
@@ -603,7 +670,7 @@ def stage_weights(
             )
         else:
             _log(f"Weights reused (warm) for {checkpoint}")
-        return mirror, copied
+        return mirror
     except Exception as exc:  # noqa: BLE001 - overlay failure must not fail the spawn
         _log(f"Weights not staged ({checkpoint}): {exc}")
         return None
@@ -634,21 +701,17 @@ def stage_for_spawn(
         base = resolve_stage_base(Path(root))
         if base is None:
             return None
-        staged_root = stage_env(Path(root), env_name, base)
+        env_record = _read_manifest_env(root, env_name)
+        staged_root = stage_env(Path(root), env_name, base, env_record=env_record)
         if staged_root is None:
             return None
 
         cache_base: Path | None = None
-        copied = 0
         if payload.get("checkpoint") and "weights_capture" not in payload:
-            weights = stage_weights(root, cache_root, env_name, payload["checkpoint"], base)
-            if weights is not None:
-                cache_base, copied = weights
-        return StagedSpawn(
-            env_dir=staged_root / "envs" / env_name,
-            cache_base=cache_base,
-            weights_staged_bytes=copied,
-        )
+            cache_base = stage_weights(
+                root, cache_root, env_name, payload["checkpoint"], base, env_record=env_record
+            )
+        return StagedSpawn(env_dir=staged_root / "envs" / env_name, cache_base=cache_base)
     except Exception as exc:  # noqa: BLE001 - staging must never fail the spawn
         try:
             _log(f"Stage skipped ({env_name}): {type(exc).__name__}: {exc}")
