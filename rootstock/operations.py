@@ -39,6 +39,7 @@ from .environment import (
     parse_checkpoints_dict,
     parse_clusters_list,
     parse_custom_checkpoint_ids,
+    verify_kwargs_for,
 )
 from .exceptions import RootstockError
 from .layout import resolve_cache_root
@@ -1211,11 +1212,16 @@ def fetch_checkpoint(
     manifest's ``last_error``).
     """
     root = Path(root)
-    setup_kwargs = setup_kwargs or {}
     if cache_root is None:
         cache_root = resolve_cache_root(root)
 
     env_name = _resolve_built_env(root, checkpoint, cluster)
+
+    # No explicit kwargs → fall back to the env's declared VERIFY_KWARGS,
+    # exactly like the verify path: setup() runs the download here too, and a
+    # multi-head env (UMA's task, MACE-MH-1's head) raises without a head
+    # selection. Explicit kwargs always win.
+    setup_kwargs = setup_kwargs or verify_kwargs_for(root, env_name, checkpoint)
 
     # Unlocked peek for idempotence; every write below loads fresh inside
     # its own transaction, so a racing writer costs at most a redundant
