@@ -140,6 +140,71 @@ def test_fetch_refresh_knob(fake_root, refresh_calls, monkeypatch):
     assert len(refresh_calls) == 1
 
 
+_MULTIHEAD_ENV_SOURCE = '''\
+"""Multi-head env: setup() requires a head selection, no default."""
+
+CHECKPOINTS = {
+    "uma-s-1p1": "uma-s-1p1",
+}
+
+VERIFY_KWARGS = {
+    "uma-s-1p1": {"task": "omat"},
+}
+
+
+def setup(checkpoint, device="cuda", task=None):
+    return None
+'''
+
+
+@pytest.fixture
+def multihead_root(tmp_path: Path) -> Path:
+    """A root whose env declares VERIFY_KWARGS for its checkpoint."""
+    root = tmp_path
+    env_dir = root / "envs" / "uma"
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").touch()
+    (env_dir / "env_source.py").write_text(_MULTIHEAD_ENV_SOURCE)
+
+    from rootstock.config import UserConfig
+    from rootstock.manifest import create_manifest, save_manifest
+
+    cfg = UserConfig(name="t", email="t@t.t")
+    save_manifest(create_manifest(root, ["test"], cfg), root)
+    return root
+
+
+def test_fetch_falls_back_to_verify_kwargs(multihead_root, refresh_calls, monkeypatch):
+    """No explicit kwargs → the env's VERIFY_KWARGS reach the download's
+    setup() call, same as the verify path (a multi-head setup() raises
+    without a head selection)."""
+    captured = {}
+
+    def fake_download(root, env_name, checkpoint, setup_kwargs, **kw):
+        captured["setup_kwargs"] = setup_kwargs
+        return True, None
+
+    monkeypatch.setattr(operations, "_run_download", fake_download)
+
+    fetch_checkpoint(multihead_root, "uma-s-1p1")
+
+    assert captured["setup_kwargs"] == {"task": "omat"}
+
+
+def test_fetch_explicit_kwargs_beat_verify_kwargs(multihead_root, refresh_calls, monkeypatch):
+    captured = {}
+
+    def fake_download(root, env_name, checkpoint, setup_kwargs, **kw):
+        captured["setup_kwargs"] = setup_kwargs
+        return True, None
+
+    monkeypatch.setattr(operations, "_run_download", fake_download)
+
+    fetch_checkpoint(multihead_root, "uma-s-1p1", setup_kwargs={"task": "omol"})
+
+    assert captured["setup_kwargs"] == {"task": "omol"}
+
+
 def test_fetch_fails_fast_when_env_not_built(tmp_path, refresh_calls):
     from rootstock.config import UserConfig
     from rootstock.manifest import create_manifest, save_manifest
