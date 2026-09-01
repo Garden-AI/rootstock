@@ -49,6 +49,20 @@ Commands:
             rootstock prune ./environments/ --yes    # retire everything not declared here
             rootstock prune --gc-only --yes          # internal garbage only
 
+    rootstock pack [<env> ...] [--all] [--root <path> | --cluster <name>]
+        Pack built envs into single-image archives ({root}/images/) for
+        node-local staging (#180). Bare `pack` covers every built env whose
+        image is missing or stale; `install` packs its own env automatically.
+            rootstock pack --cluster delta       # backfill missing/stale
+            rootstock pack mace uma              # exactly these
+
+    rootstock stage <checkpoint-id> [...] [--root <path> | --cluster <name>]
+        Warm checkpoints once, ahead of worker spawns — for job prologues.
+        Extracts each hosting env's image (plus recorded weights) to the
+        configured node-local dir, or falls back to a page-cache prewarm
+        where staging isn't configured.
+            rootstock stage uma-s-1p1 mace-mp-0-medium --cluster delta
+
     rootstock benchmark [--root <path>] [--checkpoints <id> ...] [--devices cuda cpu] [--list]
         Measure i-PI IPC overhead: RootstockCalculator vs. the same calculator
         called directly inside its pre-built env. `--list` shows installed ids.
@@ -93,11 +107,13 @@ from .commands import (
     cmd_manifest_push,
     cmd_manifest_show,
     cmd_new_env,
+    cmd_pack,
     cmd_prune,
     cmd_resolve,
     cmd_serve,
     cmd_setup_perms,
     cmd_smoke_test,
+    cmd_stage,
     cmd_status,
     cmd_sync,
     cmd_usage_compact,
@@ -143,6 +159,16 @@ def main():
             "(recorded in {root}/layout.json). Prompted for if omitted. This is "
             "a deployment-time choice: changing it later means editing "
             "layout.json and moving the weights."
+        ),
+    )
+    init_parser.add_argument(
+        "--stage-dir",
+        default=None,
+        help=(
+            "Node-local directory worker spawns may stage packed env images "
+            "to (recorded in {root}/layout.json). May contain env vars that "
+            "expand on the compute node, e.g. '$SLURM_TMPDIR' or '/tmp'. "
+            "Pass an empty string to clear an existing declaration."
         ),
     )
     init_parser.add_argument(
@@ -226,6 +252,15 @@ def main():
         "--no-perm-check",
         action="store_true",
         help="Skip the up-front shared-install permission check",
+    )
+    install_parser.add_argument(
+        "--no-pack",
+        action="store_true",
+        help=(
+            "Skip packing the staging image after the build (worker spawns "
+            "then warm this env via the prewarm path; pack later with "
+            "'rootstock pack')"
+        ),
     )
     install_parser.set_defaults(func=cmd_install)
 
@@ -532,6 +567,77 @@ def main():
         help="Skip the up-front shared-install permission check",
     )
     prune_parser.set_defaults(func=cmd_prune)
+
+    # pack command
+    pack_parser = subparsers.add_parser(
+        "pack",
+        help="Pack built envs into single-image archives for node-local staging",
+        description=(
+            "Pack built envs into {root}/images/<env>-<sha>.tar.zst and "
+            "record the images in the manifest (#180). Worker spawns on "
+            "clusters with a configured staging dir extract these to "
+            "node-local disk instead of prewarming the shared tree. Bare "
+            "'pack' covers every built env whose image is missing or stale "
+            "(installs pack their own env automatically). Needs tar and "
+            "zstd on PATH; on login nodes with CPU-time caps, run inside a "
+            "batch allocation."
+        ),
+    )
+    pack_parser.add_argument(
+        "envs",
+        nargs="*",
+        metavar="ENV",
+        help="Env name(s) to pack (default: every built env with a missing/stale image)",
+    )
+    pack_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Repack every built env, fresh or not",
+    )
+    pack_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    pack_parser.add_argument(
+        "--cluster",
+        help="Resolve the root from the cluster registry instead of --root",
+    )
+    pack_parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Don't push manifest to backend (useful during development)",
+    )
+    pack_parser.set_defaults(func=cmd_pack)
+
+    # stage command
+    stage_parser = subparsers.add_parser(
+        "stage",
+        help="Warm checkpoints once ahead of worker spawns (job prologues)",
+        description=(
+            "Stage each checkpoint's env image and recorded weights to the "
+            "configured node-local dir — or page-cache prewarm them where "
+            "staging isn't configured — so the shared-filesystem read "
+            "happens once, before any worker spawns. Intended for job "
+            "prologues; worker spawns do the same on their own at startup."
+        ),
+    )
+    stage_parser.add_argument(
+        "checkpoints",
+        nargs="+",
+        metavar="CHECKPOINT",
+        help="Canonical checkpoint id(s) to warm",
+    )
+    stage_parser.add_argument(
+        "--root",
+        default=os.environ.get(ROOTSTOCK_ROOT_ENV),
+        help=f"Root directory (default: ${ROOTSTOCK_ROOT_ENV})",
+    )
+    stage_parser.add_argument(
+        "--cluster",
+        help="Resolve the root from the cluster registry instead of --root",
+    )
+    stage_parser.set_defaults(func=cmd_stage)
 
     # smoke-test command
     smoke_parser = subparsers.add_parser(

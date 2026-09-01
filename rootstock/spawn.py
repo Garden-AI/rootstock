@@ -152,6 +152,13 @@ def spawn_in_env(
     Stage ``wrapper_source`` + a JSON sidecar for ``payload`` and yield the
     command that runs them with the env's Python.
 
+    When node-local staging is configured and the env has a current packed
+    image (#180), worker spawns run from a node-local extraction instead of
+    the shared tree — ``env_dir``, the interpreter, and (when the
+    checkpoint's weights could be overlaid) the cache env vars all point at
+    local disk, and the page-cache prewarm is skipped as redundant. Any
+    missing piece degrades back to the shared tree + prewarm.
+
     Args:
         root: Rootstock install root.
         env_name: Name of the pre-built environment.
@@ -203,8 +210,33 @@ def spawn_in_env(
             if tier is not None:
                 payload = {**payload, "prewarm_paths": paths, "prewarm_weights_tier": tier}
 
+    # Node-local staging (#180): extract the env's packed image (and overlay
+    # the checkpoint's recorded weights) to local disk, and run the worker
+    # from the copy. Best-effort — None means every piece below behaves
+    # exactly as before staging existed. Download spawns never stage: their
+    # job is to *write* the shared cache.
+    staged = None
+    if wrapper_source != DOWNLOAD_WRAPPER:
+        from .stage import stage_for_spawn
+
+        staged = stage_for_spawn(root, env_name, payload, cache_root)
+    if staged is not None:
+        env_dir = staged.env_dir
+        env_python = env_dir / "bin" / "python"
+
     env = os.environ.copy()
-    env.update(get_model_cache_env(root, cache_root))
+    if staged is not None and staged.cache_base is not None:
+        env.update(get_model_cache_env(root, staged.cache_base))
+        # With env and weights both node-local, the page-cache prewarm is
+        # pure overhead — except a user-supplied (:custom) weights file,
+        # which still lives on the shared filesystem and needs the warm.
+        if not payload.get("checkpoint_path"):
+            env["ROOTSTOCK_NO_PREWARM"] = "1"
+    else:
+        # Staged env without staged weights keeps the prewarm: the env-tree
+        # portion re-reads from local disk at memory-ish speed, and the
+        # weight portion still streams the shared cache ahead of the mmaps.
+        env.update(get_model_cache_env(root, cache_root))
     if offline:
         env["HF_HUB_OFFLINE"] = "1"
 

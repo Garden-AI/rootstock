@@ -118,7 +118,10 @@ def test_v5_unregistered_root_migrates_to_single_cluster():
     migrated, notes = migrate_manifest_data(_v5(cluster="della", root="/nowhere"))
     assert migrated["clusters"] == ["della"]
     # No sibling seeding — nothing extra to announce.
-    assert notes == ["migrated manifest schema v5 -> v6"]
+    assert notes == [
+        "migrated manifest schema v5 -> v6",
+        "migrated manifest schema v6 -> v7",
+    ]
 
 
 def test_migrated_v5_round_trips_through_dataclasses():
