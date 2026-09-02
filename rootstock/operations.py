@@ -1001,11 +1001,11 @@ def pack_environments(
     image is missing or stale; naming envs packs exactly those, fresh or not.
 
     Returns the new image records by env name. Raises OperationError when a
-    named env isn't built or a requested pack fails (an unnamed sweep keeps
-    going and reports at the end).
+    named env isn't built, and — after recording whatever did pack in the
+    manifest — when any requested pack failed. The manifest update must not
+    be skippable by a late failure: earlier packs in the same run already
+    deleted the superseded archives their old records point at.
     """
-    from .manifest import image_is_current
-
     root = Path(root)
     built = {name for name, _ in list_built_environments(root)}
 
@@ -1021,7 +1021,9 @@ def pack_environments(
         manifest = load_manifest(root)
         recorded = manifest.environments if manifest else {}
         targets = sorted(
-            name for name in built if name not in recorded or not image_is_current(recorded[name])
+            name
+            for name in built
+            if name not in recorded or not _image_usable(root, recorded[name])
         )
         if not targets:
             _say(progress, "All built envs already have current images.")
@@ -1034,8 +1036,6 @@ def pack_environments(
         try:
             packed[env_name] = pack_environment(root, env_name, progress=progress)
         except PackError as exc:
-            if env_names:
-                raise OperationError(str(exc)) from exc
             failures.append(f"{env_name}: {exc}")
 
     if packed:
@@ -1043,6 +1043,19 @@ def pack_environments(
     if failures:
         raise OperationError("some envs could not be packed:\n  " + "\n  ".join(failures))
     return packed
+
+
+def _image_usable(root: Path, env: EnvironmentInfo) -> bool:
+    """Current by timestamp AND the archive actually on disk. The sweep's
+    repack filter must see through a purged images/ dir — a current-looking
+    record with no file behind it would otherwise report "nothing to pack"
+    forever while every spawn falls back to prewarm."""
+    from .manifest import image_is_current
+
+    if not image_is_current(env):
+        return False
+    path = env.image.get("path") if isinstance(env.image, dict) else None
+    return isinstance(path, str) and bool(path) and (Path(root) / path).is_file()
 
 
 # -----------------------------------------------------------------------------

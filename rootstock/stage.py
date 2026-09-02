@@ -58,7 +58,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from .pack import IMAGE_FORMAT, pack_tools_missing
+from . import __version__
+from .pack import IMAGE_FORMAT, _pid_alive, pack_tools_missing
 from .prewarm import _fmt_bytes
 
 STAGE_DIR_ENV = "ROOTSTOCK_STAGE_DIR"
@@ -195,21 +196,25 @@ def _recorded_weight_entries(env_record: dict | None, checkpoint: str) -> list |
 
 def _user_stage_root(base: Path) -> Path:
     """``{base}/rootstock/{user}``, created 0700: staged trees are exec'd, so
-    they must not be writable — or trustingly reusable — across users."""
-    user_root = base / "rootstock" / getpass.getuser()
-    user_root.mkdir(parents=True, exist_ok=True)
+    they must not be writable — or trustingly reusable — across users.
+
+    The shared ``{base}/rootstock`` intermediate is made sticky-1777 (the
+    /tmp recipe, same as the usage spool): whoever stages first must not
+    lock everyone else's leaf-mkdir out via their umask. chmod is
+    best-effort — on an already-existing dir owned by someone else it
+    fails, and the mkdir below then either works or disables staging for
+    this user with a visible log line (via the callers' guards).
+    """
+    shared = base / "rootstock"
+    shared.mkdir(exist_ok=True)
+    try:
+        os.chmod(shared, 0o1777)
+    except OSError:
+        pass
+    user_root = shared / getpass.getuser()
+    user_root.mkdir(exist_ok=True)
     os.chmod(user_root, 0o700)
     return user_root
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except (PermissionError, OSError):
-        pass
-    return True
 
 
 def _sweep_partials(envs_root: Path) -> None:
@@ -221,15 +226,51 @@ def _sweep_partials(envs_root: Path) -> None:
             pid = int(partial.name.rsplit(".", 1)[-1])
         except ValueError:
             continue
-        stale_by_age = time.time() - partial.stat().st_mtime > _LOCK_STALE_SECONDS
+        try:
+            stale_by_age = time.time() - partial.stat().st_mtime > _LOCK_STALE_SECONDS
+        except OSError:
+            continue  # renamed/removed mid-scan by its extractor
         if not _pid_alive(pid) or stale_by_age:
             shutil.rmtree(partial, ignore_errors=True)
 
 
+def _mark_in_use(staged_root: Path) -> None:
+    """Record this process as a user of a staged env, in
+    ``{staged}/.users/<pid>``. The recording process is the *client* (the
+    calculator / server process), which lives as long as any worker it
+    spawns — so pid-aliveness of these files is the eviction shield for
+    long MD runs. Dead pidfiles are cleaned during eviction scans; nothing
+    removes them on exit, and nothing needs to."""
+    users = staged_root / ".users"
+    try:
+        users.mkdir(exist_ok=True)
+        (users / str(os.getpid())).touch()
+    except OSError:
+        pass  # marking is best-effort; min-age still shields young dirs
+
+
+def _in_use(staged_root: Path) -> bool:
+    """Whether any recorded user of a staged env is still alive (pruning
+    dead pidfiles as a side effect)."""
+    live = False
+    try:
+        pidfiles = list((staged_root / ".users").iterdir())
+    except OSError:
+        return False
+    for pidfile in pidfiles:
+        if pidfile.name.isdigit() and _pid_alive(int(pidfile.name)):
+            live = True
+        else:
+            pidfile.unlink(missing_ok=True)
+    return live
+
+
 def _evict_lru(envs_root: Path, keep: Path, bytes_needed: int) -> None:
-    """Free space by removing the oldest staged envs (never ``keep``, never
-    anything younger than the min age — its job may still be running from
-    it). Best-effort: rechecks free space after each removal."""
+    """Free space by removing the oldest staged envs — never ``keep``,
+    never anything younger than the min age, and never a dir some live
+    client process is registered against (mtime alone can't shield a
+    multi-day MD run on a persistent /tmp). Best-effort: rechecks free
+    space after each removal."""
     try:
         entries = sorted(
             (d for d in envs_root.iterdir() if d.is_dir() and d != keep),
@@ -246,6 +287,8 @@ def _evict_lru(envs_root: Path, keep: Path, bytes_needed: int) -> None:
                 break  # sorted oldest-first: everything after is younger
         except OSError:
             continue
+        if _in_use(entry):
+            continue  # a live client is running workers out of it
         _log(f"Stage evicting {entry.name} (LRU) to make room")
         shutil.rmtree(entry, ignore_errors=True)
 
@@ -291,12 +334,35 @@ class _StageLock:
             self.acquired = False
 
 
+class _FixupError(RuntimeError):
+    """A staged tree could not be pointed at its local interpreter.
+
+    Deterministic for a given (archive, client version) — unlike transient
+    extraction failures — so stage_env caches it per sha and stops paying
+    the multi-GB extract-and-discard on every subsequent spawn.
+    """
+
+
 def _remap_into_stage(value: str, root: Path, staged_root: Path) -> str | None:
     """Rewrite an absolute path under the shared ``root`` to its staged
-    equivalent; None when it doesn't point under the root (either spelling)."""
+    equivalent; None when it doesn't point under the root.
+
+    Tries the root as spelled and as resolved, then — because uv bakes the
+    *install-time* spelling into symlink targets and pyvenv.cfg, which on
+    multi-alias mounts (/eagle vs /lus/eagle at ALCF) matches neither —
+    resolves the value itself and retries against the resolved root.
+    """
     for prefix in {str(root), str(Path(root).resolve())}:
         if value == prefix or value.startswith(prefix.rstrip("/") + "/"):
             return str(staged_root) + value[len(prefix.rstrip("/")) :]
+    if os.path.isabs(value):
+        try:
+            real = str(Path(value).resolve())
+        except OSError:
+            return None
+        root_real = str(Path(root).resolve()).rstrip("/")
+        if real == root_real or real.startswith(root_real + "/"):
+            return str(staged_root) + real[len(root_real) :]
     return None
 
 
@@ -328,7 +394,7 @@ def _fixup_staged_env(tree: Path, final_root: Path, root: Path, env_name: str) -
         remapped = _remap_into_stage(target, root, final_root)
         if remapped is None:
             if entry.name.startswith("python"):
-                raise RuntimeError(f"staged {entry.name} links outside the install root ({target})")
+                raise _FixupError(f"staged {entry.name} links outside the install root ({target})")
             continue
         entry.unlink()
         os.symlink(remapped, entry)
@@ -345,7 +411,7 @@ def _fixup_staged_env(tree: Path, final_root: Path, root: Path, env_name: str) -
     python = env_dir / "bin" / "python"
     target = os.readlink(python) if python.is_symlink() else None
     if target is None or not (tree / Path(target).relative_to(final_root)).exists():
-        raise RuntimeError("staged bin/python does not resolve after fixup")
+        raise _FixupError("staged bin/python does not resolve after fixup")
 
 
 def stage_env(root: Path, env_name: str, base: Path, env_record: dict | None = None) -> Path | None:
@@ -355,8 +421,25 @@ def stage_env(root: Path, env_name: str, base: Path, env_record: dict | None = N
     Content-addressed by archive sha256: a warm dir is reused with zero
     reads, and a rebuilt env (new archive, new sha) lands beside the old one,
     which ages out via LRU eviction. ``env_record`` is the pre-read raw
-    manifest env record, for callers that already have it.
+    manifest env record, for callers that already have it. Never raises —
+    the CLI calls this bare, and even the preamble (mkdir on a shared /tmp,
+    disk_usage, lock files) can fail on a hostile node.
     """
+    try:
+        return _stage_env(root, env_name, base, env_record)
+    except Exception as exc:  # noqa: BLE001 - staging must never fail the caller
+        try:
+            _log(
+                f"Stage skipped ({env_name}): {type(exc).__name__}: {exc}; falling back to prewarm"
+            )
+        except Exception:
+            pass
+        return None
+
+
+def _stage_env(
+    root: Path, env_name: str, base: Path, env_record: dict | None = None
+) -> Path | None:
     if env_record is None:
         env_record = _read_manifest_env(root, env_name)
     image = _current_image_record(root, env_record)
@@ -374,8 +457,25 @@ def stage_env(root: Path, env_name: str, base: Path, env_record: dict | None = N
 
     if marker.exists():
         final.touch()  # LRU freshness
+        _mark_in_use(final)
         _log(f"Stage reused (warm): {env_name} at {final}")
         return final
+
+    # A recorded deterministic fixup failure for this archive + client
+    # version: don't repeat a multi-GB extract-and-discard on every spawn.
+    failed_note = envs_root / f"{image['sha256']}.failed"
+    try:
+        failed_version, failed_reason = failed_note.read_text().splitlines()[:2]
+    except (OSError, ValueError):
+        failed_version = None
+        failed_reason = ""
+    if failed_version == __version__:
+        _log(
+            f"Stage skipped ({env_name}): previously failed on this node "
+            f"({failed_reason}); falling back to prewarm"
+        )
+        return None
+    failed_note.unlink(missing_ok=True)  # other-version note: retry below
 
     _sweep_partials(envs_root)
 
@@ -397,6 +497,7 @@ def stage_env(root: Path, env_name: str, base: Path, env_record: dict | None = N
         deadline = time.monotonic() + _LOCK_STALE_SECONDS
         while time.monotonic() < deadline:
             if marker.exists():
+                _mark_in_use(final)
                 _log(f"Stage reused (warm): {env_name} at {final}")
                 return final
             if lock.try_acquire():
@@ -410,6 +511,7 @@ def stage_env(root: Path, env_name: str, base: Path, env_record: dict | None = N
     image_path = Path(root) / image["path"]
     try:
         if marker.exists():  # completed while we raced for the lock
+            _mark_in_use(final)
             return final
         _log(
             f"Staging {env_name} ({_fmt_bytes(image.get('compressed_bytes', 0))} "
@@ -440,9 +542,18 @@ def stage_env(root: Path, env_name: str, base: Path, env_record: dict | None = N
         except OSError:
             if not marker.exists():  # a real failure, not a lost race
                 raise
+        _mark_in_use(final)
         _log(f"Staged {env_name} in {time.monotonic() - began:.1f}s")
         return final
     except Exception as exc:  # noqa: BLE001 - staging must never fail the spawn
+        if isinstance(exc, _FixupError):
+            # Deterministic for this archive + client version; note it so
+            # later spawns skip straight to prewarm instead of re-paying
+            # the extraction. A client upgrade invalidates the note.
+            try:
+                failed_note.write_text(f"{__version__}\n{exc}\n")
+            except OSError:
+                pass
         _log(f"Stage skipped ({env_name}): {exc}; falling back to prewarm")
         shutil.rmtree(partial, ignore_errors=True)
         return None
@@ -490,9 +601,16 @@ def _copy_file_atomic(src: Path, dest: Path, src_stat: os.stat_result | None = N
 
 def _mirror_current(mirror: Path, rel: str, src_stat: os.stat_result) -> bool:
     """Whether the mirror's copy of ``rel`` matches the shared source (size
-    and preserved mtime). Local stats only."""
+    and preserved mtime). A fallthrough *symlink* is never current — its
+    stat would trivially match the very shared file it points at, and
+    treating it as a copy would leave a later-recorded weight file on the
+    shared filesystem with the worker's prewarm switched off (worse than no
+    staging). ``_copy_file_atomic``'s rename-over replaces the link."""
+    dest = mirror / rel
+    if os.path.islink(dest):
+        return False
     try:
-        st = os.stat(mirror / rel)
+        st = os.stat(dest)
     except OSError:
         return False
     return st.st_size == src_stat.st_size and st.st_mtime_ns == src_stat.st_mtime_ns
@@ -593,7 +711,7 @@ def stage_weights(
 ) -> Path | None:
     """Overlay the checkpoint's recorded weight files into the node-local
     cache mirror; return the mirror base or None to leave the worker's
-    caches on the shared filesystem.
+    caches on the shared filesystem. Never raises (see stage_env).
 
     Only the manifest record tier is trusted here (unlike the prewarm's
     heuristic tier): redirecting a worker's caches at a mirror is only safe
@@ -607,6 +725,24 @@ def stage_weights(
     the committee-demo case — read the marker and return without ever
     touching the mirror lock or re-walking the shared cache.
     """
+    try:
+        return _stage_weights(root, cache_root, env_name, checkpoint, base, env_record)
+    except Exception as exc:  # noqa: BLE001 - staging must never fail the caller
+        try:
+            _log(f"Weights not staged ({checkpoint}): {type(exc).__name__}: {exc}")
+        except Exception:
+            pass
+        return None
+
+
+def _stage_weights(
+    root: Path,
+    cache_root: Path | None,
+    env_name: str,
+    checkpoint: str,
+    base: Path,
+    env_record: dict | None = None,
+) -> Path | None:
     if env_record is None:
         env_record = _read_manifest_env(root, env_name)
     recorded = _recorded_weight_entries(env_record, checkpoint)

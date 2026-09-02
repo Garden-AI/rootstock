@@ -455,6 +455,36 @@ def test_orphaned_interpreters_are_collected_live_ones_kept(tmp_path):
     assert by_name[stranded.name].reason == "stranded staging copy"
 
 
+def test_orphaned_staging_images_are_collected_recorded_ones_kept(tmp_path):
+    source = env_source("mace-mp-0-medium")
+    register(tmp_path, "mace", source)
+    build(tmp_path, "mace", source)
+    images = tmp_path / "images"
+    images.mkdir()
+    recorded_image = images / "mace-abc123def456.tar.zst"
+    recorded_image.write_bytes(b"z")
+    age(recorded_image)
+    orphan = images / "retired-0123456789ab.tar.zst"  # env pruned in a past run
+    orphan.write_bytes(b"z")
+    age(orphan)
+    crashed = images / ".uma.packing.4242"
+    crashed.write_bytes(b"z")
+    age(crashed)
+    fresh_partial = images / ".orb.packing.9999"  # in-flight pack: age guard
+    fresh_partial.write_bytes(b"z")
+
+    env = record(tmp_path, "mace", checkpoints={"mace-mp-0-medium": fetched()})
+    env.image = {"path": "images/mace-abc123def456.tar.zst", "packed_at": NEWER}
+    save(tmp_path, {"mace": env})
+
+    plan = plan_prune(tmp_path, cache_root=tmp_path)
+
+    by_name = {Path(i.path).name: i for i in plan.gc if i.kind == "image"}
+    assert set(by_name) == {orphan.name, crashed.name}
+    assert by_name[crashed.name].reason == "leftover from a crashed pack"
+    assert by_name[orphan.name].reason == "no manifest env records it"
+
+
 def test_orphaned_lockfile_is_collected(tmp_path):
     register(tmp_path, "mace", env_source("mace-mp-0-medium"))
     build(tmp_path, "mace", env_source("mace-mp-0-medium"))

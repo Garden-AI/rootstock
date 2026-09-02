@@ -43,8 +43,8 @@ Commands:
         The subtractive half of sync: remove built envs with no registered
         source, checkpoint records (and their unshared weight files) no
         source declares, and internal garbage (.build/.trash leftovers,
-        orphaned interpreters, stale lockfiles, the uv cache). Plan-confirm
-        by default; batch jobs pass --yes.
+        orphaned interpreters, stale lockfiles, orphaned staging images,
+        the uv cache). Plan-confirm by default; batch jobs pass --yes.
             rootstock prune --cluster delta --dry-run
             rootstock prune ./environments/ --yes    # retire everything not declared here
             rootstock prune --gc-only --yes          # internal garbage only
@@ -467,7 +467,8 @@ def main():
             "checkpoint records no source declares (plus their weight files, "
             "refcounted against surviving checkpoints), and internal garbage "
             "(.build/.trash leftovers, orphaned interpreters, stale "
-            "lockfiles, the uv cache). Prints the plan and asks for "
+            "lockfiles, orphaned staging images, the uv cache). Prints the "
+            "plan and asks for "
             "confirmation before deleting anything; idempotent and safe to "
             "re-run after a failure. Don't run while a sync is in flight."
         ),

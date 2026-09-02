@@ -29,9 +29,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .exceptions import RootstockError
@@ -43,6 +45,23 @@ IMAGES_DIRNAME = "images"
 # several times faster to compress — and decompression speed (the spawn-path
 # cost) is essentially level-independent.
 _ZSTD_LEVEL = 3
+
+# A .packing partial older than this is a crashed pack's leftover even if
+# some process holds its recorded pid (pid reuse); far beyond any real pack.
+_PACK_STALE_SECONDS = 6 * 3600.0
+
+
+def _pid_alive(pid: int) -> bool:
+    """Shared by the pack-side partial sweep and the staging module (which
+    imports it from here — stage imports pack, so the helper can't live
+    there without a cycle)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        pass
+    return True
 
 
 class PackError(RootstockError, RuntimeError):
@@ -165,7 +184,16 @@ def pack_environment(root: Path | str, env_name: str, progress=None) -> dict:
 
         sha256 = digest.hexdigest()
         image_name = f"{env_name}-{sha256[:12]}.{IMAGE_FORMAT}"
-        partial.rename(images_dir / image_name)
+        try:
+            partial.rename(images_dir / image_name)
+        except OSError as exc:
+            # Most plausibly a concurrent pack of the same env swept our
+            # partial; surface it as the domain error so batch callers
+            # (pack_environments) report it instead of crashing.
+            raise PackError(
+                f"could not move the finished image for '{env_name}' into "
+                f"place (concurrent pack?): {exc}"
+            ) from exc
     except Exception:
         for proc in (tar_proc, zstd_proc):
             if proc is not None and proc.poll() is None:
@@ -174,15 +202,30 @@ def pack_environment(root: Path | str, env_name: str, progress=None) -> dict:
         partial.unlink(missing_ok=True)
         raise
 
-    # Superseded images of this env (and crashed packs' partials) are dead
-    # weight on the shared filesystem; the new archive is the only one the
-    # manifest will point at.
-    for stale in images_dir.glob(f"{env_name}-*.{IMAGE_FORMAT}"):
-        if stale.name != image_name:
+    # Superseded images of this env are dead weight on the shared
+    # filesystem; the new archive is the only one the manifest will point
+    # at. Exact-match on the <12-hex-sha> suffix — a bare `{env_name}-*`
+    # glob would also swallow a dash-extended sibling env's images
+    # (packing 'ani' must never delete 'ani-tuned-<sha>.tar.zst').
+    stale_image = re.compile(rf"^{re.escape(env_name)}-[0-9a-f]{{12}}\.{re.escape(IMAGE_FORMAT)}$")
+    for stale in images_dir.iterdir():
+        if stale.name != image_name and stale_image.match(stale.name):
             stale.unlink(missing_ok=True)
-    # Our own partial was renamed into place above, so every remaining
-    # .packing.* entry is a crashed pack's leftover.
+    # Our own partial was renamed into place above; remaining .packing.*
+    # entries are crashed packs' leftovers — unless their recorded pid is
+    # still alive and the file is fresh (a concurrent pack of this env,
+    # e.g. install's auto-pack racing a batch `rootstock pack`).
     for stale in images_dir.glob(f".{env_name}.packing.*"):
+        try:
+            pid = int(stale.name.rsplit(".", 1)[-1])
+        except ValueError:
+            pid = None
+        try:
+            age = time.time() - stale.stat().st_mtime
+        except OSError:
+            continue  # gone already
+        if pid is not None and _pid_alive(pid) and age < _PACK_STALE_SECONDS:
+            continue
         stale.unlink(missing_ok=True)
 
     if progress is not None:

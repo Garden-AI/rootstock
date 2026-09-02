@@ -193,3 +193,36 @@ def test_warm_mirror_with_full_disk_stays_staged(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("rootstock.stage.shutil.disk_usage", lambda p: usage._replace(free=0))
 
     assert stage_weights(root, None, ENV_NAME, CKPT, base) == first
+
+
+def test_fallthrough_symlink_upgrades_to_copy_when_recorded(tmp_path: Path):
+    """A file symlinked earlier as an unrecorded sibling must become a real
+    copy once a checkpoint records it — a symlink's stat matches the shared
+    source trivially, and treating it as current would leave the worker
+    cold-mmapping the shared file with its prewarm switched off."""
+    root = tmp_path / "root"
+    root.mkdir()
+    _write(root, "cache/demo/a.pt", b"a" * 128)
+    _write(root, "cache/demo/b.pt", b"b" * 128)
+    base = tmp_path / "local"
+    base.mkdir()
+
+    # First checkpoint records only a.pt: b.pt gets the fallthrough symlink.
+    _record(root, [{"path": "cache/demo/a.pt", "size": 128}])
+    mirror = stage_weights(root, None, ENV_NAME, CKPT, base)
+    assert mirror is not None
+    assert (mirror / "cache" / "demo" / "b.pt").is_symlink()
+
+    # A second checkpoint records b.pt: the symlink must become a copy.
+    write_manifest_env(
+        root,
+        checkpoints={
+            CKPT: {"weight_files": [{"path": "cache/demo/a.pt", "size": 128}]},
+            "other-ckpt": {"weight_files": [{"path": "cache/demo/b.pt", "size": 128}]},
+        },
+    )
+    mirror2 = stage_weights(root, None, ENV_NAME, "other-ckpt", base)
+    assert mirror2 == mirror
+    staged_b = mirror / "cache" / "demo" / "b.pt"
+    assert staged_b.is_file() and not staged_b.is_symlink()
+    assert staged_b.read_bytes() == b"b" * 128

@@ -132,3 +132,41 @@ def test_insufficient_space_falls_back(install_root: Path, tmp_path: Path, monke
     monkeypatch.setattr("rootstock.stage.shutil.disk_usage", lambda p: usage._replace(free=10))
     assert stage_env(install_root, ENV_NAME, base) is None
     assert "free at" in capsys.readouterr().err
+
+
+def test_fixup_failure_is_cached_per_node(install_root: Path, tmp_path: Path, monkeypatch, capsys):
+    """A deterministic fixup failure (e.g. targets outside every known root
+    spelling) must not re-pay the multi-GB extract-and-discard on every
+    spawn — it is noted per archive and skipped until the client changes."""
+    import rootstock.stage as stage_module
+
+    _pack_and_record(install_root)
+    base = tmp_path / "local"
+    base.mkdir()
+    calls = {"n": 0}
+
+    def boom(*a, **k):
+        calls["n"] += 1
+        raise stage_module._FixupError("no local interpreter mapping")
+
+    monkeypatch.setattr(stage_module, "_fixup_staged_env", boom)
+
+    assert stage_module.stage_env(install_root, ENV_NAME, base) is None
+    assert stage_module.stage_env(install_root, ENV_NAME, base) is None
+
+    assert calls["n"] == 1  # the second call skipped extraction entirely
+    assert "previously failed" in capsys.readouterr().err
+
+
+def test_transient_extraction_failure_is_not_cached(install_root: Path, tmp_path: Path, capsys):
+    """A corrupt read is not a deterministic failure: fixing the archive
+    (repack) must let the very next spawn stage again."""
+    record = _pack_and_record(install_root)
+    base = tmp_path / "local"
+    base.mkdir()
+    image = install_root / record["path"]
+    good = image.read_bytes()
+    image.write_bytes(b"corrupt")
+    assert stage_env(install_root, ENV_NAME, base) is None
+    image.write_bytes(good)
+    assert stage_env(install_root, ENV_NAME, base) is not None
