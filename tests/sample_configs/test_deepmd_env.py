@@ -82,6 +82,28 @@ def stubbed_deepmd(monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", "/shared/root/cache")
     monkeypatch.delenv("DEVICE", raising=False)
     monkeypatch.delenv("LOCAL_RANK", raising=False)
+
+    # The mpich wheel's bundled libfabric, as importlib.metadata reports it
+    # (RECORD paths are site-packages-relative), and the ctypes load call.
+    class _Entry:
+        def __init__(self, rel: str):
+            self._path = Path(rel)
+
+        def match(self, pattern: str) -> bool:
+            return self._path.match(pattern)
+
+        def locate(self) -> Path:
+            return Path("/shared/root/envs/deepmd/lib/python3.11/site-packages") / self._path
+
+    captured["mpich_files"] = [_Entry("../../libmpi.so.12"), _Entry("../../mpich/libfabric.so.1")]
+    monkeypatch.setattr(
+        "importlib.metadata.files",
+        lambda dist: captured["mpich_files"] if dist == "mpich" else None,
+    )
+    captured["cdll"] = []
+    monkeypatch.setattr(
+        "ctypes.CDLL", lambda path, mode=None: captured["cdll"].append((path, mode))
+    )
     return captured
 
 
@@ -151,6 +173,28 @@ def test_cpu_device_sets_deepmd_device_env(stubbed_deepmd):
     import os
 
     assert os.environ["DEVICE"] == "cpu"
+
+
+# ---------- libfabric preload -----------------------------------------------------
+
+
+def test_bundled_libfabric_is_preloaded_globally_before_deepmd(stubbed_deepmd):
+    import ctypes
+
+    module = _load_env_module()
+    module.setup("dpa3-omol-large", device="cpu")
+    assert stubbed_deepmd["cdll"] == [
+        ("/shared/root/envs/deepmd/lib/mpich/libfabric.so.1", ctypes.RTLD_GLOBAL)
+    ]
+
+
+def test_libfabric_preload_is_skipped_when_mpich_ships_none(stubbed_deepmd, monkeypatch):
+    stubbed_deepmd["mpich_files"] = []
+    monkeypatch.setattr("sys.prefix", "/nonexistent/prefix")
+    module = _load_env_module()
+    module.setup_from_path("/scratch/me/ft.pt", device="cpu")
+    assert stubbed_deepmd["cdll"] == []
+    assert stubbed_deepmd["calculator"]["model"] == "/scratch/me/ft.pt"
 
 
 # ---------- custom weights -------------------------------------------------------
