@@ -43,11 +43,23 @@ Device: deepmd's PyTorch backend fixes its device at first import from the
 environment (``DEVICE=cpu`` for CPU, otherwise ``cuda:{LOCAL_RANK}``), so
 setup() sets those variables before importing deepmd.
 
+MPI: the deepmd-kit wheel preloads ``libmpi.so.12`` from the ``mpich`` wheel
+at import (its custom-op library links MPI, used only by the LAMMPS
+plugin). That libmpi needs the libfabric bundled next to it under
+``lib/mpich/``; on Cray systems the module environment puts the system
+libfabric on ``LD_LIBRARY_PATH``, which outranks the wheel's RUNPATH and
+lacks the ``FABRIC_1.9`` symbol version libmpi wants. setup() therefore
+loads the bundled libfabric by absolute path first, so the dynamic linker
+reuses it when libmpi asks for ``libfabric.so.1``.
+
 Licenses: the DPA-2 / DPA-3 checkpoints are CC-BY-4.0; the DPA4 checkpoints
 are CC-BY-NC-4.0 (non-commercial).
 """
 
+import ctypes
 import os
+import sys
+from importlib import metadata
 from pathlib import Path
 
 CHECKPOINTS = {
@@ -169,6 +181,32 @@ def _select_device(device: str) -> None:
         os.environ["LOCAL_RANK"] = device.split(":", 1)[1]
 
 
+def _bundled_libfabric() -> Path | None:
+    """The libfabric shipped inside the ``mpich`` wheel, if installed."""
+    try:
+        files = metadata.files("mpich") or []
+    except metadata.PackageNotFoundError:
+        files = []
+    for entry in files:
+        if entry.match("mpich/libfabric.so.1"):
+            return Path(entry.locate()).resolve()
+    fallback = Path(sys.prefix) / "lib" / "mpich" / "libfabric.so.1"
+    return fallback if fallback.is_file() else None
+
+
+def _preload_bundled_libfabric() -> None:
+    """Load the wheel's own libfabric before deepmd pulls in libmpi.
+
+    Must run before the first deepmd import: once ``libmpi.so.12`` has
+    resolved ``libfabric.so.1`` against whatever LD_LIBRARY_PATH offered
+    (the Cray system copy, on Delta), the choice is fixed for the process.
+    A library already loaded under that soname is reused instead.
+    """
+    lib = _bundled_libfabric()
+    if lib is not None:
+        ctypes.CDLL(str(lib), mode=ctypes.RTLD_GLOBAL)
+
+
 def _calculator_class():
     """deepmd's ASE calculator, reading charge/spin the way the other envs do."""
     from ase.calculators.calculator import all_changes
@@ -223,6 +261,7 @@ def setup(checkpoint: str, device: str = "cuda", head: str | None = None, **kwar
             f'with setup_kwargs={{"head": ...}}: one of {", ".join(HEADS[checkpoint])}'
         )
     _select_device(device)
+    _preload_bundled_libfabric()
 
     from deepmd.pretrained.download import resolve_model_path
 
@@ -239,4 +278,5 @@ def setup_from_path(path: str, device: str = "cuda", head: str | None = None, **
     # --kwarg head=...) unless it declares a default; single-task ones
     # take none.
     _select_device(device)
+    _preload_bundled_libfabric()
     return _calculator_class()(model=path, head=head, **kwargs)
