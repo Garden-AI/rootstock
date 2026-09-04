@@ -36,6 +36,7 @@ from .config import load_config
 from .environment import (
     declares_setup_from_path,
     find_env_for_checkpoint,
+    list_built_environments,
     parse_checkpoints_dict,
     parse_clusters_list,
     parse_custom_checkpoint_ids,
@@ -56,6 +57,7 @@ from .manifest import (
     now_iso,
     save_manifest,
 )
+from .pack import PackError, pack_environment, pack_environment_best_effort
 from .pep723 import (
     get_dependencies,
     get_requires_python,
@@ -163,7 +165,10 @@ def parse_setup_kwargs(kwarg_specs: list[str] | None) -> dict[str, object]:
 
 
 def refresh_manifest_environments(
-    manifest: Manifest, root: Path, built_env: str | None = None
+    manifest: Manifest,
+    root: Path,
+    built_env: str | None = None,
+    packed_images: dict[str, dict] | None = None,
 ) -> Manifest:
     """
     Update manifest with current environment state.
@@ -177,6 +182,13 @@ def refresh_manifest_environments(
     env the manifest has never seen gets the env directory's mtime as a
     best-effort estimate — never `now`, which would fake freshness into the
     `verified_at > built_at` staleness comparison.
+
+    `packed_images` carries freshly packed image records (env name -> record
+    from :func:`rootstock.pack.pack_environment`); each is stamped with
+    ``packed_at`` here, in the same refresh that stamps ``built_at``, so a
+    just-installed env's image always satisfies the ``packed_at >= built_at``
+    currency check. Other envs keep their existing image record — currency is
+    judged at read time, never by dropping history.
     """
     from . import __version__
     from .install_state import read_install_state
@@ -224,6 +236,11 @@ def refresh_manifest_environments(
         else:
             built_at = built_at_estimate(env.path)
 
+        if packed_images and env_name in packed_images:
+            image = {**packed_images[env_name], "packed_at": now_iso()}
+        else:
+            image = env.record.image if env.record else None
+
         manifest.environments[env_name] = EnvironmentInfo(
             built_at=built_at,
             source_hash=env.source_hash,
@@ -233,6 +250,7 @@ def refresh_manifest_environments(
             checkpoints=checkpoints,
             lock_hash=env.lock_hash,
             clusters=env_clusters,
+            image=image,
         )
 
     # The filesystem is the truth for what's installed: a record whose env
@@ -253,6 +271,7 @@ def update_and_push_manifest(
     quiet: bool = False,
     push: bool = True,
     built_env: str | None = None,
+    packed_images: dict[str, dict] | None = None,
 ) -> bool:
     """
     Update manifest with current state and optionally push to backend.
@@ -268,6 +287,8 @@ def update_and_push_manifest(
         push: Whether to push to backend (default True)
         built_env: Env name that was (re)built by the calling command, if any;
             its built_at is stamped to now
+        packed_images: Freshly packed image records to stamp into the
+            refreshed manifest (see refresh_manifest_environments)
 
     Returns:
         True if push succeeded or was skipped (no API key), False on error
@@ -303,7 +324,9 @@ def update_and_push_manifest(
             manifest = create_manifest(root, clusters, config)
 
         # Refresh environment info from current state
-        manifest = refresh_manifest_environments(manifest, root, built_env=built_env)
+        manifest = refresh_manifest_environments(
+            manifest, root, built_env=built_env, packed_images=packed_images
+        )
 
         # Save locally
         save_manifest(manifest, root)
@@ -582,6 +605,7 @@ def install_environment(
     upgrade: bool = False,
     verbose: bool = False,
     push: bool = True,
+    pack: bool = True,
     progress: Progress | None = None,
 ) -> InstallResult:
     """
@@ -707,6 +731,7 @@ def install_environment(
             verbose=verbose,
             push=push,
             upgrade=upgrade,
+            pack=pack,
             progress=progress,
         )
     finally:
@@ -727,6 +752,7 @@ def _build_and_swap(
     verbose: bool,
     push: bool,
     upgrade: bool,
+    pack: bool,
     progress: Progress | None,
 ) -> bool:
     """Build the venv into build_dir, then atomically swap it into env_target.
@@ -933,13 +959,104 @@ def _build_and_swap(
     _say(progress, "7. Pre-compiling bytecode...")
     _precompile_environment(env_python, env_target)
 
+    # Pack the single-image archive for node-local staging (#180) inside the
+    # same install transaction that produced the env, so image and env can
+    # only ever describe the same build. Best-effort: a failed pack degrades
+    # spawns to the prewarm path, never fails the install.
+    packed_images = None
+    if pack:
+        _say(progress, "8. Packing staging image...")
+        record = pack_environment_best_effort(
+            root, env_name, progress=None if progress is None else (lambda m: _say(progress, m))
+        )
+        if record is not None:
+            packed_images = {env_name: record}
+
     _say(progress, f"\nBuilt environment: {env_target}")
 
     # Update manifest. built_env stamps this env's built_at to now — the one
     # moment the true build time is known.
-    update_and_push_manifest(root, quiet=progress is None, push=push, built_env=env_name)
+    update_and_push_manifest(
+        root,
+        quiet=progress is None,
+        push=push,
+        built_env=env_name,
+        packed_images=packed_images,
+    )
 
     return locked
+
+
+def pack_environments(
+    root: Path,
+    env_names: list[str] | None = None,
+    *,
+    push: bool = True,
+    progress: Progress | None = None,
+) -> dict[str, dict]:
+    """Pack staging images for built envs and record them in the manifest.
+
+    The backfill half of image packing (#180): ``install`` packs its own env,
+    this covers everything built before packing existed (or whose pack was
+    skipped/failed). ``env_names=None`` packs every built env whose recorded
+    image is missing or stale; naming envs packs exactly those, fresh or not.
+
+    Returns the new image records by env name. Raises OperationError when a
+    named env isn't built, and — after recording whatever did pack in the
+    manifest — when any requested pack failed. The manifest update must not
+    be skippable by a late failure: earlier packs in the same run already
+    deleted the superseded archives their old records point at.
+    """
+    root = Path(root)
+    built = {name for name, _ in list_built_environments(root)}
+
+    if env_names:
+        missing = sorted(set(env_names) - built)
+        if missing:
+            raise OperationError(
+                f"not built at {root}: {', '.join(missing)}. "
+                f"Built envs: {', '.join(sorted(built)) or '(none)'}"
+            )
+        targets = list(env_names)
+    else:
+        manifest = load_manifest(root)
+        recorded = manifest.environments if manifest else {}
+        targets = sorted(
+            name
+            for name in built
+            if name not in recorded or not _image_usable(root, recorded[name])
+        )
+        if not targets:
+            _say(progress, "All built envs already have current images.")
+            return {}
+
+    packed: dict[str, dict] = {}
+    failures: list[str] = []
+    for env_name in targets:
+        _say(progress, f"Packing {env_name}...")
+        try:
+            packed[env_name] = pack_environment(root, env_name, progress=progress)
+        except PackError as exc:
+            failures.append(f"{env_name}: {exc}")
+
+    if packed:
+        update_and_push_manifest(root, quiet=progress is None, push=push, packed_images=packed)
+    if failures:
+        raise OperationError("some envs could not be packed:\n  " + "\n  ".join(failures))
+    return packed
+
+
+def _image_usable(root: Path, env: EnvironmentInfo) -> bool:
+    """Current by timestamp AND the archive actually on disk. The sweep's
+    repack filter must see through a purged images/ dir — a current-looking
+    record with no file behind it would otherwise report "nothing to pack"
+    forever while every spawn falls back to prewarm."""
+    from .manifest import image_is_current
+
+    if not image_is_current(env):
+        return False
+    path = env.image.get("path") if isinstance(env.image, dict) else None
+    return isinstance(path, str) and bool(path) and (Path(root) / path).is_file()
 
 
 # -----------------------------------------------------------------------------

@@ -23,10 +23,18 @@ class Cluster:
 
     `cache_root` defaults to `root`. Override it only when the right filesystem
     for code/venvs differs from the right filesystem for the model-weight cache.
+
+    `stage_dir` names a node-local directory worker spawns may stage packed
+    env images to (#180); like `cache_root`, it is only a legacy fallback —
+    the install's own `stage_dir` declaration in `{root}/layout.json` wins.
+    The value is a raw string because it may contain environment variables
+    (`$SLURM_TMPDIR`) that expand on the compute node at spawn time. None
+    (the default) disables staging via the registry.
     """
 
     root: Path
     cache_root: Path | None = None
+    stage_dir: str | None = None
 
     @property
     def resolved_cache_root(self) -> Path:

@@ -41,7 +41,7 @@ def _make_manifest(envs: dict[str, EnvironmentInfo] | None = None) -> Manifest:
 
 
 def test_schema_version_constant():
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION == 7
 
 
 def test_checkpoint_info_round_trip():

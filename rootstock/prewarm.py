@@ -145,7 +145,7 @@ def prewarm_files(paths, max_workers: int | None = None) -> tuple[int, int]:
     return _read_sized(_stat_files(paths), max_workers)
 
 
-def _fmt_bytes(n: int) -> str:
+def _fmt_bytes(n: float) -> str:
     return f"{n / 1e9:.1f} GB" if n >= 1e9 else f"{n / 1e6:.0f} MB"
 
 
@@ -194,7 +194,7 @@ def _cgroup_memory_limit(
     return min(limits) if limits else None
 
 
-def prewarm_from_spec(spec: dict, log=None) -> None:
+def prewarm_from_spec(spec: dict, log=None, label: str = "[Worker]") -> None:
     """Warm the page cache for a worker spawn spec; never raises.
 
     The one-line summary goes to ``log`` (default stderr, so it lands in
@@ -203,7 +203,8 @@ def prewarm_from_spec(spec: dict, log=None) -> None:
     replaces an hours-long stall with a visible, bounded read. The weights
     portion is reported separately, tagged with the tier that resolved it
     (#178) — field data for retiring the heuristic once manifest records
-    are universal.
+    are universal. ``label`` prefixes each line: the default is the worker
+    wrapper's; the ``rootstock stage`` prologue fallback passes its own.
     """
     if os.environ.get("ROOTSTOCK_NO_PREWARM"):
         return
@@ -227,7 +228,7 @@ def prewarm_from_spec(spec: dict, log=None) -> None:
         limit = _cgroup_memory_limit()
         if limit is not None and expected > limit:
             print(
-                f"[Worker] Warning: expected cold working set "
+                f"{label} Warning: expected cold working set "
                 f"{_fmt_bytes(expected)} exceeds this job's memory limit "
                 f"{_fmt_bytes(limit)}; warmed pages will be evicted before "
                 f"the worker reads them — request more memory for the job",
@@ -239,7 +240,7 @@ def prewarm_from_spec(spec: dict, log=None) -> None:
         elapsed = time.monotonic() - began
 
         summary = (
-            f"[Worker] Prewarmed page cache: {n_files} files, "
+            f"{label} Prewarmed page cache: {n_files} files, "
             f"{_fmt_bytes(n_bytes)} in {elapsed:.1f}s"
         )
         tier = spec.get("prewarm_weights_tier")
@@ -257,6 +258,6 @@ def prewarm_from_spec(spec: dict, log=None) -> None:
         print(summary, file=log, flush=True)
     except Exception as exc:  # noqa: BLE001 - never take the worker down
         try:
-            print(f"[Worker] Prewarm skipped: {type(exc).__name__}: {exc}", file=log, flush=True)
+            print(f"{label} Prewarm skipped: {type(exc).__name__}: {exc}", file=log, flush=True)
         except Exception:
             pass

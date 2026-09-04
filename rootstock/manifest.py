@@ -28,7 +28,7 @@ from pathlib import Path
 from .config import UserConfig
 from .exceptions import RootstockError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # manifest_lock defaults. The lock is only held across a load → mutate → save
 # cycle (plus the env refresh, which shells out to `uv pip list` per env), so
@@ -172,6 +172,19 @@ def _migrate_v5_to_v6(data: dict) -> tuple[dict, str | None]:
     return data, note
 
 
+def _migrate_v6_to_v7(data: dict) -> tuple[dict, str | None]:
+    """v7 added the optional per-env ``image`` record (packed env archive,
+    #180).
+
+    ``image`` defaults to absent, so this is a pure version bump — the bump
+    matters for the same reason v5's did: without it a v6 client's
+    from_dict/asdict round-trip would silently drop the record on its next
+    save.
+    """
+    data["schema_version"] = 7
+    return data, None
+
+
 # One entry per historical schema version, upgrading one step. A schema bump
 # without a migration here strands every deployed manifest of that vintage —
 # add the migration in the same change as the bump.
@@ -181,6 +194,7 @@ MIGRATIONS = {
     3: _migrate_v3_to_v4,
     4: _migrate_v4_to_v5,
     5: _migrate_v5_to_v6,
+    6: _migrate_v6_to_v7,
 }
 
 
@@ -345,6 +359,13 @@ class EnvironmentInfo:
     # refresh time. None = serves every cluster the install does; a list
     # restricts it (a cluster-specific variant on a shared install, #208).
     clusters: list[str] | None = None
+    # Packed single-image archive of this env (#180): a dict of {"path"
+    # (relative to the root), "sha256" (of the archive — the staging
+    # identity), "format", "compressed_bytes", "uncompressed_bytes",
+    # "packed_at"}. None = never packed. The image is current only while
+    # ``packed_at >= built_at`` (see :func:`image_is_current`) — a rebuild
+    # without a repack must never serve a stale image.
+    image: dict | None = None
     # Field order is the JSON key order (asdict): lock_hash stays ahead of
     # checkpoints to match the layout pushed manifests have always had.
     checkpoints: dict[str, CheckpointInfo] = field(default_factory=dict)
@@ -372,6 +393,7 @@ class EnvironmentInfo:
             checkpoints=checkpoints,
             lock_hash=data.get("lock_hash"),
             clusters=data.get("clusters"),
+            image=data.get("image"),
         )
 
 
@@ -382,6 +404,19 @@ def is_verified(env: EnvironmentInfo, ckpt: CheckpointInfo, cluster: str) -> boo
     if verified_at is None:
         return False
     return verified_at > env.built_at  # ISO 8601 sorts lexically
+
+
+def image_is_current(env: EnvironmentInfo) -> bool:
+    """True if the env's packed image record describes the current build.
+
+    ``packed_at >= built_at`` (ISO 8601 sorts lexically; ``>=`` because an
+    install stamps both in the same refresh): an env rebuilt without a repack
+    reads as image-less rather than serving a stale archive.
+    """
+    if not isinstance(env.image, dict):
+        return False
+    packed_at = env.image.get("packed_at")
+    return isinstance(packed_at, str) and packed_at >= env.built_at
 
 
 @dataclass
