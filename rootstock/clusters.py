@@ -67,7 +67,7 @@ CLUSTER_REGISTRY: dict[str, Cluster] = {
     # job (the worker inherits the environment). Install + weight cache both
     # live on the /lus/flare project filesystem.
     "aurora": Cluster(
-        root=Path("/lus/flare/projects/MatSciAI/rootstock"),
+        root=Path("/lus/flare/projects/Rootstock/rootstock"),
     ),
 }
 
