@@ -9,6 +9,16 @@ automated smoke-test rotation.
 pass each) and pushes the refreshed `manifest.json` to the backend. Running it
 on a schedule keeps each cluster's manifest honest about checkpoint health.
 
+Each checkpoint's result is written to `manifest.json` the moment it is known
+(a short locked read-modify-write per checkpoint), so a job the scheduler
+kills at its wall-time limit keeps every verified/failed stamp it reached.
+The backend push is a separate step that happens once, after the last
+checkpoint. To bound how much a killed run leaves unpushed, add
+`--push-every N`: the manifest is then also pushed after every N results
+(each push replaces the whole manifest server-side, so an intermediate push
+is simply a snapshot of the stamps so far). Either way, stamps a killed run
+left on disk ride along with the next successful push from that install.
+
 User-supplied weights (`<family>:custom` checkpoints) are never smoke-tested
 — there is nothing registered to verify. Every use is a fresh load through
 the env's `setup_from_path` hook, so a bad file simply fails at server start.
@@ -59,6 +69,11 @@ Two recipes with placeholders:
      `qstat -u $USER` (PBS) shows a pending job (on PBS a job with a future
      start time sits in state `W`, waiting — not `Q`), and
    - the manifest landed — `rootstock status` shows fresh `verified_at` times.
+
+   If the job hit its wall-time limit before pushing, `rootstock status` still
+   shows the stamps it reached (they are written per checkpoint); only the
+   push is missing. Raise the walltime in the recipe, or pass `--push-every N`
+   in the `rootstock smoke-test` invocation so partial runs reach the backend.
 
 ## How the self-scheduling works
 

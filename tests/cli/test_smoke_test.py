@@ -76,6 +76,7 @@ def _make_args(root: Path, **overrides):
     args.root = str(root)
     args.no_push = overrides.get("no_push", True)
     args.cluster = overrides.get("cluster")
+    args.push_every = overrides.get("push_every", 0)
     return args
 
 
@@ -234,6 +235,143 @@ def test_smoke_test_empty_selection_returns_0(tmp_path, monkeypatch):
     )
     rc = cmd_smoke_test(_make_args(tmp_path))
     assert rc == 0
+
+
+class _Killed(BaseException):
+    """Stand-in for the scheduler killing the job (SIGTERM/SIGKILL at the
+    wall-time limit) — not an Exception, so nothing in the command path
+    could swallow it."""
+
+
+def _verify_killing_at(victim: str, verdicts: dict[str, tuple[bool, str | None]] | None = None):
+    """A verify_checkpoint stand-in that dies when asked for ``victim``,
+    exactly as a wall-time kill would strike mid-verification."""
+    verdicts = verdicts or {}
+
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **_):
+        if checkpoint == victim:
+            raise _Killed()
+        return verdicts.get(checkpoint, (True, None))
+
+    return fake_verify
+
+
+def test_smoke_test_persists_each_result_before_the_next_checkpoint(populated_root, monkeypatch):
+    """Two 12 h Delta runs (SLURM 21119813 / 21119858, 2026-08-13) hit their
+    wall-time limit and left no trace: results only reached the manifest
+    after the last checkpoint. Each outcome must land on disk as soon as it
+    is known, so a killed run keeps the stamps it reached."""
+    monkeypatch.setattr(
+        smoke_module,
+        "verify_checkpoint",
+        _verify_killing_at(
+            "uma-s-1p1", verdicts={"mace-mp-0-medium": (False, "RuntimeError: bad")}
+        ),
+    )
+    pushes: list[dict] = []
+    monkeypatch.setattr(
+        smoke_module, "update_and_push_manifest", lambda *a, **kw: pushes.append(kw) or True
+    )
+
+    with pytest.raises(_Killed):
+        cmd_smoke_test(_make_args(populated_root))
+
+    m = load_manifest(populated_root)
+    small = m.environments["mace"].checkpoints["mace-mp-0-small"]
+    medium = m.environments["mace"].checkpoints["mace-mp-0-medium"]
+    uma = m.environments["uma"].checkpoints["uma-s-1p1"]
+    assert small.verification("test").verified_at is not None
+    assert "smoke-test: RuntimeError: bad" == medium.verification("test").last_error
+    assert uma.verification("test").verified_at is None  # never got its turn
+    assert uma.verification("test").last_error is None
+    assert pushes == []  # the kill also pre-empted the single end-of-run push
+
+
+def test_smoke_test_persists_weight_files_per_checkpoint(populated_root, monkeypatch):
+    files = [{"path": "cache/fake/model.bin", "size": 9_000_000}]
+
+    def fake_verify(
+        root, env_name, checkpoint, device, setup_kwargs, *, weights_capture_path=None, **_
+    ):
+        if checkpoint == "mace-mp-0-medium":
+            raise _Killed()
+        Path(weights_capture_path).write_text(json.dumps({"files": files}))
+        return True, None
+
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", fake_verify)
+    with pytest.raises(_Killed):
+        cmd_smoke_test(_make_args(populated_root))
+
+    small = load_manifest(populated_root).environments["mace"].checkpoints["mace-mp-0-small"]
+    assert small.weight_files == files
+    assert small.weights_recorded_at is not None
+
+
+def test_smoke_test_does_not_clobber_concurrent_manifest_writes(populated_root, monkeypatch):
+    """Each per-checkpoint write re-reads the manifest under the lock, so a
+    co-maintainer's change made while a verification was running survives."""
+
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **_):
+        if checkpoint == "mace-mp-0-medium":
+            m = load_manifest(populated_root)
+            m.environments["uma"].checkpoints["uma-s-1p2p1"] = CheckpointInfo(
+                fetched_at="2026-03-01T00:00:00Z"
+            )
+            save_manifest(m, populated_root)
+        return True, None
+
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", fake_verify)
+    assert cmd_smoke_test(_make_args(populated_root)) == 0
+
+    m = load_manifest(populated_root)
+    assert "uma-s-1p2p1" in m.environments["uma"].checkpoints
+    assert m.environments["mace"].checkpoints["mace-mp-0-small"].verification("test").verified_at
+
+
+def test_smoke_test_pushes_exactly_once_by_default(populated_root, monkeypatch):
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", lambda *a, **kw: (True, None))
+    pushes: list[dict] = []
+    monkeypatch.setattr(
+        smoke_module, "update_and_push_manifest", lambda *a, **kw: pushes.append(kw) or True
+    )
+
+    assert cmd_smoke_test(_make_args(populated_root, no_push=False)) == 0
+    assert pushes == [{"quiet": True, "push": True}]
+
+
+def test_smoke_test_push_every_adds_intermediate_pushes(populated_root, monkeypatch):
+    """--push-every N pushes after every N results and still once at the
+    end; each push is a whole-manifest snapshot of the stamps so far."""
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", lambda *a, **kw: (True, None))
+    snapshots: list[int] = []
+
+    def fake_push(root, quiet, push):
+        m = load_manifest(root)
+        stamped = sum(
+            1
+            for env in m.environments.values()
+            for c in env.checkpoints.values()
+            if c.verification("test").verified_at
+        )
+        snapshots.append(stamped)
+        return True
+
+    monkeypatch.setattr(smoke_module, "update_and_push_manifest", fake_push)
+
+    # 3 checkpoints selected: pushes after the 2nd, then the final one.
+    assert cmd_smoke_test(_make_args(populated_root, no_push=False, push_every=2)) == 0
+    assert snapshots == [2, 3]
+
+
+def test_smoke_test_no_push_suppresses_push_every(populated_root, monkeypatch):
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", lambda *a, **kw: (True, None))
+    pushes: list[dict] = []
+    monkeypatch.setattr(
+        smoke_module, "update_and_push_manifest", lambda *a, **kw: pushes.append(kw) or True
+    )
+
+    assert cmd_smoke_test(_make_args(populated_root, no_push=True, push_every=1)) == 0
+    assert pushes == [{"quiet": True, "push": False}]
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +553,35 @@ def test_custom_leg_divergence_fails_and_records_error(custom_root, monkeypatch)
     # The canonical baseline itself passed.
     base = load_manifest(custom_root).environments["uma"].checkpoints["uma-s-1p1"]
     assert base.verification("test").verified_at is not None
+
+
+def test_custom_leg_result_is_persisted_before_the_next_leg(custom_root, monkeypatch):
+    """The custom legs run after every canonical checkpoint, i.e. latest in
+    the job — exactly where a wall-time kill lands. Each leg's stamp must be
+    on disk before the next leg starts."""
+    calls: list[dict] = []
+    inner = _fake_verify_factory(calls)
+
+    def fake_verify(root, env_name, checkpoint, device, setup_kwargs, **kw):
+        if checkpoint == "mace-off:custom":
+            raise _Killed()
+        return inner(root, env_name, checkpoint, device, setup_kwargs, **kw)
+
+    monkeypatch.setattr(smoke_module, "verify_checkpoint", fake_verify)
+    with pytest.raises(_Killed):
+        cmd_smoke_test(_make_args(custom_root))
+
+    m = load_manifest(custom_root)
+    assert m.environments["uma"].checkpoints["uma:custom"].verification("test").verified_at
+    assert m.environments["mace"].checkpoints["mace:custom"].verification("test").verified_at
+    assert "mace-off:custom" not in m.environments["mace"].checkpoints
+    # Every canonical baseline landed too.
+    for env, ckpt in (
+        ("uma", "uma-s-1p1"),
+        ("mace", "mace-mp-0-small"),
+        ("mace", "mace-off23-small"),
+    ):
+        assert m.environments[env].checkpoints[ckpt].verification("test").verified_at
 
 
 def test_custom_leg_skipped_when_baseline_fails(custom_root, monkeypatch, capsys):
