@@ -118,6 +118,7 @@ def _args(root: Path, **overrides):
     args.root = str(root)
     args.no_push = True
     args.cluster = overrides.get("cluster")
+    args.push_every = 0
     return args
 
 

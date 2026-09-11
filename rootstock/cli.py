@@ -582,6 +582,18 @@ def main():
         action="store_true",
         help="Don't push manifest to backend",
     )
+    smoke_parser.add_argument(
+        "--push-every",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "Also push the manifest after every N checkpoint results (default: "
+            "only once, at the end). Each result is written to manifest.json as "
+            "soon as it is known regardless; this only bounds how much a run "
+            "killed at its wall-time limit leaves unpushed. Ignored with --no-push."
+        ),
+    )
     smoke_parser.set_defaults(func=cmd_smoke_test)
 
     # status command

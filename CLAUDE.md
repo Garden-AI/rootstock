@@ -28,7 +28,7 @@ rootstock add <checkpoint-id> [--kwarg key=val ...] [--device cuda] [--no-verify
 # (re-loads a same-family checkpoint's cached weights and compares results).
 # Suitable for nightly cron. --cluster names the machine (required on shared
 # installs like sophia/polaris; add/sync take it too).
-rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--cluster NAME] [--json]
+rootstock smoke-test [--env ENV] [--checkpoint CKPT] [--device cuda] [--cluster NAME] [--json] [--push-every N]
 
 # Show status (per-checkpoint verified/stale grid; --json for machine-readable)
 rootstock status [--root <path>] [--json]

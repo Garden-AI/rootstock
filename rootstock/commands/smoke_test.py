@@ -317,6 +317,55 @@ def _dominant_weights_file(files: list[dict] | None) -> str | None:
     return largest["path"]
 
 
+def _persist_outcome(
+    root: Path,
+    cluster: str,
+    device: str,
+    env_name: str,
+    ckpt_name: str,
+    verification: VerificationRecord,
+    weight_files: list[dict] | None,
+    fetched_at: str | None,
+    progress,
+) -> None:
+    """Write one checkpoint's outcome to ``{root}/manifest.json`` now.
+
+    Each result lands as soon as it is known — one short locked
+    read-modify-write per checkpoint — so a run the scheduler kills at its
+    wall-time limit still leaves the verified/failed stamps it reached (two
+    12 h Delta runs on 2026-08-13 timed out and left nothing). The manifest
+    is re-read *inside* the lock: verification runs are minutes long and a
+    co-maintainer may have written in between, so the copy loaded before the
+    loop is never saved.
+    """
+    with manifest_lock(root):
+        fresh = load_manifest(root)
+        if fresh is None:
+            return
+        env_record = fresh.environments.get(env_name)
+        if env_record is None:
+            return  # env removed while we were testing
+        # Created on first pass when the resolved env has no record of an id
+        # it now hosts (a variant tested checkpoint-first for the first time,
+        # #208; a ':custom' entry, which nothing else ever writes). The
+        # donor's fetch stamp rides along so a canonical record never reads
+        # "verified but never fetched".
+        ckpt_record = env_record.checkpoints.setdefault(ckpt_name, CheckpointInfo())
+        if ckpt_record.fetched_at is None and fetched_at is not None:
+            ckpt_record.fetched_at = fetched_at
+        ckpt_record.verifications[cluster] = verification
+        apply_weights_record(
+            ckpt_record, weight_files, label=f"{env_name}/{ckpt_name}", progress=progress
+        )
+        save_manifest(fresh, root)
+
+
+def _verification_for(ok: bool, err: str | None, device: str) -> VerificationRecord:
+    if ok:
+        return VerificationRecord(verified_at=now_iso(), verified_device=device)
+    return VerificationRecord(last_error=f"smoke-test: {err}")
+
+
 def cmd_smoke_test(args) -> int:
     root: Path = get_root_or_exit(args)
     cache_root = resolve_cache_root(root)
@@ -326,6 +375,7 @@ def cmd_smoke_test(args) -> int:
     verify_timeout = args.verify_timeout
     json_out = args.json
     no_push = args.no_push
+    push_every = getattr(args, "push_every", 0) or 0
 
     if ckpt_filter is not None and env_filter is None:
         print("Error: --checkpoint requires --env", file=sys.stderr)
@@ -385,12 +435,19 @@ def cmd_smoke_test(args) -> int:
     n_failed = 0
     total_start = time.monotonic()
 
-    # Verification runs are long (minutes per checkpoint) and must not hold
-    # the manifest lock. Record outcomes here and apply them to a *freshly
-    # loaded* manifest in one locked cycle afterwards — mutating the manifest
-    # loaded before the loop and saving it at the end would silently revert
-    # anything a co-maintainer wrote in between.
-    outcomes: list[tuple[str, str, bool, str | None, list[dict] | None, str | None]] = []
+    # Every outcome is written to manifest.json the moment it is known (see
+    # _persist_outcome), so a run killed mid-way keeps what it reached. The
+    # backend push is separate: once at the end by default, or additionally
+    # after every --push-every recorded outcomes. Each push replaces the
+    # whole manifest server-side, so an intermediate push is simply a
+    # snapshot of the stamps so far.
+    n_recorded = 0
+    progress = None if json_out else print
+
+    def _maybe_push() -> None:
+        if no_push or push_every <= 0 or n_recorded % push_every:
+            return
+        update_and_push_manifest(root, quiet=True, push=True)
 
     # The custom legs reuse the canonical loop's work: its results are the
     # comparison baseline, and its fresh weight capture names the file on
@@ -421,22 +478,31 @@ def cmd_smoke_test(args) -> int:
             )
             weight_files = read_weights_capture(capture_path)
         elapsed = time.monotonic() - start
-        outcomes.append((env_name, ckpt_name, ok, err, weight_files, ckpt.fetched_at))
 
         if (env_name, ckpt_name) in base_keys:
             baselines[(env_name, ckpt_name)] = run_results
             base_captures[(env_name, ckpt_name)] = weight_files
 
+        verification = _verification_for(ok, err, device)
+        _persist_outcome(
+            root,
+            cluster,
+            device,
+            env_name,
+            ckpt_name,
+            verification,
+            weight_files,
+            ckpt.fetched_at,
+            progress,
+        )
+        n_recorded += 1
         # Mirror the outcome onto the working copy so verified_current in the
         # report reflects this run.
+        ckpt.verifications[cluster] = verification
         if ok:
             passed_keys.add((env_name, ckpt_name))
-            ckpt.verifications[cluster] = VerificationRecord(
-                verified_at=now_iso(), verified_device=device
-            )
             n_passed += 1
         else:
-            ckpt.verifications[cluster] = VerificationRecord(last_error=f"smoke-test: {err}")
             n_failed += 1
 
         results.append(
@@ -458,10 +524,10 @@ def cmd_smoke_test(args) -> int:
             if not ok:
                 line += f"  {err}"
             print(line)
+        _maybe_push()
 
     # Custom-weights legs (#200): re-load each base's cached weights file via
     # the weights= path and require agreement with the canonical run.
-    custom_outcomes: list[tuple[str, str, bool, str | None]] = []
     for leg in custom_legs:
         key = (leg.env_name, leg.base)
         if key not in passed_keys:
@@ -504,17 +570,20 @@ def cmd_smoke_test(args) -> int:
             if mismatch is not None:
                 ok, err = False, f"weights= run diverges from {leg.base}: {mismatch}"
         elapsed = time.monotonic() - start
-        custom_outcomes.append((leg.env_name, leg.custom_id, ok, err))
 
+        verification = _verification_for(ok, err, device)
+        # ':custom' entries are never fetched and carry no weights of their
+        # own: no fetch stamp, no weight capture.
+        _persist_outcome(
+            root, cluster, device, leg.env_name, leg.custom_id, verification, None, None, progress
+        )
+        n_recorded += 1
         env = manifest.environments[leg.env_name]
         ckpt = env.checkpoints.setdefault(leg.custom_id, CheckpointInfo())
+        ckpt.verifications[cluster] = verification
         if ok:
-            ckpt.verifications[cluster] = VerificationRecord(
-                verified_at=now_iso(), verified_device=device
-            )
             n_passed += 1
         else:
-            ckpt.verifications[cluster] = VerificationRecord(last_error=f"smoke-test: {err}")
             n_failed += 1
 
         results.append(
@@ -540,55 +609,14 @@ def cmd_smoke_test(args) -> int:
             if not ok:
                 line += f"  {err}"
             print(line)
+        _maybe_push()
 
     if not json_out:
         for env_name, custom_id, reason in custom_skips:
             print(f"{env_name}/{custom_id:<24} [SKIP]  {reason}")
 
-    with manifest_lock(root):
-        fresh = load_manifest(root)
-        if fresh is not None:
-            for env_name, ckpt_name, ok, err, weight_files, fetched_at in outcomes:
-                env_record = fresh.environments.get(env_name)
-                if env_record is None:
-                    continue  # env removed while we were testing
-                # Created on first pass when the resolved env has no record of
-                # an id it now hosts (a variant tested checkpoint-first for
-                # the first time, #208); the donor's fetch stamp rides along
-                # so the record never reads "verified but never fetched".
-                ckpt_record = env_record.checkpoints.setdefault(ckpt_name, CheckpointInfo())
-                if ckpt_record.fetched_at is None:
-                    ckpt_record.fetched_at = fetched_at
-                if ok:
-                    ckpt_record.verifications[cluster] = VerificationRecord(
-                        verified_at=now_iso(), verified_device=device
-                    )
-                else:
-                    ckpt_record.verifications[cluster] = VerificationRecord(
-                        last_error=f"smoke-test: {err}"
-                    )
-                apply_weights_record(
-                    ckpt_record,
-                    weight_files,
-                    label=f"{env_name}/{ckpt_name}",
-                    progress=None if json_out else print,
-                )
-            for env_name, custom_id, ok, err in custom_outcomes:
-                env_record = fresh.environments.get(env_name)
-                if env_record is None:
-                    continue  # env removed while we were testing
-                # Created on first pass — ':custom' entries are never fetched,
-                # so nothing else ever writes them into the manifest.
-                ckpt_record = env_record.checkpoints.setdefault(custom_id, CheckpointInfo())
-                if ok:
-                    ckpt_record.verifications[cluster] = VerificationRecord(
-                        verified_at=now_iso(), verified_device=device
-                    )
-                else:
-                    ckpt_record.verifications[cluster] = VerificationRecord(
-                        last_error=f"smoke-test: {err}"
-                    )
-            save_manifest(fresh, root)
+    # Every stamp is already on disk; this is the one push (plus the usual
+    # state refresh) that carries them to the backend.
     update_and_push_manifest(root, quiet=True, push=not no_push)
 
     total_elapsed = time.monotonic() - total_start
