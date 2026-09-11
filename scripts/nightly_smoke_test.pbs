@@ -96,11 +96,21 @@ export HTTPS_PROXY="${HTTPS_PROXY:-http://proxy.alcf.anl.gov:3128}"
 export http_proxy="$HTTP_PROXY"
 export https_proxy="$HTTPS_PROXY"
 
-if [[ -f ~/.cache/huggingface/token ]]; then
-  export HF_TOKEN="$(cat ~/.cache/huggingface/token)"
+# Lookup order matches the sync scripts: an explicit HF_TOKEN_FILE, then a
+# 0600 ~/.hf_token, then the huggingface-cli login file. An HF_TOKEN already
+# in the environment (handed in via `qsub -v HF_TOKEN=...`) wins over all three.
+if [[ -z "${HF_TOKEN:-}" ]]; then
+  for tf in "${HF_TOKEN_FILE:-}" "$HOME/.hf_token" "$HOME/.cache/huggingface/token"; do
+    if [[ -n "$tf" && -r "$tf" ]]; then
+      export HF_TOKEN="$(tr -d '[:space:]' < "$tf")"
+      break
+    fi
+  done
+fi
+if [[ -n "${HF_TOKEN:-}" ]]; then
   export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
 else
-  echo "WARNING: no HF token at ~/.cache/huggingface/token; gated checkpoints may fail." >&2
+  echo "WARNING: no HF token (HF_TOKEN env, ~/.hf_token, or ~/.cache/huggingface/token); gated checkpoints may fail." >&2
 fi
 
 # Ensure `rootstock` is on PATH here (activate the venv / module load as your
