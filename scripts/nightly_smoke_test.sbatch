@@ -45,7 +45,8 @@ CLUSTER="${CLUSTER:-}"
 # Cadence. Default weekly: drift-free wall-clock time CADENCE_DAYS ahead at
 # RUN_HOUR (not "now+24h", which would creep later every run). Set
 # CADENCE_DAYS=1 for nightly. RESCHEDULE_BEGIN overrides the whole computation
-# with any `sbatch --begin` spec (e.g. now+3minutes) for testing.
+# with any `sbatch --begin` spec (e.g. now+3minutes) for testing; it applies to
+# this generation's resubmit only and is not propagated down the chain.
 CADENCE_DAYS="${CADENCE_DAYS:-7}"
 RUN_HOUR="${RUN_HOUR:-02:00}"
 RESCHEDULE_BEGIN="${RESCHEDULE_BEGIN:-$(date -d "+${CADENCE_DAYS} days ${RUN_HOUR}" +%Y-%m-%dT%H:%M:%S)}"
@@ -77,7 +78,12 @@ elif squeue --me --name="$JOB_NAME" --states=PENDING --noheader 2>/dev/null | gr
   # while a run is already queued).
   echo "a '$JOB_NAME' job is already PENDING; not scheduling another."
 else
-  next_id="$(sbatch --begin="$RESCHEDULE_BEGIN" --parsable "$SELF_PATH")"
+  # env -u: RESCHEDULE_BEGIN is a one-shot testing knob. sbatch defaults to
+  # --export=ALL, so it would otherwise ride down the chain and a `now+3minutes`
+  # kickoff would recur every 3 minutes forever. The next generation must
+  # recompute it from CADENCE_DAYS/RUN_HOUR (those knobs are meant to persist
+  # and still do).
+  next_id="$(env -u RESCHEDULE_BEGIN sbatch --begin="$RESCHEDULE_BEGIN" --parsable "$SELF_PATH")"
   echo "scheduled next run: job $next_id (begins $RESCHEDULE_BEGIN)"
 fi
 
@@ -89,11 +95,21 @@ umask 0002
 # HF token for any checkpoint whose setup() re-checks gating even with weights
 # cached. smoke-test never downloads, so a missing token is a warning, not a
 # hard error.
-if [[ -f ~/.cache/huggingface/token ]]; then
-  export HF_TOKEN="$(cat ~/.cache/huggingface/token)"
+# Lookup order matches the sync scripts: an explicit HF_TOKEN_FILE, then a
+# 0600 ~/.hf_token, then the huggingface-cli login file. An HF_TOKEN already
+# in the environment (propagated from the submit shell) wins over all three.
+if [[ -z "${HF_TOKEN:-}" ]]; then
+  for tf in "${HF_TOKEN_FILE:-}" "$HOME/.hf_token" "$HOME/.cache/huggingface/token"; do
+    if [[ -n "$tf" && -r "$tf" ]]; then
+      export HF_TOKEN="$(tr -d '[:space:]' < "$tf")"
+      break
+    fi
+  done
+fi
+if [[ -n "${HF_TOKEN:-}" ]]; then
   export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
 else
-  echo "WARNING: no HF token at ~/.cache/huggingface/token; gated checkpoints may fail." >&2
+  echo "WARNING: no HF token (HF_TOKEN env, ~/.hf_token, or ~/.cache/huggingface/token); gated checkpoints may fail." >&2
 fi
 
 # Ensure `rootstock` is on PATH here (activate the venv / module load as your

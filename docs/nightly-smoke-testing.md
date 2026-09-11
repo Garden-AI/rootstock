@@ -94,6 +94,13 @@ Both override when generation 1 schedules generation 2, which is the handoff
 worth testing. (On PBS, `qsub -a <time>` would only delay generation 1's own
 start and exercises nothing about the chain.)
 
+The override is one-shot: generation 2 recomputes its own resubmit time from
+`CADENCE_DAYS`/`RUN_HOUR`. On SLURM the recipe resubmits with
+`env -u RESCHEDULE_BEGIN` because `sbatch` defaults to `--export=ALL` and would
+otherwise carry the testing value down the chain forever; on PBS `qsub -v`
+passes only the variables it names, so `RESCHEDULE_AT` never propagates.
+`CADENCE_DAYS` and `RUN_HOUR` *do* persist on SLURM via the same `--export=ALL`.
+
 ## Knobs
 
 Override via env at submit time (SLURM: inline `VAR=val sbatch …`; PBS:
@@ -105,7 +112,15 @@ Override via env at submit time (SLURM: inline `VAR=val sbatch …`; PBS:
 | `CADENCE_DAYS` | `7` | days between runs (`1` = nightly) |
 | `RUN_HOUR` | `02:00` | wall-clock time of day for scheduled runs |
 | `STOP_FILE` | `~/.rootstock-nightly-stop` | presence ends the chain |
-| `RESCHEDULE_BEGIN` / `RESCHEDULE_AT` | computed | override the next-run time directly (testing) |
+| `RESCHEDULE_BEGIN` / `RESCHEDULE_AT` | computed | override the next-run time directly (testing); one-shot, not inherited by the next generation |
+| `HF_TOKEN` / `HF_TOKEN_FILE` | (see below) | Hugging Face token for gated checkpoints |
+
+The token lookup matches the sync scripts: an `HF_TOKEN` already in the
+environment wins; otherwise the first readable of `HF_TOKEN_FILE`,
+`~/.hf_token`, and `~/.cache/huggingface/token` is used (whitespace stripped)
+and exported as both `HF_TOKEN` and `HUGGING_FACE_HUB_TOKEN`. A missing token is
+a warning, not an error: smoke-test never downloads, but some checkpoints
+re-check gating in `setup()` even with weights cached.
 
 ## Per-cluster notes
 
