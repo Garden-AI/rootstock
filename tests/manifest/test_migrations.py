@@ -84,6 +84,7 @@ def test_v2_without_checkpoints_migrates_quietly():
         "migrated manifest schema v3 -> v4",
         "migrated manifest schema v4 -> v5",
         "migrated manifest schema v5 -> v6",
+        "migrated manifest schema v6 -> v7",
     ]
 
 
@@ -114,6 +115,7 @@ def test_v3_drops_dead_status_fields():
         "migrated manifest schema v3 -> v4",
         "migrated manifest schema v4 -> v5",
         "migrated manifest schema v5 -> v6",
+        "migrated manifest schema v6 -> v7",
     ]
     assert "mace" in Manifest.from_dict(migrated).environments
 
@@ -134,6 +136,7 @@ def test_v4_bumps_cleanly_with_checkpoints_intact():
     assert notes == [
         "migrated manifest schema v4 -> v5",
         "migrated manifest schema v5 -> v6",
+        "migrated manifest schema v6 -> v7",
     ]
     ckpt = Manifest.from_dict(migrated).environments["mace"].checkpoints["mace-mp-0-medium"]
     assert ckpt.fetched_at == "2026-01-02T00:00:00Z"
@@ -154,7 +157,7 @@ def test_v1_chain_migrates_to_current():
     assert migrated["clusters"] == ["test"]
     # v1->v2 mints empty CheckpointInfo dicts; v2->v3 then drops them
     assert migrated["environments"]["mace"]["checkpoints"] == {}
-    assert len(notes) == 5
+    assert len(notes) == 6
     assert Manifest.from_dict(migrated).environments["mace"].source_hash == "sha256:abc"
 
 

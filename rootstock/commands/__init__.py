@@ -7,11 +7,13 @@ from .create import cmd_new_env
 from .init import cmd_init
 from .install import cmd_install
 from .manifest import cmd_manifest_init, cmd_manifest_push, cmd_manifest_show
+from .pack import cmd_pack
 from .prune import cmd_prune
 from .resolve import cmd_resolve
 from .serve import cmd_serve
 from .setup_perms import cmd_setup_perms
 from .smoke_test import cmd_smoke_test
+from .stage import cmd_stage
 from .status import cmd_list, cmd_status
 from .sync import cmd_sync
 from .usage import cmd_usage_compact, cmd_usage_push, cmd_usage_report
@@ -27,11 +29,13 @@ __all__ = [
     "cmd_manifest_push",
     "cmd_manifest_show",
     "cmd_new_env",
+    "cmd_pack",
     "cmd_prune",
     "cmd_resolve",
     "cmd_serve",
     "cmd_setup_perms",
     "cmd_smoke_test",
+    "cmd_stage",
     "cmd_status",
     "cmd_sync",
     "cmd_usage_compact",

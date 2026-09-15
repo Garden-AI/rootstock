@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rootstock runs MLIP (Machine Learning Interatomic Potential) calculators in isolated pre-built Python environments on HPC clusters, communicating via the i-PI protocol over Unix sockets.
 
-Versioning is dynamic (git tags via uv-dynamic-versioning) — check `rootstock --version`. Manifest schema v6 (older schemas migrate in place on load; verification is per-cluster, and shared installs like sophia/polaris push one manifest per cluster); canonical-checkpoint-id API.
+Versioning is dynamic (git tags via uv-dynamic-versioning) — check `rootstock --version`. Manifest schema v7 (older schemas migrate in place on load; verification is per-cluster, and shared installs like sophia/polaris push one manifest per cluster); canonical-checkpoint-id API.
 
 ## Commands
 

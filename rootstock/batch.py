@@ -15,8 +15,9 @@ there is no other resume state.
 
 The prune planner takes the opposite half of the same diff — ``actual −
 desired`` — plus an internal-GC tier that needs no declared state at all
-(``.build`` leftovers, orphaned interpreters, stale lockfiles, ``.trash``,
-the uv cache). Same keep-going executor idiom, same single end-of-run
+(``.build`` leftovers, orphaned interpreters, stale lockfiles, orphaned
+staging images, ``.trash``, the uv cache). Same keep-going executor idiom,
+same single end-of-run
 manifest refresh + push. Deletion orders are chosen so a crash mid-run
 strands only *unreferenced* state that a later run collects.
 """
@@ -677,7 +678,9 @@ class PruneEnvItem:
 class GCItem:
     """One piece of internal garbage; ``path`` is absolute."""
 
-    kind: str  # "build" | "trash" | "interpreter" | "lockfile" | "uv-cache" | "unattributed"
+    # "build" | "trash" | "interpreter" | "lockfile" | "image" | "uv-cache"
+    # | "unattributed"
+    kind: str
     path: str
     reason: str
     reclaim_bytes: int | None = None  # None: unknown until executed (uv-cache)
@@ -1117,6 +1120,32 @@ def plan_prune(
             if not lock.with_suffix("").exists()
         ]
         collect("lockfile", orphan_locks, lambda _: "no matching environment source")
+
+    images_dir = root / "images"
+    if images_dir.is_dir():
+        # A staging archive is live iff some manifest env record points at
+        # it (#180) — retiring an env drops its record (refresh) but leaves
+        # the multi-GB archive; crashed packs leave .packing partials. The
+        # age guard in collect() protects in-flight packs and images whose
+        # manifest record is about to be written.
+        recorded_images = set()
+        for record in manifest.environments.values() if manifest else []:
+            image = record.image if isinstance(record.image, dict) else None
+            image_path = image.get("path") if image else None
+            if isinstance(image_path, str) and image_path:
+                recorded_images.add(Path(image_path).name)
+        orphan_images = [
+            entry for entry in sorted(images_dir.iterdir()) if entry.name not in recorded_images
+        ]
+        collect(
+            "image",
+            orphan_images,
+            lambda entry: (
+                "leftover from a crashed pack"
+                if ".packing." in entry.name
+                else "no manifest env records it"
+            ),
+        )
 
     for kind, count in sorted(age_skipped.items()):
         plan.notes.append(

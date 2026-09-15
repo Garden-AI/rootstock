@@ -67,6 +67,32 @@ The cluster registry (`rootstock/clusters.py`) is only a name → install-path b
 
 Users don't need to set environment variables — `RootstockCalculator(cluster="perlmutter", ...)` resolves both automatically.
 
+### Node-local staging (optional)
+
+On network filesystems with slow cold reads, worker startup can be dominated by faulting multi-GB libraries and weights in over the wire. When the compute nodes have local disk, an install can opt into **node-local staging**: `rootstock install` (and the `rootstock pack` backfill command) archives each built env into a single compressed image under `{root}/images/`, and worker spawns extract that image to local disk — one sequential read — then run entirely from the local copy. Checkpoint weights ride along via each checkpoint's recorded weight files. Nothing is required of end users; spawns fall back to the ordinary warm-up path whenever any piece is missing.
+
+Enable it by declaring where staged copies may live, in `{root}/layout.json`:
+
+```bash
+rootstock init --stage-dir '/tmp'              # or e.g. '$SLURM_TMPDIR'
+```
+
+(or add `"stage_dir": "/tmp"` to an existing `layout.json` by hand — like `cache_root`, `init` is the only command with a flag to *set* it; `install`/`sync`/`prune` rewrite the marker but always preserve an existing declaration). The value may contain environment variables, which expand on the node at spawn time; a value that doesn't expand (e.g. `$SLURM_TMPDIR` on a login node), doesn't exist, isn't writable, or is on the *same* filesystem as the install simply disables staging on that node. Users can override per run with `ROOTSTOCK_STAGE_DIR=...` or disable with `ROOTSTOCK_NO_STAGE=1`.
+
+Packing and extraction shell out to `tar` and `zstd`, so both must be on `PATH` (compute nodes usually have them; `module load zstd` otherwise). After enabling, backfill images for already-built envs — in a batch allocation if the login nodes cap CPU time:
+
+```bash
+rootstock pack --cluster <name>
+```
+
+Job scripts that spawn several calculators can pay the read once, up front:
+
+```bash
+rootstock stage uma-s-1p1 mace-mp-0-medium --cluster <name>
+```
+
+Staged copies are per-user, content-addressed by image, reused across spawns and jobs while the node directory survives, and evicted oldest-first when local disk runs short.
+
 ### Trust model
 
 Using a shared install means trusting its maintainer. An environment's

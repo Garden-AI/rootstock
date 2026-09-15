@@ -202,9 +202,12 @@ def cmd_init(args) -> int:
                 print(f"  Exists:  {dir_path}")
 
         try:
-            # Declare the cache root so the install is self-describing —
-            # readers prefer this over the baked-in cluster registry.
-            write_layout_marker(root, cache_root=cache_root)
+            # Declare the cache root (and any node-local staging base) so
+            # the install is self-describing — readers prefer this over the
+            # baked-in cluster registry.
+            write_layout_marker(
+                root, cache_root=cache_root, stage_dir=getattr(args, "stage_dir", None)
+            )
             print(f"  Created: {root / 'layout.json'}")
         except PermissionError:
             print(f"  Skipped (no permission): {root / 'layout.json'}")

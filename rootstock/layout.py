@@ -64,6 +64,20 @@ def read_declared_cache_root(root: Path) -> Path | None:
     return Path(declared) if isinstance(declared, str) and declared else None
 
 
+def read_declared_stage_dir(root: Path) -> str | None:
+    """Return the node-local staging base this install declares, if any.
+
+    The declaration lives in {root}/layout.json for the same reason
+    ``cache_root`` does: a registry baked into pinned clients goes stale,
+    while the install's own declaration travels with the install. The value
+    is kept as the raw string — it may contain environment variables
+    (``$SLURM_TMPDIR``, ``$TMPDIR``) that must expand on the *node* doing
+    the staging, not wherever the maintainer ran init.
+    """
+    declared = _read_marker(root).get("stage_dir")
+    return declared if isinstance(declared, str) and declared else None
+
+
 def resolve_cache_root(root: Path, explicit: Path | str | None = None) -> Path:
     """Resolve the model-weight cache root for an install root.
 
@@ -108,15 +122,21 @@ def ensure_layout_compatible(root: Path) -> None:
         )
 
 
-def write_layout_marker(root: Path, cache_root: Path | str | None = None) -> None:
-    """Record the layout version — and the install's cache root — in
-    {root}/layout.json.
+def write_layout_marker(
+    root: Path,
+    cache_root: Path | str | None = None,
+    stage_dir: str | None = None,
+) -> None:
+    """Record the layout version — and the install's cache root and staging
+    base — in {root}/layout.json.
 
     Called from maintainer commands that write the root anyway (install,
     init). ``cache_root`` records where this install keeps its model-weight
-    cache; when omitted, an existing declaration is preserved. No-op when
-    nothing would change, so repeated installs don't churn the file. Atomic
-    write, mode honoring the process umask — same recipe as save_manifest.
+    cache; ``stage_dir`` records the node-local base worker spawns may stage
+    envs to (#180). When omitted, existing declarations are preserved; pass
+    ``stage_dir=""`` to remove one. No-op when nothing would change, so
+    repeated installs don't churn the file. Atomic write, mode honoring the
+    process umask — same recipe as save_manifest.
     """
     from . import __version__
     from .manifest import now_iso
@@ -127,8 +147,15 @@ def write_layout_marker(root: Path, cache_root: Path | str | None = None) -> Non
         existing = read_declared_cache_root(root)
         declared = str(existing) if existing is not None else None
 
+    declared_stage = stage_dir if stage_dir is not None else read_declared_stage_dir(root)
+    declared_stage = declared_stage or None  # "" clears the declaration
+
     current = _read_marker(root)
-    if current.get("layout_version") == LAYOUT_VERSION and current.get("cache_root") == declared:
+    if (
+        current.get("layout_version") == LAYOUT_VERSION
+        and current.get("cache_root") == declared
+        and current.get("stage_dir") == declared_stage
+    ):
         return
 
     data = {
@@ -138,6 +165,8 @@ def write_layout_marker(root: Path, cache_root: Path | str | None = None) -> Non
     }
     if declared is not None:
         data["cache_root"] = declared
+    if declared_stage is not None:
+        data["stage_dir"] = declared_stage
 
     root.mkdir(parents=True, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(dir=root, suffix=".json")

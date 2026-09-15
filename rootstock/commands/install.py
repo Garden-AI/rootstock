@@ -26,6 +26,7 @@ def _install_one(root: Path, source: str, args) -> int:
             upgrade=args.upgrade,
             verbose=args.verbose,
             push=not args.no_push,
+            pack=not getattr(args, "no_pack", False),
             progress=print,
         )
     except OperationError as exc:
