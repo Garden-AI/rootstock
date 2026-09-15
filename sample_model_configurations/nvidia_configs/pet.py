@@ -20,6 +20,12 @@ pet-oam models.
 CHECKPOINTS = {
     "pet-oam-xl": "pet-oam-xl@1.0.0",
     "pet-omatpes-l": "pet-omatpes-l@0.1.0",
+    "pet-mad-xs": "pet-mad-xs@1.6.0",
+    "pet-mad-s": "pet-mad-s@1.6.0",
+    "pet-mad-m": "pet-mad-m@1.6.0",
+    "pet-omol-s": "pet-omol-s@1.0.0",
+    "pet-omol-m": "pet-omol-m@1.0.0",
+    "pet-omol-l": "pet-omol-l@1.0.0",
 }
 
 
