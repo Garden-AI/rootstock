@@ -49,6 +49,16 @@ CHECKPOINTS = {
     "orbmol:custom": None,
 }
 
+# The smoke-test's weights= leg borrows the first fetched family checkpoint
+# (CHECKPOINTS order → orbmol-v1-conservative) and reloads its weights through
+# setup_from_path, whose default arch is orbmol-v2. The v2 energy head has 257
+# input columns (CoulombModule adds one) against v1's 256, so the default arch
+# fails with a state_dict size mismatch (Frontier, 2026-08-24). Name the
+# matching architecture for the leg; your own weights still take arch= per call.
+VERIFY_KWARGS = {
+    "orbmol:custom": {"arch": "orbmol-v1-conservative"},
+}
+
 
 def _default_weights_url(load_fn) -> str:
     """The upstream URL baked into the loader's ``weights_path`` default."""
