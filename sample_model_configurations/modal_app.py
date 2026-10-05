@@ -63,9 +63,12 @@ def probe_image(
     *,
     python_version: str = "3.11",
     find_links: str | None = None,
+    extra_index_url: str | None = None,
     apt_packages: list[str] | None = None,
     no_deps: list[str] | None = None,
     gpu: str = "A10G",
+    cpu: float | None = None,
+    timeout: int = 900,
 ):
     """Decorator factory: builds a Modal image from deps and wires up app.function.
 
@@ -75,7 +78,14 @@ def probe_image(
     img = modal.Image.debian_slim(python_version=python_version)
     if apt_packages:
         img = img.apt_install(*apt_packages)
-    img = img.uv_pip_install(*deps, **({"find_links": find_links} if find_links else {}))
+    index_opts = {}
+    if find_links:
+        index_opts["find_links"] = find_links
+    if extra_index_url:
+        # uv otherwise takes every package the extra index carries from it alone.
+        index_opts["extra_index_url"] = extra_index_url
+        index_opts["extra_options"] = "--index-strategy unsafe-best-match"
+    img = img.uv_pip_install(*deps, **index_opts)
     if no_deps:
         img = img.run_commands(
             f"/.uv/uv pip install --system --no-deps {' '.join(repr(p) for p in no_deps)}"
@@ -88,7 +98,8 @@ def probe_image(
         gpu=gpu,
         volumes={CACHE_MOUNT: model_cache},
         secrets=[HF_SECRET],
-        timeout=900,
+        timeout=timeout,
+        **({"cpu": cpu} if cpu else {}),
     )
 
 
@@ -382,3 +393,39 @@ def probe_uma_1p2p1(checkpoint: str = "uma-s-1p2p1", system: str = "crystal"):
 def probe_uma_medium(checkpoint: str = "uma-m-1p1", system: str = "crystal"):
     """Probe UMA Medium on OMAT-style bulk materials."""
     return _run_probe_subprocess(checkpoint, system, kwargs=["task=omat"])
+
+
+# NequIP/Allegro compile models with AOTInductor on first GPU use, which needs
+# a host C++ compiler (debian_slim ships none) and CUDA headers (from the
+# nvidia-cuda-* wheels of the cu128 torch build, as in the configs). The
+# compile is CPU-bound and takes many minutes for the larger models.
+@probe_image(
+    "nequip.py",
+    ["nequip>=0.19,<0.20", "ase>=3.23", "torch>=2.6,<2.12", "cuda-toolkit[cccl,nvcc]>=12.8,<12.9"],
+    extra_index_url="https://download.pytorch.org/whl/cu128",
+    apt_packages=["build-essential"],
+    cpu=8,
+    timeout=3600,
+)
+def probe_nequip(checkpoint: str = "nequip-oam-l", system: str = "crystal"):
+    """Probe NequIP-OAM (AOTInductor-compiled on first load)."""
+    return _run_probe_subprocess(checkpoint, system)
+
+
+@probe_image(
+    "allegro.py",
+    [
+        "nequip>=0.19,<0.20",
+        "nequip-allegro>=0.8.3,<0.9",
+        "ase>=3.23",
+        "torch>=2.6,<2.12",
+        "cuda-toolkit[cccl,nvcc]>=12.8,<12.9",
+    ],
+    extra_index_url="https://download.pytorch.org/whl/cu128",
+    apt_packages=["build-essential"],
+    cpu=8,
+    timeout=3600,
+)
+def probe_allegro(checkpoint: str = "allegro-oam-l", system: str = "crystal"):
+    """Probe Allegro-OAM (AOTInductor-compiled on first load)."""
+    return _run_probe_subprocess(checkpoint, system)
