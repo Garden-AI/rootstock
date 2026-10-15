@@ -13,6 +13,9 @@
 #     # CUDA headers for compiling on nodes with no CUDA toolkit loaded (the
 #     # runtime headers come with torch); matches the cu128 torch build.
 #     "cuda-toolkit[cccl,nvcc]>=12.8,<12.9",
+#     # AOTInductor's C++ builder imports torch.utils.cpp_extension, which
+#     # imports setuptools at module level; uv venvs do not seed it.
+#     "setuptools>=70",
 # ]
 #
 # [tool.uv.sources]
