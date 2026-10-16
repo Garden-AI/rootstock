@@ -140,16 +140,26 @@ def _hardware_tag(device: str) -> str:
 
 
 def _toolkit_env(env: dict, link_dir: Path) -> None:
-    """Point AOTInductor at CUDA headers and libcuda when no toolkit is loaded.
+    """Point AOTInductor at CUDA headers and libcuda.
 
     The C++ wrapper AOTInductor builds needs ``$CUDA_HOME/include`` and links
-    ``-lcuda``. Compute nodes often expose a CUDA toolkit only through a
-    module, so when none is visible fall back to the headers in NVIDIA's CUDA
-    wheels (``nvidia/cuda_runtime/``, ``cuda_nvcc/`` and ``cuda_cccl/``), and
+    ``-lcuda``. torch derives CUDA_HOME from ``nvcc`` on PATH when unset, which
+    goes wrong when that nvcc is a compiler-suite wrapper (e.g. the NVIDIA HPC
+    SDK's, whose include dir has its own intrinsics headers and no cuda.h).
+    So use CUDA_HOME, CUDA_PATH or nvcc's toolkit only if it really ships
+    ``include/cuda.h``; otherwise fall back to the headers in NVIDIA's CUDA
+    wheels (``nvidia/cuda_runtime/``, ``cuda_nvcc/`` and ``cuda_cccl/``) and
     link against the driver library this process has loaded.
     """
-    if env.get("CUDA_HOME") or env.get("CUDA_PATH") or shutil.which("nvcc", path=env.get("PATH")):
-        return
+    candidates = [env.get("CUDA_HOME"), env.get("CUDA_PATH")]
+    nvcc = shutil.which("nvcc", path=env.get("PATH"))
+    if nvcc:
+        candidates.append(str(Path(nvcc).resolve().parent.parent))
+    for home in filter(None, candidates):
+        if (Path(home) / "include" / "cuda.h").is_file():
+            env["CUDA_HOME"] = home
+            return
+    env.pop("CUDA_PATH", None)
     import nvidia
 
     headers = next(
