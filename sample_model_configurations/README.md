@@ -12,6 +12,7 @@ sample_model_configurations/
 │   ├── failure_modes.md
 │   └── README.md
 └── nvidia_configs/     # configs targeting NVIDIA GPUs (the release catalog)
+    ├── allegro.py      # Allegro-OAM-L / Allegro-MP-L (nequip.net, AOTInductor-compiled)
     ├── allscaip.py     # AllScAIP (FAIRChem scalable-attention, OMol25)
     ├── ani.py          # ANI-2x / ANI-1ccx / ANI-1x (organic molecules)
     ├── chgnet.py       # CHGNet (inorganic, charge-informed)
@@ -22,6 +23,7 @@ sample_model_configurations/
     ├── mace.py         # MACE foundations: MP-0, OFF23, MPA-0, MATPES, MH-1, OMOL
     ├── mace_polar.py   # MACE-POLAR-1 (electrostatic MACE + graph-longrange)
     ├── mattersim.py    # MatterSim-v1 (Microsoft universal)
+    ├── nequip.py       # NequIP-OAM-{S,M,L,XL} / NequIP-MP-L (nequip.net, AOTInductor-compiled)
     ├── orb.py          # Orb v2 (kept for orb-d3-v2 only; v3 is primary)
     ├── orb_v3.py       # Orb v3 (Orbital Materials universal)
     ├── pet.py          # UPET / PET-MAD successor (lab-cosmo)
@@ -38,8 +40,8 @@ hardware-agnostic.
 Pruned 2026-07-30 (still on some clusters until their next cleanup): the
 legacy fairchem-core 1.x OC20 baselines beyond escn/equiformer (dimenet,
 gemnet, painn, schnet, scn), the BYO-weights-only envs with no shippable
-checkpoints (allegro, nequip — the `<family>:custom` mechanism is the
-supported path for user weights now), and orb v2's superseded checkpoints
+checkpoints (allegro, nequip — since re-added hosting the nequip.net
+foundation models), and orb v2's superseded checkpoints
 (orb-v2, orb-mptraj-only-v2).
 
 > **Python floor caveat.** rootstock itself requires Python >=3.11, and the
