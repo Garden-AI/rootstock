@@ -174,6 +174,52 @@ def _toolkit_env(env: dict, link_dir: Path) -> None:
         )
 
 
+# Host compilers tried, in order, when CXX is unset or not GNU-compatible.
+_CXX_CANDIDATES = ("g++-14", "g++-13", "g++-12", "g++-11", "g++-10", "g++-9", "g++", "clang++")
+
+
+def _gnu_major(cxx: str) -> int | None:
+    """Major version of a GNU-compatible (gcc or clang) compiler, else None.
+
+    AOTInductor passes gcc-style flags, which other compilers on HPC systems
+    (e.g. NVIDIA's nvc++) reject.
+    """
+    try:
+        banner = subprocess.run([cxx, "--version"], capture_output=True, text=True).stdout
+        version = subprocess.run([cxx, "-dumpversion"], capture_output=True, text=True).stdout
+    except OSError:
+        return None
+    if "Free Software Foundation" not in banner and "clang version" not in banner:
+        return None
+    try:
+        return int(version.strip().split(".")[0])
+    except ValueError:
+        return None
+
+
+def _compiler_env(env: dict) -> None:
+    """Point CXX/CC at a GNU-compatible compiler new enough for C++17.
+
+    Cluster compiler modules often export CXX/CC for a vendor compiler (e.g.
+    nvc++/nvc). Keep the caller's CXX when it is gcc >= 9 or clang;
+    otherwise use the first suitable candidate on PATH, with its matching C
+    compiler (Triton builds a small C helper with CC during compilation).
+    """
+    path = os.pathsep.join(filter(None, [env.get("PATH"), "/usr/bin"]))
+    for name in filter(None, [env.get("CXX"), *_CXX_CANDIDATES]):
+        cxx = shutil.which(name, path=path)
+        major = _gnu_major(cxx) if cxx else None
+        if major is None or ("clang" not in Path(cxx).name and major < 9):
+            continue
+        env["CXX"] = cxx
+        cc = shutil.which(
+            Path(cxx).name.replace("clang++", "clang").replace("g++", "gcc"), path=path
+        )
+        if cc:
+            env["CC"] = cc
+        return
+
+
 def _compiled_model(source: Path, key: str, device: str) -> Path:
     """Path to ``source`` compiled for ASE on ``device``, compiling on a miss."""
     import nequip
@@ -224,10 +270,12 @@ def _compiled_model(source: Path, key: str, device: str) -> Path:
     try:
         with tempfile.TemporaryDirectory() as link_dir:
             _toolkit_env(env, Path(link_dir))
+            _compiler_env(env)
             result = subprocess.run(cmd, env=env, stdout=sys.stderr, stderr=sys.stderr)
         if result.returncode != 0:
             raise RuntimeError(
                 f"nequip-compile failed (exit {result.returncode}); see the log above. "
+                "It needs gcc >= 9 or clang (set CXX if neither is on PATH). "
                 'Pass setup_kwargs={"compile": False} to run eager instead.'
             )
     finally:
